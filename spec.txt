@@ -1,0 +1,2040 @@
+# tpt-proto20 Design Document
+
+**Project name:** tpt-proto20  
+**Document status:** Full-scope design  
+**Implementation model:** Clean-room  
+**Primary language:** Rust  
+**License:** MIT OR Apache-2.0  
+**Compatibility strategy:** Native next-generation design with official adapters for Protocol Buffers and gRPC compatibility
+
+---
+
+## 1. Summary
+
+`tpt-proto20` is a next-generation, schema-first contract system for distributed applications.
+
+It combines:
+
+- a modern schema language
+- a pure-Rust compiler
+- a compact binary wire format
+- a Rust-first runtime
+- generated code
+- reflection
+- JSON/text representations
+- schema evolution tooling
+- security-hardened decoding
+- observability
+- an RPC/streaming system
+- compatibility adapters for existing Protocol Buffers and gRPC ecosystems
+
+The goal is not merely to serialize data.
+
+The goal is to allow independently evolving programs to communicate safely, efficiently, and predictably over time.
+
+---
+
+## 2. Vision
+
+`tpt-proto20` should be the contract layer for distributed systems.
+
+It should answer these questions:
+
+- What data is being sent?
+- What version of the contract is in use?
+- Is this change safe?
+- Can old clients read new messages?
+- Can new clients tolerate old messages?
+- Can untrusted input be decoded safely?
+- Can messages be inspected, debugged, and converted?
+- Can services stream, cancel, timeout, and observe requests cleanly?
+- Can Rust developers use the system without fighting the toolchain?
+- Can other languages interoperate with the system?
+
+The project should feel like a complete contract toolchain, not just a codec.
+
+---
+
+## 3. Design principles
+
+### 3.1 Schema-first
+
+Every message, enum, and service is defined by a schema.
+
+The schema is the source of truth.
+
+### 3.2 Explicit evolution
+
+Schema changes must be explicit, analyzable, and classified.
+
+The compiler should detect:
+
+- safe additions
+- risky renames
+- breaking removals
+- field ID reuse
+- type changes
+- service contract changes
+
+### 3.3 Safe by default
+
+Decoding untrusted input must be safe.
+
+Default decoder limits must protect against:
+
+- excessive allocation
+- deep recursion
+- huge messages
+- excessive field counts
+- oversized strings
+- oversized byte fields
+- malicious repeated fields
+- malicious map fields
+
+### 3.4 Rust-first, but polyglot
+
+The reference implementation is Rust.
+
+The system should also support other languages through:
+
+- a neutral compiler IR
+- descriptor outputs
+- language-specific code generators
+- language-specific runtimes
+
+### 3.5 Zero-copy friendly
+
+The runtime should support:
+
+- owned messages
+- borrowed views
+- bytes-backed messages
+- dynamic messages
+
+Zero-copy should be a first-class design consideration.
+
+### 3.6 Observability built in
+
+RPC and message tooling should provide:
+
+- metrics
+- tracing
+- structured errors
+- debugging tools
+- schema-aware inspection
+
+### 3.7 Compatibility through adapters
+
+`tpt-proto20` should support migration from existing protobuf/gRPC systems through compatibility layers.
+
+The project should allow:
+
+```text
+existing protobuf/gRPC system
+  -> adapter
+    -> gradual migration
+      -> native tpt20 usage
+```
+
+### 3.8 Tooling is part of the protocol
+
+A protocol without tooling is incomplete.
+
+`tpt-proto20` includes:
+
+- formatter
+- linter
+- diff tool
+- code generator
+- conformance suite
+- CLI debugger
+- schema registry support
+
+---
+
+## 4. Scope
+
+`tpt-proto20` covers the full contract system.
+
+The system includes:
+
+```text
+tpt20-language
+tpt20-ir
+tpt20-descriptor
+tpt20-compiler
+tpt20-codegen-rust
+tpt20-codegen-backends
+tpt20-core
+tpt20-reflect
+tpt20-json
+tpt20-text
+tpt20-stdlib
+tpt20-compat-protobuf
+tpt20-compat-grpc
+tpt20-rpc
+tpt20-transport
+tpt20-observability
+tpt20-lint
+tpt20-diff
+tpt20-cli
+tpt20-conformance
+tpt20-registry
+```
+
+Out of scope for the core project:
+
+- message brokers
+- databases
+- object-relational mapping
+- UI state synchronization
+- general-purpose application frameworks
+
+Those may be built on top of `tpt-proto20`, but they are not part of the core.
+
+---
+
+## 5. System architecture
+
+```text
+                    +---------------------+
+                    |     .tpt schema     |
+                    +---------------------+
+                              |
+                              v
+                    +---------------------+
+                    |    tpt20 compiler   |
+                    +---------------------+
+                              |
+          +-------------------+-------------------+
+          |                   |                   |
+          v                   v                   v
++------------------+ +------------------+ +------------------+
+|      tpt IR      | | descriptor model | | compatibility    |
++------------------+ +------------------+ +------------------+
+          |                   |                   |
+          v                   v                   v
++------------------+ +------------------+ +------------------+
+| code generators  | | runtime metadata | | schema tools     |
++------------------+ +------------------+ +------------------+
+          |
+          v
++--------------------------------------------------+
+| language runtime                                 |
+|                                                  |
+| binary codec                                     |
+| generated types                                  |
+| reflection                                       |
+| JSON/text                                        |
+| RPC                                              |
+| observability                                    |
++--------------------------------------------------+
+```
+
+---
+
+## 6. Schema language
+
+`tpt-proto20` uses a modern schema language with the file extension:
+
+```text
+.tpt
+```
+
+The language should be concise, explicit, and easy to lint.
+
+### 6.1 Example schema
+
+```tpt
+package user.v1;
+
+message User {
+  1: id int64;
+  2: name string;
+  3: email string?;
+  4: roles repeated Role;
+  5: created_at Timestamp;
+}
+
+enum Role {
+  UNKNOWN = 0;
+  ADMIN = 1;
+  MEMBER = 2;
+  AUDITOR = 3;
+}
+
+message GetUserRequest {
+  1: user_id int64;
+}
+
+message WatchUsersRequest {
+  1: include_deleted bool;
+}
+
+service UserService {
+  get_user(GetUserRequest) -> User;
+  watch_users(WatchUsersRequest) -> stream User;
+}
+```
+
+### 6.2 Field IDs
+
+Every field must have a stable numeric ID.
+
+```tpt
+1: id int64;
+```
+
+Field IDs are part of the wire contract.
+
+Once a schema is published, field IDs must not be reused.
+
+### 6.3 Presence
+
+Optional presence is explicit.
+
+Implicit presence:
+
+```tpt
+1: age int32;
+```
+
+Explicit presence:
+
+```tpt
+1: age int32?;
+```
+
+Rules:
+
+- implicit presence means absence equals default
+- explicit presence means absence is distinguishable from default
+- message fields are presence-aware
+- required fields are not part of the language
+
+### 6.4 Repeated fields
+
+```tpt
+1: tags repeated string;
+```
+
+Repeated fields are lists.
+
+### 6.5 Maps
+
+```tpt
+1: labels map<string, string>;
+```
+
+Maps must have:
+
+- scalar or string key types
+- valid value types
+- deterministic encoding rules
+- runtime size limits
+
+### 6.6 Oneofs
+
+```tpt
+message Contact {
+  oneof method {
+    1: email string;
+    2: phone string;
+    3: device_token string;
+  }
+}
+```
+
+Oneofs represent mutually exclusive fields.
+
+### 6.7 Enums
+
+```tpt
+enum Status {
+  UNKNOWN = 0;
+  ACTIVE = 1;
+  SUSPENDED = 2;
+}
+```
+
+Rules:
+
+- enum values have stable numeric IDs
+- aliases may be supported with explicit annotation
+- unknown enum handling must be defined by enum openness
+- closed enums reject unknown values
+- open enums preserve unknown values
+
+### 6.8 Services
+
+```tpt
+service UserService {
+  get_user(GetUserRequest) -> User;
+  watch_users(WatchUsersRequest) -> stream User;
+  upload_logs(stream LogEntry) -> UploadSummary;
+  chat(stream ChatMessage) -> stream ChatMessage;
+}
+```
+
+Service methods support:
+
+- unary
+- server streaming
+- client streaming
+- bidirectional streaming
+
+### 6.9 Annotations
+
+Annotations extend schema metadata.
+
+Example:
+
+```tpt
+message CreateUserRequest {
+  1: email string? @max_len(254);
+  2: age int32? @range(min: 0, max: 150);
+  3: username string @pattern("^[a-z0-9_]{3,32}$");
+}
+```
+
+Annotations may be used for:
+
+- validation hints
+- documentation
+- codegen options
+- compatibility policies
+- observability metadata
+- auth rules
+- storage hints
+
+Core annotations are standardized. Custom annotations are allowed through a registry.
+
+---
+
+## 7. Compiler
+
+The `tpt20` compiler transforms schema files into machine-usable artifacts.
+
+### 7.1 Compiler pipeline
+
+```text
+.tpt files
+  -> lexer
+  -> parser
+  -> AST
+  -> semantic analysis
+  -> compatibility checks
+  -> IR generation
+  -> descriptor generation
+  -> code generation
+```
+
+### 7.2 Compiler outputs
+
+The compiler produces:
+
+```text
+IR
+descriptor set
+schema fingerprint
+generated code
+diagnostics
+compatibility report
+```
+
+### 7.3 Diagnostics
+
+Diagnostics must include:
+
+- file path
+- line number
+- column number
+- span
+- severity
+- error code
+- human-readable explanation
+- suggested fix where possible
+
+Example:
+
+```text
+error[E0042]: field ID 3 was removed without reservation
+  --> schema/user.v1.tpt:12:3
+  |
+  = help: reserve field ID 3 to preserve compatibility
+```
+
+### 7.4 Schema fingerprint
+
+Every compiled schema must produce a stable fingerprint.
+
+The fingerprint is derived from the canonical descriptor.
+
+Uses:
+
+- schema registries
+- dynamic message validation
+- debugging
+- migration tooling
+- compatibility auditing
+
+---
+
+## 8. IR and descriptor model
+
+The compiler emits a neutral intermediate representation.
+
+The IR includes:
+
+- packages
+- files
+- messages
+- fields
+- enums
+- enum values
+- oneofs
+- maps
+- services
+- methods
+- annotations
+- source locations
+- compatibility metadata
+- schema fingerprint
+
+The descriptor model is the runtime representation of the schema.
+
+It must support:
+
+- binary serialization
+- JSON serialization
+- dynamic lookup
+- reflection
+- cross-language interchange
+- schema registry storage
+
+---
+
+## 9. Native binary wire format
+
+`tpt-proto20` defines its own native binary wire format.
+
+The format must be:
+
+- compact
+- deterministic when requested
+- safe to decode
+- zero-copy friendly
+- easy to skip
+- forward-compatible
+- backward-compatible where possible
+
+### 9.1 Wire classes
+
+| Wire class | Meaning |
+|---:|---|
+| 0 | VARINT |
+| 1 | FIXED32 |
+| 2 | FIXED64 |
+| 3 | LEN |
+
+`LEN` is used for:
+
+- bytes
+- strings
+- nested messages
+- packed repeated fields
+- map entries
+
+### 9.2 Tag encoding
+
+Each field begins with a tag:
+
+```text
+tag = (field_id << 3) | wire_class
+```
+
+The tag is encoded as a varint.
+
+### 9.3 Scalar types
+
+The following scalar types must be supported:
+
+```text
+bool
+int32
+int64
+uint32
+uint64
+sint32
+sint64
+fixed32
+fixed64
+sfixed32
+sfixed64
+float32
+float64
+string
+bytes
+```
+
+### 9.4 Varints
+
+Varints encode unsigned integers using 7-bit groups.
+
+Signed integers use zigzag encoding where appropriate.
+
+The decoder must reject:
+
+- truncated varints
+- overlong varints
+- overflowing varints
+- malformed payloads
+
+### 9.5 Length-delimited fields
+
+Length-delimited fields are encoded as:
+
+```text
+length as varint
+payload bytes
+```
+
+The decoder must reject:
+
+- negative lengths
+- overflowing lengths
+- truncated payloads
+- invalid UTF-8 for strings
+- payloads exceeding limits
+
+### 9.6 Repeated fields
+
+Repeated fields support:
+
+- unpacked encoding
+- packed encoding
+- mixed input encoding
+
+Decoders must accept both packed and unpacked forms for compatible scalar repeated fields.
+
+### 9.7 Maps
+
+Maps are encoded as repeated synthetic map-entry messages.
+
+Map entry fields:
+
+```text
+key = field 1
+value = field 2
+```
+
+Rules:
+
+- duplicate map entries must be accepted
+- later values override earlier values by default
+- deterministic encoding must sort map entries consistently
+- map entries must respect decoder limits
+
+### 9.8 Oneofs
+
+Oneof fields are encoded as normal fields.
+
+Decoding rules:
+
+- if multiple fields in the same oneof appear, the last one wins
+- generated APIs expose the oneof as a mutually exclusive type
+
+### 9.9 Unknown fields
+
+Unknown fields must be preserved by default.
+
+Unknown field policies:
+
+```text
+preserve
+discard
+fail
+```
+
+Preserved unknown fields must be re-encodable.
+
+### 9.10 Canonical encoding
+
+The system must support canonical deterministic encoding.
+
+Canonical mode must define:
+
+- field order
+- map ordering
+- unknown field ordering
+- canonical varint representation
+- repeated field ordering where applicable
+- oneof serialization behavior
+
+Canonical encoding is useful for:
+
+- hashing
+- signatures
+- auditing
+- reproducible builds
+- content addressing
+
+### 9.11 Optional envelope
+
+For storage, event systems, and dynamic registries, messages may be wrapped in an envelope.
+
+```tpt
+message Envelope {
+  1: schema_id bytes;
+  2: schema_version string;
+  3: payload bytes;
+}
+```
+
+The envelope is optional.
+
+It is not required for normal RPC payloads.
+
+---
+
+## 10. Compatibility adapters
+
+`tpt-proto20` must provide compatibility with the existing protobuf/gRPC ecosystem.
+
+### 10.1 Protobuf schema import
+
+The compiler should import `.proto` files.
+
+Example:
+
+```sh
+tpt20 import user.proto --out user.tpt
+```
+
+Import support includes:
+
+- proto2
+- proto3
+- editions where feasible
+- messages
+- enums
+- oneofs
+- maps
+- services
+- options where meaningful
+- reserved fields
+- extensions where feasible
+
+### 10.2 Protobuf wire adapter
+
+The runtime should support encoding and decoding protobuf-compatible binary messages.
+
+Conceptual API:
+
+```rust
+let user = User::decode_protobuf(bytes)?;
+let bytes = user.encode_protobuf();
+```
+
+This allows gradual migration.
+
+### 10.3 gRPC bridge
+
+The RPC layer should support compatibility with gRPC.
+
+This includes:
+
+- HTTP/2 framing compatible with gRPC
+- protobuf-compatible message payloads
+- status mapping
+- metadata mapping
+- deadline mapping
+- streaming modes
+- health checking
+- reflection where feasible
+
+This allows `tpt-proto20` services to communicate with existing gRPC systems during migration.
+
+---
+
+## 11. Runtime message model
+
+The Rust runtime must support multiple message representations.
+
+### 11.1 Owned messages
+
+Owned messages own all data.
+
+```rust
+pub struct User {
+    pub id: i64,
+    pub name: String,
+    pub email: Option<String>,
+}
+```
+
+### 11.2 Borrowed messages
+
+Borrowed messages avoid allocation where possible.
+
+```rust
+pub struct UserView<'a> {
+    pub id: i64,
+    pub name: &'a str,
+    pub email: Option<&'a str>,
+}
+```
+
+### 11.3 Bytes-backed messages
+
+Bytes-backed messages allow efficient slicing and sharing.
+
+They are useful for:
+
+- proxies
+- caches
+- streaming pipelines
+- zero-copy gateways
+
+### 11.4 Dynamic messages
+
+Dynamic messages are descriptor-driven.
+
+They require no compile-time generated types.
+
+```rust
+let message = DynamicMessage::decode(descriptor, bytes)?;
+```
+
+Dynamic messages support:
+
+- field lookup
+- field mutation
+- unknown fields
+- reflection
+- JSON conversion
+- text conversion
+
+---
+
+## 12. Code generation
+
+The Rust code generator must produce idiomatic, safe, maintainable code.
+
+### 12.1 Generated message types
+
+For:
+
+```tpt
+message User {
+  1: id int64;
+  2: name string;
+  3: email string?;
+}
+```
+
+The generator may produce:
+
+```rust
+pub struct User {
+    pub id: i64,
+    pub name: String,
+    pub email: Option<String>,
+}
+```
+
+### 12.2 Generated methods
+
+Generated messages should provide:
+
+```rust
+impl User {
+    pub fn encode(&self) -> Vec<u8>;
+    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError>;
+    pub fn decode_borrowed(bytes: &[u8]) -> Result<UserView<'_>, DecodeError>;
+    pub fn to_json(&self) -> Result<String, JsonError>;
+    pub fn from_json(json: &str) -> Result<Self, JsonError>;
+}
+```
+
+### 12.3 Builders
+
+Builders should be generated where enabled.
+
+```rust
+let user = User::builder()
+    .id(42)
+    .name("Ada")
+    .email("ada@example.com")
+    .build()?;
+```
+
+Builders may validate:
+
+- presence requirements
+- oneof constraints
+- annotation constraints
+- enum validity
+- map key validity
+
+### 12.4 Generated enums
+
+Enums should be represented as Rust enums with integer conversion support.
+
+Unknown enum handling must respect open/closed semantics.
+
+### 12.5 Generated oneofs
+
+Oneofs should be represented as Rust enums.
+
+```rust
+pub enum ContactMethod {
+    Email(String),
+    Phone(String),
+    DeviceToken(String),
+}
+```
+
+### 12.6 Generated services
+
+Service code generation should produce:
+
+- server traits
+- client stubs
+- streaming interfaces
+- metadata helpers
+- deadline helpers
+- cancellation helpers
+
+Example:
+
+```rust
+#[async_trait]
+pub trait UserService {
+    async fn get_user(
+        &self,
+        ctx: RpcContext,
+        request: GetUserRequest,
+    ) -> Result<Response<User>, RpcError>;
+}
+```
+
+---
+
+## 13. Reflection
+
+Reflection must be first-class.
+
+The reflection system should support:
+
+- dynamic decoding
+- dynamic encoding
+- field access
+- field mutation
+- repeated field access
+- map access
+- enum access
+- oneof access
+- nested message access
+- unknown field access
+- descriptor lookup
+- schema fingerprint inspection
+
+Example:
+
+```rust
+let message = DynamicMessage::decode(descriptor, bytes)?;
+let name = message.get_field("name")?;
+let bytes = message.encode()?;
+```
+
+Reflection enables:
+
+- proxies
+- gateways
+- debuggers
+- admin tools
+- schema registries
+- dynamic routing
+- test harnesses
+
+---
+
+## 14. JSON and text representations
+
+`tpt-proto20` must support multiple representations.
+
+### 14.1 Binary
+
+Binary is the primary compact representation.
+
+### 14.2 JSON
+
+JSON is used for:
+
+- debugging
+- HTTP gateways
+- configuration
+- test fixtures
+- admin APIs
+
+JSON rules:
+
+- field names should support original names and lowerCamelCase names
+- 64-bit integers should be representable as strings
+- bytes should use base64
+- enums should support names and numbers
+- default value emission should be configurable
+- unknown field handling should be configurable
+
+### 14.3 Text
+
+Text format is used for human-readable inspection.
+
+Example:
+
+```text
+id: 42
+name: "Ada"
+email: "ada@example.com"
+```
+
+Text format must support:
+
+- printing
+- parsing
+- repeated fields
+- map fields
+- oneofs
+- nested messages
+- deterministic output
+
+---
+
+## 15. Standard library types
+
+`tpt-proto20` should provide a standard library of commonly used types.
+
+Required standard types include:
+
+```text
+Timestamp
+Duration
+Empty
+Any
+Struct
+Value
+ListValue
+FieldMask
+UUID
+Decimal
+Money
+Interval
+Pagination
+ErrorDetail
+```
+
+Additional wrapper types may be provided:
+
+```text
+BoolValue
+BytesValue
+DoubleValue
+FloatValue
+Int32Value
+Int64Value
+UInt32Value
+UInt64Value
+StringValue
+```
+
+The standard library should be stable and versioned.
+
+---
+
+## 16. RPC system
+
+`tpt-proto20` includes an RPC system.
+
+The RPC system must support:
+
+- unary calls
+- server streaming
+- client streaming
+- bidirectional streaming
+- deadlines
+- cancellation
+- metadata
+- status codes
+- rich error details
+- compression
+- authentication
+- authorization
+- retries
+- backpressure
+- observability
+
+### 16.1 RPC context
+
+Every RPC should carry a context.
+
+```rust
+pub struct RpcContext {
+    pub deadline: Deadline,
+    pub cancellation: CancellationToken,
+    pub metadata: Metadata,
+    pub trace: TraceContext,
+    pub peer: Option<PeerInfo>,
+    pub extensions: Extensions,
+}
+```
+
+Handlers should be able to inspect:
+
+```rust
+ctx.is_expired()
+ctx.remaining_time()
+ctx.metadata()
+ctx.trace()
+```
+
+### 16.2 Streaming APIs
+
+Streaming APIs should be backpressure-aware.
+
+Server streaming example:
+
+```rust
+async fn watch_users(
+    &self,
+    ctx: RpcContext,
+    request: WatchUsersRequest,
+    sink: ServerStreamSink<User>,
+) -> Result<(), RpcError>;
+```
+
+Client streaming example:
+
+```rust
+async fn upload_logs(
+    &self,
+    ctx: RpcContext,
+    input: ClientStreamSource<LogEntry>,
+) -> Result<Response<UploadSummary>, RpcError>;
+```
+
+Bidirectional streaming example:
+
+```rust
+async fn chat(
+    &self,
+    ctx: RpcContext,
+    stream: BidiStream<ChatMessage>,
+) -> Result<(), RpcError>;
+```
+
+### 16.3 Status codes
+
+The RPC system must define standard status codes.
+
+Required codes:
+
+```text
+OK
+CANCELLED
+UNKNOWN
+INVALID_ARGUMENT
+DEADLINE_EXCEEDED
+NOT_FOUND
+ALREADY_EXISTS
+PERMISSION_DENIED
+RESOURCE_EXHAUSTED
+FAILED_PRECONDITION
+ABORTED
+OUT_OF_RANGE
+UNIMPLEMENTED
+INTERNAL
+UNAVAILABLE
+DATA_LOSS
+UNAUTHENTICATED
+```
+
+### 16.4 Rich errors
+
+Errors should support structured details.
+
+Example:
+
+```rust
+let error = RpcError::invalid_argument("validation failed")
+    .with_details(ValidationFailure {
+        field: "email".to_string(),
+        reason: "invalid format".to_string(),
+    })?;
+```
+
+Rich error details should be compatible with descriptor-based dynamic decoding.
+
+### 16.5 Metadata
+
+Metadata is carried alongside RPC calls.
+
+Rules:
+
+- metadata keys should be lowercase
+- binary metadata should use a standard suffix convention
+- metadata size limits must be enforced
+- reserved metadata keys must be protected
+
+---
+
+## 17. Transport layer
+
+The RPC system should be transport-agnostic.
+
+Supported transports:
+
+```text
+HTTP/2
+in-process
+QUIC/HTTP3 optional
+custom stream transports optional
+```
+
+The required production transport is HTTP/2 because of ecosystem compatibility.
+
+### 17.1 HTTP/2 requirements
+
+The HTTP/2 transport must support:
+
+- multiplexed streams
+- trailers
+- flow control
+- stream reset
+- GOAWAY handling
+- keepalive/ping behavior
+- TLS with ALPN
+- cleartext h2c for local development when explicitly enabled
+
+### 17.2 Message framing
+
+RPC messages must be framed.
+
+Conceptual frame:
+
+```text
+1 byte flags
+4 bytes big-endian length
+N bytes payload
+```
+
+Flags may indicate:
+
+- compression enabled
+- future protocol extensions
+
+### 17.3 In-process transport
+
+The system must provide an in-process transport for:
+
+- tests
+- embedded systems
+- local development
+- benchmarking
+- fuzzing
+
+---
+
+## 18. Security model
+
+`tpt-proto20` must assume hostile input.
+
+### 18.1 Decoder limits
+
+The runtime must enforce limits.
+
+```rust
+pub struct DecoderLimits {
+    pub max_message_bytes: usize,
+    pub max_depth: u32,
+    pub max_field_count: usize,
+    pub max_unknown_field_bytes: usize,
+    pub max_string_bytes: usize,
+    pub max_bytes_field_bytes: usize,
+    pub max_repeated_entries: usize,
+    pub max_map_entries: usize,
+}
+```
+
+### 18.2 Integer safety
+
+Integer operations must use checked arithmetic where overflow is possible.
+
+### 18.3 UTF-8 validation
+
+String fields must be validated.
+
+### 18.4 Recursion control
+
+Nested message depth must be bounded.
+
+### 18.5 Allocation control
+
+Allocations must be bounded and predictable.
+
+### 18.6 RPC security
+
+The RPC layer must support:
+
+- TLS
+- mTLS
+- token authentication
+- metadata authentication
+- authorization middleware
+- peer inspection
+- rate limiting hooks
+- request limits
+- deadline enforcement
+
+### 18.7 Unsafe policy
+
+Default policy:
+
+```text
+no unsafe in core decoding paths
+```
+
+Unsafe may only be used when:
+
+- isolated
+- documented
+- tested
+- feature-gated
+- justified by measurable benefit
+
+---
+
+## 19. Observability
+
+Observability is a first-class requirement.
+
+### 19.1 Metrics
+
+The system should expose metrics for:
+
+- requests started
+- requests completed
+- request duration
+- active streams
+- cancelled requests
+- deadline exceeded requests
+- bytes sent
+- bytes received
+- messages sent
+- messages received
+- decode failures
+- encode failures
+- connection errors
+- stream resets
+
+Labels should include:
+
+```text
+service
+method
+status
+streaming_type
+transport
+```
+
+### 19.2 Tracing
+
+The system should integrate with tracing systems.
+
+Span attributes should include:
+
+```text
+rpc.system
+rpc.service
+rpc.method
+rpc.status
+rpc.schema_fingerprint
+```
+
+### 19.3 Structured logging
+
+Logs should include:
+
+- request ID
+- service
+- method
+- status
+- deadline
+- cancellation reason
+- peer info where allowed
+- schema fingerprint where useful
+
+### 19.4 Debugging
+
+The CLI should support schema-aware debugging.
+
+Example:
+
+```sh
+tpt20 decode --schema user.tpt --message user.v1.User < message.bin
+```
+
+---
+
+## 20. Schema evolution and governance
+
+`tpt-proto20` must make schema evolution safe.
+
+### 20.1 Compatibility classes
+
+Changes are classified as:
+
+```text
+SAFE
+WARNING
+BREAKING
+```
+
+### 20.2 Safe changes
+
+Examples:
+
+- add optional field
+- add repeated field
+- add new enum value in open enums
+- add new service method
+- reserve removed field IDs
+
+### 20.3 Warning changes
+
+Examples:
+
+- rename field but keep ID
+- rename method
+- change documentation semantics
+- change annotation behavior
+
+### 20.4 Breaking changes
+
+Examples:
+
+- change field type
+- change field ID
+- remove field without reservation
+- remove service method without compatibility policy
+- change streaming direction
+- change request type incompatibly
+- change response type incompatibly
+
+### 20.5 Schema history
+
+The toolchain should support schema history manifests.
+
+A manifest can record:
+
+- schema versions
+- fingerprints
+- compatibility policies
+- migration notes
+- reserved IDs
+- deprecation dates
+
+---
+
+## 21. Tooling
+
+The `tpt20` CLI is a core part of the project.
+
+### 21.1 Commands
+
+```sh
+tpt20 init
+tpt20 check
+tpt20 fmt
+tpt20 lint
+tpt20 diff
+tpt20 gen
+tpt20 descriptors
+tpt20 decode
+tpt20 encode
+tpt20 json-to-binary
+tpt20 binary-to-json
+tpt20 text-to-binary
+tpt20 binary-to-text
+tpt20 import-proto
+tpt20 conformance
+tpt20 call
+tpt20 health
+tpt20 reflect
+tpt20 registry publish
+```
+
+### 21.2 Code generation
+
+```sh
+tpt20 gen rust --in schema --out src/generated
+```
+
+### 21.3 Linting
+
+```sh
+tpt20 lint schema/
+```
+
+### 21.4 Diffing
+
+```sh
+tpt20 diff schema/v1/user.tpt schema/v2/user.tpt
+```
+
+Example output:
+
+```text
+SAFE     added field 6 created_at
+WARNING  renamed field username to login
+BREAKING removed field 3 without reservation
+```
+
+### 21.5 RPC debugging
+
+```sh
+tpt20 call localhost:50051 user.v1.UserService/get_user
+```
+
+The CLI should support:
+
+- JSON input
+- binary input
+- metadata
+- deadlines
+- TLS configuration
+- compression configuration
+- streaming calls
+
+---
+
+## 22. Conformance and testing
+
+`tpt-proto20` must have a strong conformance strategy.
+
+### 22.1 Native conformance
+
+Native conformance tests must cover:
+
+- schema parsing
+- semantic analysis
+- wire encoding
+- wire decoding
+- canonical encoding
+- JSON mapping
+- text mapping
+- reflection
+- dynamic messages
+- RPC behavior
+- streaming behavior
+- deadline behavior
+- cancellation behavior
+- security limits
+
+### 22.2 Compatibility conformance
+
+Compatibility conformance must cover:
+
+- protobuf schema import
+- protobuf binary decoding
+- protobuf binary encoding
+- gRPC-compatible RPC behavior
+- status mapping
+- metadata mapping
+- streaming semantics
+
+### 22.3 Fuzzing
+
+Fuzz targets must include:
+
+- binary decoder
+- JSON decoder
+- text parser
+- schema parser
+- descriptor decoder
+- dynamic message decoder
+- RPC framing
+- metadata parsing
+
+### 22.4 Property testing
+
+Random valid messages must roundtrip correctly.
+
+```text
+encode -> decode -> equal
+decode -> encode -> decode -> equal
+```
+
+### 22.5 Interoperability testing
+
+The project should maintain interop tests against:
+
+- Rust clients/servers
+- Go clients/servers where feasible
+- Java clients/servers where feasible
+- Python clients/servers where feasible
+- HTTP/2 proxies where feasible
+- load balancers where feasible
+
+---
+
+## 23. Performance
+
+`tpt-proto20` should be production-competitive.
+
+Performance goals:
+
+- fast varint encoding/decoding
+- minimal allocations
+- efficient repeated field handling
+- efficient map handling
+- efficient streaming
+- monomorphized generated code
+- optional zero-copy decoding
+- bounded memory usage
+- low-overhead observability
+
+Benchmark suite must include:
+
+- small messages
+- large messages
+- nested messages
+- repeated fields
+- packed fields
+- maps
+- unknown fields
+- dynamic decoding
+- borrowed decoding
+- JSON conversion
+- unary RPC
+- streaming RPC
+- concurrent streams
+- cancellation storms
+- deadline storms
+- TLS overhead
+- compression overhead
+
+---
+
+## 24. Versioning and releases
+
+`tpt-proto20` must use semantic versioning.
+
+### 24.1 Schema versioning
+
+Schemas should use package versioning.
+
+Example:
+
+```tpt
+package user.v1;
+```
+
+Major schema versions indicate breaking contract changes.
+
+### 24.2 Runtime versioning
+
+The runtime must define stability for:
+
+- public APIs
+- generated code
+- wire format
+- descriptor format
+- CLI output
+- registry APIs
+
+### 24.3 Compatibility policy
+
+Once stable:
+
+- native wire format changes must be backward-compatible or gated by a new protocol version
+- descriptor format changes must be carefully versioned
+- generated code stability must be documented
+- CLI breaking changes must follow semver
+
+---
+
+## 25. Licensing and provenance
+
+Project license:
+
+```toml
+license = "MIT OR Apache-2.0"
+```
+
+The repository must include:
+
+```text
+LICENSE-MIT
+LICENSE-APACHE
+COPYRIGHT
+CONTRIBUTING.md
+provenance/
+```
+
+### 25.1 Clean-room policy
+
+Allowed inputs:
+
+- public specifications
+- public protocol documentation
+- original design notes
+- original tests
+- independently created test vectors
+
+Disallowed inputs:
+
+- upstream implementation code
+- proprietary implementations
+- copied generated code templates
+- AI prompts containing upstream source code
+
+### 25.2 AI policy
+
+AI-assisted contributions must be:
+
+- reviewed by humans
+- tested
+- documented
+- checked for suspicious similarity to existing code
+- recorded in provenance notes where appropriate
+
+---
+
+## 26. Repository layout
+
+Recommended layout:
+
+```text
+tpt-proto20/
+  compiler/
+    tpt20-language/
+    tpt20-ir/
+    tpt20-descriptor/
+    tpt20-compiler/
+    tpt20-codegen-rust/
+    tpt20-codegen-backends/
+
+  runtime/
+    tpt20-core/
+    tpt20-reflect/
+    tpt20-json/
+    tpt20-text/
+    tpt20-stdlib/
+    tpt20-rpc/
+    tpt20-transport/
+    tpt20-observability/
+
+  compat/
+    tpt20-compat-protobuf/
+    tpt20-compat-grpc/
+
+  tools/
+    tpt20-cli/
+    tpt20-lint/
+    tpt20-diff/
+    tpt20-conformance/
+    tpt20-registry/
+
+  docs/
+  examples/
+  tests/
+  fuzz/
+  benches/
+  provenance/
+```
+
+---
+
+## 27. Acceptance criteria
+
+The complete `tpt-proto20` system is finished only when the following are true.
+
+### 27.1 Schema language
+
+The schema language supports:
+
+- messages
+- enums
+- oneofs
+- maps
+- repeated fields
+- optional presence
+- services
+- streaming methods
+- annotations
+- packages
+- imports
+- reserved IDs
+
+### 27.2 Compiler
+
+The compiler can:
+
+- parse schemas
+- detect semantic errors
+- emit IR
+- emit descriptors
+- emit schema fingerprints
+- generate Rust code
+- produce useful diagnostics
+
+### 27.3 Runtime
+
+The runtime can:
+
+- encode native messages
+- decode native messages
+- preserve unknown fields
+- enforce decoder limits
+- support borrowed decoding
+- support dynamic decoding
+- convert JSON
+- convert text
+
+### 27.4 Reflection
+
+Reflection supports:
+
+- descriptor-driven decoding
+- descriptor-driven encoding
+- field access
+- field mutation
+- dynamic inspection
+
+### 27.5 RPC
+
+The RPC system supports:
+
+- unary calls
+- server streaming
+- client streaming
+- bidirectional streaming
+- deadlines
+- cancellation
+- metadata
+- rich errors
+- compression
+- TLS
+- health checking
+- reflection
+- observability
+
+### 27.6 Compatibility
+
+The compatibility layer supports:
+
+- importing protobuf schemas
+- encoding protobuf-compatible binary
+- decoding protobuf-compatible binary
+- exposing gRPC-compatible services where applicable
+- consuming gRPC-compatible services where applicable
+
+### 27.7 Tooling
+
+The CLI supports:
+
+- check
+- fmt
+- lint
+- diff
+- gen
+- decode
+- encode
+- JSON conversion
+- text conversion
+- RPC debugging
+- conformance execution
+
+### 27.8 Security
+
+The system passes:
+
+- fuzz testing
+- limit enforcement tests
+- malformed input tests
+- malicious schema tests
+- RPC abuse tests
+
+### 27.9 Documentation
+
+Documentation covers:
+
+- quickstart
+- schema language
+- wire format
+- RPC model
+- compatibility adapters
+- security limits
+- observability
+- code generation
+- CLI usage
+- provenance policy
+
+---
+
+## 28. Risks
+
+### 28.1 Adoption risk
+
+A new protocol is hard to adopt.
+
+Mitigation:
+
+- protobuf compatibility adapters
+- excellent documentation
+- clear migration path
+- strong CLI tooling
+- demonstrable benefits
+
+### 28.2 Scope risk
+
+The project is large.
+
+Mitigation:
+
+- strict component boundaries
+- clear acceptance criteria
+- strong testing
+- phased development without removing required scope
+- reusable IR and descriptor model
+
+### 28.3 Compatibility risk
+
+Compatibility layers are subtle.
+
+Mitigation:
+
+- conformance tests
+- interop tests
+- golden vectors
+- differential testing
+- careful documentation
+
+### 28.4 Maintenance risk
+
+Infrastructure projects require long-term care.
+
+Mitigation:
+
+- clean architecture
+- provenance documentation
+- contribution policy
+- automated testing
+- maintainable codegen
+- community governance
+
+### 28.5 Performance risk
+
+New systems may be slower than mature systems.
+
+Mitigation:
+
+- benchmark suite
+- profiling
+- zero-copy paths
+- allocation controls
+- transport tuning
+
+---
+
+## 29. Glossary
+
+### Schema
+
+A declarative definition of messages, enums, and services.
+
+### Descriptor
+
+A machine-readable representation of a compiled schema.
+
+### IR
+
+Intermediate representation used by the compiler to support multiple language backends.
+
+### Wire format
+
+The binary encoding used to serialize messages.
+
+### Reflection
+
+Runtime access to schema structure and dynamic messages.
+
+### RPC
+
+Remote Procedure Call.
+
+### Streaming
+
+A call pattern where multiple messages are sent or received.
+
+### Deadline
+
+A point in time after which an RPC should be considered expired.
+
+### Cancellation
+
+A signal that an operation should stop.
+
+### Compatibility adapter
+
+A layer that allows `tpt-proto20` to interoperate with existing protobuf/gRPC systems.
+
+### Schema fingerprint
+
+A stable hash representing a compiled schema.
+
+### Canonical encoding
+
+A deterministic encoding mode suitable for hashing and signing.
+
+---
+
+## 30. Final statement
+
+`tpt-proto20` is not merely a serialization format.
+
+It is a complete contract system consisting of:
+
+```text
+schema language
+compiler
+IR
+descriptors
+binary format
+runtime
+reflection
+JSON/text support
+standard types
+RPC/streaming
+security limits
+observability
+schema governance
+compatibility adapters
+developer tooling
+conformance testing
+```
+
+Its goal is to make distributed communication:
+
+```text
+safer
+clearer
+faster
+more observable
+easier to evolve
+more pleasant in Rust
+compatible with the existing world
+```
+
+That is the full shape of the project.

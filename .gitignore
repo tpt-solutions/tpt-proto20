@@ -1,0 +1,15 @@
+/target
+**/target
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Env / local overrides
+.env
+*.log
