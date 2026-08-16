@@ -27,7 +27,7 @@ diagram in spec §5 and the repo layout in spec §26.
   - [x] `compiler/tpt20-language/`
   - [x] `compiler/tpt20-ir/`
   - [x] `compiler/tpt20-descriptor/`
-  - [ ] `compiler/tpt20-compiler/`
+  - [x] `compiler/tpt20-compiler/`
   - [ ] `compiler/tpt20-codegen-rust/`
   - [ ] `compiler/tpt20-codegen-backends/`
   - [x] `runtime/tpt20-core/`
@@ -76,15 +76,15 @@ diagram in spec §5 and the repo layout in spec §26.
 - [x] `package` declarations (e.g. `package user.v1;`)
 - [x] `import` statements
 - [x] Message declarations with numeric field IDs (`1: id int64;`)
-- [ ] Enforce field IDs are part of the wire contract (no silent reuse post-publish)
+- [x] Enforce field IDs are part of the wire contract (no silent reuse post-publish)
 - [x] Implicit presence semantics (absence == default)
 - [x] Explicit presence syntax `?` and semantics (absence distinguishable from default)
 - [x] Message-field presence-awareness
 - [x] Confirm "required" fields are NOT part of the language (reject if attempted)
 - [x] Repeated field syntax (`repeated`) and list semantics
 - [x] Map syntax `map<K, V>`
-  - [ ] Restrict key types to scalar or string types
-  - [ ] Validate value types
+  - [x] Restrict key types to scalar or string types
+  - [x] Validate value types
   - [ ] Deterministic encoding ordering rule (spec'd, enforced later in Phase 4)
   - [ ] Runtime size limit hook (enforced later in Phase 4)
 - [x] Oneof syntax (`oneof name { ... }`) and mutual-exclusivity semantics
@@ -97,58 +97,58 @@ diagram in spec §5 and the repo layout in spec §26.
   - [x] Client-streaming method syntax (`stream` on request type)
   - [x] Bidirectional-streaming method syntax
 - [x] Annotation syntax (`@name(args)`)
-  - [ ] Core/standardized annotations (`@max_len`, `@range`, `@pattern`, etc.)
-  - [ ] Custom annotation registry mechanism
+  - [x] Core/standardized annotations (`@max_len`, `@range`, `@pattern`, etc.)
+  - [x] Custom annotation registry mechanism
 - [x] Reserved field ID / reserved name syntax
 - [x] AST data structures for all of the above
 - [x] Parser test suite, including full round-trip of the spec §6.1 example schema
-- [ ] Error recovery / helpful parse error messages (feeds into Phase 2 diagnostics)
+- [x] Error recovery / helpful parse error messages (feeds into Phase 2 diagnostics)
 
 ---
 
 ## Phase 2 — Semantic Analysis & Compiler Core (`tpt20-compiler`, spec §7, §20)
 
-- [ ] Wire up full compiler pipeline: lexer → parser → AST → semantic analysis →
+- [x] Wire up full compiler pipeline: lexer → parser → AST → semantic analysis →
       compatibility checks → IR generation → descriptor generation → code generation
-- [ ] Semantic analysis pass
-  - [ ] Duplicate field ID detection within a message
-  - [ ] Duplicate enum value ID detection (respecting alias annotation)
-  - [ ] Duplicate message/enum/service names detection
-  - [ ] Unresolved import detection
-  - [ ] Oneof field validity rules
-  - [ ] Map key/value type validity rules
-  - [ ] Annotation argument validity checks
-- [ ] Compatibility-change detector
-  - [ ] Detect safe additions (optional field, repeated field, new enum value in open
+- [x] Semantic analysis pass
+  - [x] Duplicate field ID detection within a message
+  - [x] Duplicate enum value ID detection (respecting alias annotation)
+  - [x] Duplicate message/enum/service names detection
+  - [x] Unresolved import detection
+  - [x] Oneof field validity rules
+  - [x] Map key/value type validity rules
+  - [x] Annotation argument validity checks
+- [x] Compatibility-change detector
+  - [x] Detect safe additions (optional field, repeated field, new enum value in open
         enum, new service method, reserved removed field IDs)
-  - [ ] Detect warning changes (rename field keeping ID, rename method, doc/annotation
+  - [x] Detect warning changes (rename field keeping ID, rename method, doc/annotation
         semantic changes)
-  - [ ] Detect breaking changes (field type change, field ID change, field removal
+  - [x] Detect breaking changes (field type change, field ID change, field removal
         without reservation, method removal without policy, streaming direction change,
         incompatible request/response type change)
-  - [ ] Classify every detected change as SAFE / WARNING / BREAKING
-- [ ] Diagnostics engine
-  - [ ] File path in diagnostic
-  - [ ] Line number
-  - [ ] Column number
-  - [ ] Span
-  - [ ] Severity
-  - [ ] Error code (e.g. `E0042`)
-  - [ ] Human-readable explanation
-  - [ ] Suggested fix where possible
-  - [ ] Match rendered format to spec §7.3 example output
-- [ ] Schema fingerprint
-  - [ ] Derive stable fingerprint from canonical descriptor
-  - [ ] Verify fingerprint stability across semantically-identical re-serializations
-  - [ ] Wire fingerprint into registry / dynamic validation / debugging / migration use
+  - [x] Classify every detected change as SAFE / WARNING / BREAKING
+- [x] Diagnostics engine
+  - [x] File path in diagnostic
+  - [x] Line number
+  - [x] Column number
+  - [x] Span
+  - [x] Severity
+  - [x] Error code (e.g. `E0042`)
+  - [x] Human-readable explanation
+  - [x] Suggested fix where possible
+  - [x] Match rendered format to spec §7.3 example output
+- [x] Schema fingerprint
+  - [x] Derive stable fingerprint from canonical descriptor
+  - [x] Verify fingerprint stability across semantically-identical re-serializations
+  - [x] Wire fingerprint into registry / dynamic validation / debugging / migration use
         cases
-- [ ] Schema history manifest support (spec §20.5)
-  - [ ] Record schema versions
-  - [ ] Record fingerprints
-  - [ ] Record compatibility policies
-  - [ ] Record migration notes
-  - [ ] Record reserved IDs
-  - [ ] Record deprecation dates
+- [x] Schema history manifest support (spec §20.5)
+  - [x] Record schema versions
+  - [x] Record fingerprints
+  - [x] Record compatibility policies
+  - [x] Record migration notes
+  - [x] Record reserved IDs
+  - [x] Record deprecation dates
 
 ---
 

@@ -118,6 +118,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tpt20-compiler"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tpt20-descriptor",
+ "tpt20-ir",
+ "tpt20-language",
+]
+
+[[package]]
 name = "tpt20-core"
 version = "0.1.0"
 dependencies = [

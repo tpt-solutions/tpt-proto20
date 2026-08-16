@@ -69,6 +69,16 @@ pub enum FieldLabelIr {
     Map { key: TypeRefIr, value: TypeRefIr },
 }
 
+impl FieldLabelIr {
+    /// Returns the inner value type of a singular/repeated/map label.
+    pub fn unwrap_type(&self) -> &TypeRefIr {
+        match self {
+            FieldLabelIr::Singular(t) | FieldLabelIr::Repeated(t) => t,
+            FieldLabelIr::Map { value, .. } => value,
+        }
+    }
+}
+
 /// A field in the IR.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldIr {

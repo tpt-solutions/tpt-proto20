@@ -144,6 +144,7 @@ impl Parser {
 
     fn parse_message(&mut self) -> Result<Message, ParseError> {
         self.expect(&Token::Message)?;
+        let span = self.span();
         let name = self.expect_ident()?;
         let annotations = self.parse_annotations()?;
         self.expect(&Token::BraceOpen)?;
@@ -155,6 +156,7 @@ impl Parser {
             enums: Vec::new(),
             reserved: Vec::new(),
             annotations,
+            span,
         };
         while self.peek() != &Token::BraceClose {
             match self.peek().clone() {
@@ -166,7 +168,8 @@ impl Parser {
                     return Err(ParseError::RequiredNotAllowed(self.span()));
                 }
                 _ => {
-                    let (field, _) = self.parse_field()?;
+                    let leading = self.parse_annotations()?;
+                    let (field, _) = self.parse_field(leading)?;
                     msg.fields.push(field);
                 }
             }
@@ -177,6 +180,7 @@ impl Parser {
 
     fn parse_oneof(&mut self) -> Result<Oneof, ParseError> {
         self.expect(&Token::Oneof)?;
+        let span = self.span();
         let name = self.expect_ident()?;
         let annotations = self.parse_annotations()?;
         self.expect(&Token::BraceOpen)?;
@@ -184,9 +188,11 @@ impl Parser {
             name,
             fields: Vec::new(),
             annotations,
+            span,
         };
         while self.peek() != &Token::BraceClose {
-            let (field, _) = self.parse_field()?;
+            let leading = self.parse_annotations()?;
+            let (field, _) = self.parse_field(leading)?;
             oneof.fields.push(field);
         }
         self.expect(&Token::BraceClose)?;
@@ -204,6 +210,7 @@ impl Parser {
             open = false;
         }
         self.expect(&Token::Enum)?;
+        let span = self.span();
         let name = self.expect_ident()?;
         // Optional trailing open/closed modifier overrides the leading one.
         if self.peek() == &Token::Open {
@@ -220,8 +227,10 @@ impl Parser {
             values: Vec::new(),
             open,
             annotations,
+            span,
         };
         while self.peek() != &Token::BraceClose {
+            let v_span = self.span();
             let value_name = self.expect_ident()?;
             let mut alias = false;
             if self.peek() == &Token::Alias {
@@ -237,6 +246,7 @@ impl Parser {
                 name: value_name,
                 number: number as i32,
                 alias,
+                span: v_span,
             });
         }
         self.expect(&Token::BraceClose)?;
@@ -245,6 +255,7 @@ impl Parser {
 
     fn parse_service(&mut self) -> Result<Service, ParseError> {
         self.expect(&Token::Service)?;
+        let span = self.span();
         let name = self.expect_ident()?;
         let annotations = self.parse_annotations()?;
         self.expect(&Token::BraceOpen)?;
@@ -252,6 +263,7 @@ impl Parser {
             name,
             methods: Vec::new(),
             annotations,
+            span,
         };
         while self.peek() != &Token::BraceClose {
             service.methods.push(self.parse_method()?);
@@ -261,6 +273,7 @@ impl Parser {
     }
 
     fn parse_method(&mut self) -> Result<Method, ParseError> {
+        let span = self.span();
         let name = self.expect_ident()?;
         self.expect(&Token::ParenOpen)?;
         let request_streaming = self.eat(&Token::Stream);
@@ -289,13 +302,16 @@ impl Parser {
             response,
             response_streaming,
             annotations,
+            span,
         })
     }
 
     /// Parses a field: `id : [repeated] [map<K,V>] name [?] [@ann];`
     /// (name precedes type, matching the spec §6.1 example grammar).
+    /// Leading annotations are parsed by the caller and passed in; trailing
+    /// annotations are not consumed here so they attach to the next field.
     /// Returns the field and an optional flag (unused externally).
-    fn parse_field(&mut self) -> Result<(Field, ()), ParseError> {
+    fn parse_field(&mut self, leading: Vec<Annotation>) -> Result<(Field, ()), ParseError> {
         let id_span = self.span();
         let id = self
             .parse_number()
@@ -336,7 +352,6 @@ impl Parser {
         } else {
             Presence::Implicit
         };
-        let annotations = self.parse_annotations()?;
         self.expect(&Token::Semi)?;
 
         Ok((
@@ -345,7 +360,8 @@ impl Parser {
                 name: field_name,
                 label,
                 presence,
-                annotations,
+                annotations: leading,
+                span: id_span,
             },
             (),
         ))

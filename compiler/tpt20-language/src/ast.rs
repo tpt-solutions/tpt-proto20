@@ -4,6 +4,8 @@
 //! semantic-analysis and codegen passes. Source locations are attached where
 //! useful so the diagnostics engine (Phase 2) can render helpful messages.
 
+use crate::lexer::Span;
+
 /// A complete parsed `.tpt` file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct File {
@@ -19,6 +21,8 @@ pub struct File {
     pub services: Vec<Service>,
     /// Top-level reserved declarations.
     pub reserved: Vec<Reserved>,
+    /// Source location of the file (defaults to the origin).
+    pub span: Span,
 }
 
 /// A message declaration (possibly nested).
@@ -38,6 +42,8 @@ pub struct Message {
     pub reserved: Vec<Reserved>,
     /// Annotations applied to the message.
     pub annotations: Vec<Annotation>,
+    /// Source location of the declaration.
+    pub span: Span,
 }
 
 /// A field declaration.
@@ -53,6 +59,8 @@ pub struct Field {
     pub presence: Presence,
     /// Annotations applied to the field.
     pub annotations: Vec<Annotation>,
+    /// Source location of the declaration.
+    pub span: Span,
 }
 
 /// Field label / cardinality.
@@ -89,6 +97,8 @@ pub struct Oneof {
     pub fields: Vec<Field>,
     /// Annotations applied to the oneof.
     pub annotations: Vec<Annotation>,
+    /// Source location of the declaration.
+    pub span: Span,
 }
 
 /// An enum declaration.
@@ -102,6 +112,8 @@ pub struct Enum {
     pub open: bool,
     /// Annotations applied to the enum.
     pub annotations: Vec<Annotation>,
+    /// Source location of the declaration.
+    pub span: Span,
 }
 
 /// An enum value.
@@ -113,6 +125,8 @@ pub struct EnumValue {
     pub number: i32,
     /// Whether this is an explicit alias of another value.
     pub alias: bool,
+    /// Source location of the declaration.
+    pub span: Span,
 }
 
 /// A service declaration.
@@ -124,6 +138,8 @@ pub struct Service {
     pub methods: Vec<Method>,
     /// Annotations applied to the service.
     pub annotations: Vec<Annotation>,
+    /// Source location of the declaration.
+    pub span: Span,
 }
 
 /// A service method declaration.
@@ -141,6 +157,8 @@ pub struct Method {
     pub response_streaming: bool,
     /// Annotations applied to the method.
     pub annotations: Vec<Annotation>,
+    /// Source location of the declaration.
+    pub span: Span,
 }
 
 /// A type reference (scalar or qualified message/enum name).

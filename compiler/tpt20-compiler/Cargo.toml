@@ -1,0 +1,20 @@
+[package]
+name = "tpt20-compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "tpt20 schema compiler: semantic analysis, compatibility checks, IR/descriptor generation (spec §7, §20)"
+
+[dependencies]
+tpt20-language = { path = "../tpt20-language" }
+tpt20-ir = { path = "../tpt20-ir" }
+tpt20-descriptor = { path = "../tpt20-descriptor" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

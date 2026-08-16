@@ -4,6 +4,7 @@ members = [
     "compiler/tpt20-language",
     "compiler/tpt20-ir",
     "compiler/tpt20-descriptor",
+    "compiler/tpt20-compiler",
     "runtime/tpt20-core",
 ]
 exclude = []
