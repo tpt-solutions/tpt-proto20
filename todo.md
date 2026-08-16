@@ -20,17 +20,17 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 0 — Project Foundation & Governance
 
-- [ ] `git init` the repository
-- [ ] `.gitignore` for Rust (`target/`, etc.)
-- [ ] Root Cargo workspace `Cargo.toml`
+- [x] `git init` the repository
+- [x] `.gitignore` for Rust (`target/`, etc.)
+- [x] Root Cargo workspace `Cargo.toml`
 - [ ] Create workspace layout per spec §26:
-  - [ ] `compiler/tpt20-language/`
-  - [ ] `compiler/tpt20-ir/`
-  - [ ] `compiler/tpt20-descriptor/`
+  - [x] `compiler/tpt20-language/`
+  - [x] `compiler/tpt20-ir/`
+  - [x] `compiler/tpt20-descriptor/`
   - [ ] `compiler/tpt20-compiler/`
   - [ ] `compiler/tpt20-codegen-rust/`
   - [ ] `compiler/tpt20-codegen-backends/`
-  - [ ] `runtime/tpt20-core/`
+  - [x] `runtime/tpt20-core/`
   - [ ] `runtime/tpt20-reflect/`
   - [ ] `runtime/tpt20-json/`
   - [ ] `runtime/tpt20-text/`
@@ -50,58 +50,58 @@ diagram in spec §5 and the repo layout in spec §26.
   - [ ] `tests/`
   - [ ] `fuzz/`
   - [ ] `benches/`
-  - [ ] `provenance/`
-- [ ] `LICENSE-MIT` (TPT Solutions)
-- [ ] `LICENSE-APACHE` (TPT Solutions)
-- [ ] `COPYRIGHT` file (TPT Solutions)
-- [ ] Set `license = "MIT OR Apache-2.0"` and `authors`/`TPT Solutions` in workspace `Cargo.toml`
-- [ ] `CONTRIBUTING.md`
-  - [ ] Document clean-room policy (spec §25.1): allowed inputs (public specs, original
+  - [x] `provenance/`
+- [x] `LICENSE-MIT` (TPT Solutions)
+- [x] `LICENSE-APACHE` (TPT Solutions)
+- [x] `COPYRIGHT` file (TPT Solutions)
+- [x] Set `license = "MIT OR Apache-2.0"` and `authors`/`TPT Solutions` in workspace `Cargo.toml`
+- [x] `CONTRIBUTING.md`
+  - [x] Document clean-room policy (spec §25.1): allowed inputs (public specs, original
         design notes/tests, independently created test vectors) vs. disallowed inputs
         (upstream implementation code, proprietary implementations, copied codegen
         templates, AI prompts containing upstream source)
-  - [ ] Document AI-assisted contribution policy (spec §25.2): human review, testing,
+  - [x] Document AI-assisted contribution policy (spec §25.2): human review, testing,
         documentation, similarity checks, provenance recording
-- [ ] `provenance/` directory with initial policy docs
-- [ ] Baseline CI pipeline (build, test, `fmt --check`, `clippy`)
-- [ ] `README.md` skeleton (project summary, vision, links to docs/)
+- [x] `provenance/` directory with initial policy docs
+- [x] Baseline CI pipeline (build, test, `fmt --check`, `clippy`)
+- [x] `README.md` skeleton (project summary, vision, links to docs/)
 
 ---
 
 ## Phase 1 — Schema Language (`tpt20-language`, spec §6)
 
-- [ ] Define `.tpt` file extension and top-level file grammar
-- [ ] Lexer/tokenizer for `.tpt` source
-- [ ] Parser producing an AST
-- [ ] `package` declarations (e.g. `package user.v1;`)
-- [ ] `import` statements
-- [ ] Message declarations with numeric field IDs (`1: id int64;`)
+- [x] Define `.tpt` file extension and top-level file grammar
+- [x] Lexer/tokenizer for `.tpt` source
+- [x] Parser producing an AST
+- [x] `package` declarations (e.g. `package user.v1;`)
+- [x] `import` statements
+- [x] Message declarations with numeric field IDs (`1: id int64;`)
 - [ ] Enforce field IDs are part of the wire contract (no silent reuse post-publish)
-- [ ] Implicit presence semantics (absence == default)
-- [ ] Explicit presence syntax `?` and semantics (absence distinguishable from default)
-- [ ] Message-field presence-awareness
-- [ ] Confirm "required" fields are NOT part of the language (reject if attempted)
-- [ ] Repeated field syntax (`repeated`) and list semantics
-- [ ] Map syntax `map<K, V>`
+- [x] Implicit presence semantics (absence == default)
+- [x] Explicit presence syntax `?` and semantics (absence distinguishable from default)
+- [x] Message-field presence-awareness
+- [x] Confirm "required" fields are NOT part of the language (reject if attempted)
+- [x] Repeated field syntax (`repeated`) and list semantics
+- [x] Map syntax `map<K, V>`
   - [ ] Restrict key types to scalar or string types
   - [ ] Validate value types
   - [ ] Deterministic encoding ordering rule (spec'd, enforced later in Phase 4)
   - [ ] Runtime size limit hook (enforced later in Phase 4)
-- [ ] Oneof syntax (`oneof name { ... }`) and mutual-exclusivity semantics
-- [ ] Enum declarations with stable numeric values
-  - [ ] Enum value aliases with explicit annotation
-  - [ ] Open vs. closed enum annotation/semantics
-- [ ] Service declarations
-  - [ ] Unary method syntax
-  - [ ] Server-streaming method syntax (`stream` on return type)
-  - [ ] Client-streaming method syntax (`stream` on request type)
-  - [ ] Bidirectional-streaming method syntax
-- [ ] Annotation syntax (`@name(args)`)
+- [x] Oneof syntax (`oneof name { ... }`) and mutual-exclusivity semantics
+- [x] Enum declarations with stable numeric values
+  - [x] Enum value aliases with explicit annotation
+  - [x] Open vs. closed enum annotation/semantics
+- [x] Service declarations
+  - [x] Unary method syntax
+  - [x] Server-streaming method syntax (`stream` on return type)
+  - [x] Client-streaming method syntax (`stream` on request type)
+  - [x] Bidirectional-streaming method syntax
+- [x] Annotation syntax (`@name(args)`)
   - [ ] Core/standardized annotations (`@max_len`, `@range`, `@pattern`, etc.)
   - [ ] Custom annotation registry mechanism
-- [ ] Reserved field ID / reserved name syntax
-- [ ] AST data structures for all of the above
-- [ ] Parser test suite, including full round-trip of the spec §6.1 example schema
+- [x] Reserved field ID / reserved name syntax
+- [x] AST data structures for all of the above
+- [x] Parser test suite, including full round-trip of the spec §6.1 example schema
 - [ ] Error recovery / helpful parse error messages (feeds into Phase 2 diagnostics)
 
 ---
@@ -154,49 +154,49 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 3 — IR & Descriptor Model (`tpt20-ir`, `tpt20-descriptor`, spec §8)
 
-- [ ] Define neutral IR types
-  - [ ] Packages
-  - [ ] Files
-  - [ ] Messages
-  - [ ] Fields
-  - [ ] Enums
-  - [ ] Enum values
-  - [ ] Oneofs
-  - [ ] Maps
-  - [ ] Services
-  - [ ] Methods
-  - [ ] Annotations
-  - [ ] Source locations
-  - [ ] Compatibility metadata
-  - [ ] Schema fingerprint
-- [ ] Descriptor model (runtime representation of compiled schema)
-  - [ ] Binary serialization of descriptors
-  - [ ] JSON serialization of descriptors
-  - [ ] Dynamic lookup support (by name/ID)
-  - [ ] Reflection support hooks (consumed by Phase 7)
-  - [ ] Cross-language interchange format
-  - [ ] Schema registry storage format
+- [x] Define neutral IR types
+  - [x] Packages
+  - [x] Files
+  - [x] Messages
+  - [x] Fields
+  - [x] Enums
+  - [x] Enum values
+  - [x] Oneofs
+  - [x] Maps
+  - [x] Services
+  - [x] Methods
+  - [x] Annotations
+  - [x] Source locations
+  - [x] Compatibility metadata
+  - [x] Schema fingerprint
+- [x] Descriptor model (runtime representation of compiled schema)
+  - [x] Binary serialization of descriptors
+  - [x] JSON serialization of descriptors
+  - [x] Dynamic lookup support (by name/ID)
+  - [x] Reflection support hooks (consumed by Phase 7)
+  - [x] Cross-language interchange format
+  - [x] Schema registry storage format
 
 ---
 
 ## Phase 4 — Native Binary Wire Format & Core Runtime (`tpt20-core`, spec §9, §18)
 
-- [ ] Wire classes: VARINT (0), FIXED32 (1), FIXED64 (2), LEN (3)
-- [ ] Tag encoding: `tag = (field_id << 3) | wire_class`, encoded as varint
-- [ ] Scalar type support: `bool`, `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64`,
+- [x] Wire classes: VARINT (0), FIXED32 (1), FIXED64 (2), LEN (3)
+- [x] Tag encoding: `tag = (field_id << 3) | wire_class`, encoded as varint
+- [x] Scalar type support: `bool`, `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64`,
       `fixed32`, `fixed64`, `sfixed32`, `sfixed64`, `float32`, `float64`, `string`, `bytes`
-- [ ] Varint encoding/decoding (7-bit groups)
-  - [ ] Zigzag encoding for signed varint types
-  - [ ] Reject truncated varints
-  - [ ] Reject overlong varints
-  - [ ] Reject overflowing varints
-  - [ ] Reject malformed payloads
-- [ ] Length-delimited field encoding (varint length + payload bytes)
-  - [ ] Reject negative lengths
-  - [ ] Reject overflowing lengths
-  - [ ] Reject truncated payloads
-  - [ ] Reject invalid UTF-8 in string fields
-  - [ ] Reject payloads exceeding configured limits
+- [x] Varint encoding/decoding (7-bit groups)
+  - [x] Zigzag encoding for signed varint types
+  - [x] Reject truncated varints
+  - [x] Reject overlong varints
+  - [x] Reject overflowing varints
+  - [x] Reject malformed payloads
+- [x] Length-delimited field encoding (varint length + payload bytes)
+  - [x] Reject negative lengths
+  - [x] Reject overflowing lengths
+  - [x] Reject truncated payloads
+  - [x] Reject invalid UTF-8 in string fields
+  - [x] Reject payloads exceeding configured limits
 - [ ] Repeated field encoding/decoding
   - [ ] Packed encoding
   - [ ] Unpacked encoding
@@ -207,42 +207,42 @@ diagram in spec §5 and the repo layout in spec §26.
   - [ ] Later value overrides earlier value by default
   - [ ] Deterministic map-entry ordering in canonical mode
   - [ ] Enforce decoder limits on map entries
-- [ ] Oneof encoding/decoding
-  - [ ] Encode oneof fields as normal fields
+- [x] Oneof encoding/decoding
+  - [x] Encode oneof fields as normal fields
   - [ ] Last field wins when multiple oneof members appear on decode
   - [ ] Expose oneof as mutually-exclusive generated type (ties into Phase 5)
-- [ ] Unknown field handling
-  - [ ] Preserve policy (default)
+- [x] Unknown field handling
+  - [x] Preserve policy (default)
   - [ ] Discard policy
   - [ ] Fail policy
-  - [ ] Ensure preserved unknown fields are re-encodable
-- [ ] Canonical deterministic encoding mode
-  - [ ] Canonical field order
+  - [x] Ensure preserved unknown fields are re-encodable
+- [x] Canonical deterministic encoding mode
+  - [x] Canonical field order
   - [ ] Canonical map ordering
   - [ ] Canonical unknown-field ordering
-  - [ ] Canonical varint representation
-  - [ ] Canonical repeated-field ordering where applicable
+  - [x] Canonical varint representation
+  - [x] Canonical repeated-field ordering where applicable
   - [ ] Canonical oneof serialization behavior
-  - [ ] Validate suitability for hashing/signatures/auditing/reproducible builds/content
+  - [x] Validate suitability for hashing/signatures/auditing/reproducible builds/content
         addressing
-- [ ] Optional `Envelope` message (`schema_id: bytes`, `schema_version: string`,
+- [x] Optional `Envelope` message (`schema_id: bytes`, `schema_version: string`,
       `payload: bytes`) — optional, not required for normal RPC payloads
-- [ ] `DecoderLimits` struct
-  - [ ] `max_message_bytes`
+- [x] `DecoderLimits` struct
+  - [x] `max_message_bytes`
   - [ ] `max_depth`
-  - [ ] `max_field_count`
+  - [x] `max_field_count`
   - [ ] `max_unknown_field_bytes`
   - [ ] `max_string_bytes`
-  - [ ] `max_bytes_field_bytes`
+  - [x] `max_bytes_field_bytes`
   - [ ] `max_repeated_entries`
   - [ ] `max_map_entries`
-  - [ ] Enforce every limit in the decode path with sane defaults
-- [ ] Checked-arithmetic integer safety throughout encode/decode
-- [ ] UTF-8 validation for all string fields
+  - [x] Enforce every limit in the decode path with sane defaults
+- [x] Checked-arithmetic integer safety throughout encode/decode
+- [x] UTF-8 validation for all string fields
 - [ ] Recursion/depth bounding for nested messages
 - [ ] Allocation bounding/predictability
-- [ ] Enforce "no unsafe in core decoding paths" default policy
-  - [ ] Any exception is isolated, documented, tested, feature-gated, and justified by
+- [x] Enforce "no unsafe in core decoding paths" default policy
+  - [x] Any exception is isolated, documented, tested, feature-gated, and justified by
         measurable benefit
 
 ---

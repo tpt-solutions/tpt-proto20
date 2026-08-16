@@ -1,0 +1,16 @@
+[package]
+name = "tpt20-descriptor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Descriptor model and serialization for tpt20 (spec §8)"
+
+[dependencies]
+tpt20-ir = { path = "../tpt20-ir" }
+tpt20-core = { path = "../../runtime/tpt20-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
