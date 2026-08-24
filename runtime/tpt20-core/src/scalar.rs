@@ -6,7 +6,7 @@
 
 use crate::error::DecodeError;
 use crate::message::Value;
-use crate::varint::{decode_zigzag, encode_zigzag};
+use crate::varint::{decode_varint, decode_zigzag, encode_varint, encode_zigzag};
 
 /// The wire representation class a scalar type maps to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +121,99 @@ pub fn decode_string(value: &Value) -> Result<&str, DecodeError> {
     }
 }
 
+/// Decodes a length-delimited value as a UTF-8 string, enforcing
+/// `max_string_bytes` (spec §18.1).
+pub fn decode_string_limited<'a>(
+    value: &'a Value,
+    limits: &crate::limits::DecoderLimits,
+) -> Result<&'a str, DecodeError> {
+    let s = decode_string(value)?;
+    limits.check_string_bytes(s.len())?;
+    Ok(s)
+}
+
+/// Encodes numeric values as one packed repeated varint field (spec §9.6).
+pub fn encode_packed_varints(values: &[u64]) -> Value {
+    let mut out = Vec::with_capacity(values.len());
+    for v in values {
+        encode_varint(*v, &mut out);
+    }
+    Value::Len(out)
+}
+
+/// Decodes a packed repeated varint field, enforcing `max_repeated_entries`.
+/// Initial allocation is bounded by input length (each element needs >= 1 byte).
+pub fn decode_packed_varints(
+    value: &Value,
+    limits: &crate::limits::DecoderLimits,
+) -> Result<Vec<u64>, DecodeError> {
+    let payload = decode_bytes(value)?;
+    if payload.len() > limits.max_repeated_entries {
+        return Err(DecodeError::RepeatedEntriesExceeded);
+    }
+    let mut out = Vec::with_capacity(payload.len());
+    let mut cursor = 0usize;
+    while cursor < payload.len() {
+        out.push(decode_varint(payload, &mut cursor)?);
+        limits.check_repeated_entries(out.len())?;
+    }
+    Ok(out)
+}
+
+/// Encodes `u32` values as one packed repeated fixed32 field (spec §9.6).
+pub fn encode_packed_fixed32(values: &[u32]) -> Value {
+    let mut out = Vec::with_capacity(values.len() * 4);
+    for v in values {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    Value::Len(out)
+}
+
+/// Decodes a packed repeated fixed32 field, enforcing `max_repeated_entries`.
+pub fn decode_packed_fixed32(
+    value: &Value,
+    limits: &crate::limits::DecoderLimits,
+) -> Result<Vec<u32>, DecodeError> {
+    let payload = decode_bytes(value)?;
+    if payload.len() / 4 > limits.max_repeated_entries {
+        return Err(DecodeError::RepeatedEntriesExceeded);
+    }
+    if payload.len() % 4 != 0 {
+        return Err(DecodeError::MalformedScalar);
+    }
+    Ok(payload
+        .chunks_exact(4)
+        .map(|c| u32::from_le_bytes(c.try_into().expect("4 bytes")))
+        .collect())
+}
+
+/// Encodes `u64` values as one packed repeated fixed64 field (spec §9.6).
+pub fn encode_packed_fixed64(values: &[u64]) -> Value {
+    let mut out = Vec::with_capacity(values.len() * 8);
+    for v in values {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    Value::Len(out)
+}
+
+/// Decodes a packed repeated fixed64 field, enforcing `max_repeated_entries`.
+pub fn decode_packed_fixed64(
+    value: &Value,
+    limits: &crate::limits::DecoderLimits,
+) -> Result<Vec<u64>, DecodeError> {
+    let payload = decode_bytes(value)?;
+    if payload.len() / 8 > limits.max_repeated_entries {
+        return Err(DecodeError::RepeatedEntriesExceeded);
+    }
+    if payload.len() % 8 != 0 {
+        return Err(DecodeError::MalformedScalar);
+    }
+    Ok(payload
+        .chunks_exact(8)
+        .map(|c| u64::from_le_bytes(c.try_into().expect("8 bytes")))
+        .collect())
+}
+
 /// Decodes a fixed32 value interpreted as an `f32`.
 pub fn decode_float32(value: &Value) -> Result<f32, DecodeError> {
     Ok(f32::from_bits(decode_fixed32(value)?))
@@ -168,5 +261,55 @@ mod tests {
         for v in [0.0f32, -1.5, 9.75] {
             assert_eq!(decode_float32(&encode_float32(v)).unwrap(), v);
         }
+    }
+
+    #[test]
+    fn string_limit_enforced() {
+        let limits = crate::limits::DecoderLimits {
+            max_string_bytes: 4,
+            ..Default::default()
+        };
+        let v = encode_string("toolongstring");
+        assert_eq!(
+            decode_string_limited(&v, &limits),
+            Err(DecodeError::LimitExceeded { limit: 4 })
+        );
+        let ok = encode_string("ok");
+        assert_eq!(decode_string_limited(&ok, &limits).unwrap(), "ok");
+    }
+
+    #[test]
+    fn packed_varints_roundtrip_and_limits() {
+        let limits = crate::limits::DecoderLimits::default();
+        let values: Vec<u64> = vec![0, 1, 127, 128, u64::MAX];
+        let packed = encode_packed_varints(&values);
+        assert_eq!(decode_packed_varints(&packed, &limits).unwrap(), values);
+        // Unpacked occurrences decode through the same helper one value at a time.
+        let single = encode_uint(300);
+        assert_eq!(decode_packed_varints(&single, &limits), Err(DecodeError::Internal("expected length-delimited")));
+
+        let tight = crate::limits::DecoderLimits {
+            max_repeated_entries: 2,
+            ..Default::default()
+        };
+        assert_eq!(
+            decode_packed_varints(&packed, &tight),
+            Err(DecodeError::RepeatedEntriesExceeded)
+        );
+    }
+
+    #[test]
+    fn packed_fixed_roundtrip_and_malformed() {
+        let limits = crate::limits::DecoderLimits::default();
+        let v32: Vec<u32> = vec![1, 2, u32::MAX];
+        let p32 = encode_packed_fixed32(&v32);
+        assert_eq!(decode_packed_fixed32(&p32, &limits).unwrap(), v32);
+        let v64: Vec<u64> = vec![7, u64::MAX];
+        let p64 = encode_packed_fixed64(&v64);
+        assert_eq!(decode_packed_fixed64(&p64, &limits).unwrap(), v64);
+        // Trailing partial word is malformed.
+        let bad = Value::Len(vec![1, 2, 3]);
+        assert_eq!(decode_packed_fixed32(&bad, &limits), Err(DecodeError::MalformedScalar));
+        assert_eq!(decode_packed_fixed64(&bad, &limits), Err(DecodeError::MalformedScalar));
     }
 }

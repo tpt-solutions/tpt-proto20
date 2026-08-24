@@ -17,7 +17,7 @@ pub mod wire;
 
 pub use error::{DecodeError, EncodeError};
 pub use limits::{DecoderLimits, UnknownFieldPolicy};
-pub use message::{Field, RawMessage, Value};
+pub use message::{split_len_delimited, Field, RawMessage, Value};
 pub use wire::{Tag, WireClass};
 
 /// Optional envelope wrapping a schema-identified payload (spec §9).

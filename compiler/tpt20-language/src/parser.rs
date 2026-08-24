@@ -306,11 +306,11 @@ impl Parser {
         })
     }
 
-    /// Parses a field: `id : [repeated] [map<K,V>] name [?] [@ann];`
+    /// Parses a field: `[(@ann)*] id : [repeated] [map<K,V>] name [?] (@ann)* ;`
     /// (name precedes type, matching the spec §6.1 example grammar).
-    /// Leading annotations are parsed by the caller and passed in; trailing
-    /// annotations are not consumed here so they attach to the next field.
-    /// Returns the field and an optional flag (unused externally).
+    /// Annotations may appear before the id or trailing after the presence
+    /// marker (spec §6.9, e.g. `1: email string? @max_len(254);`); both spellings
+    /// attach to this field.
     fn parse_field(&mut self, leading: Vec<Annotation>) -> Result<(Field, ()), ParseError> {
         let id_span = self.span();
         let id = self
@@ -352,6 +352,10 @@ impl Parser {
         } else {
             Presence::Implicit
         };
+
+        // Trailing annotations bind to this field (spec §6.9).
+        let mut annotations = leading;
+        annotations.extend(self.parse_annotations()?);
         self.expect(&Token::Semi)?;
 
         Ok((
@@ -360,7 +364,7 @@ impl Parser {
                 name: field_name,
                 label,
                 presence,
-                annotations: leading,
+                annotations,
                 span: id_span,
             },
             (),

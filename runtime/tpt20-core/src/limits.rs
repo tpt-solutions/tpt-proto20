@@ -40,6 +40,58 @@ impl Default for DecoderLimits {
     }
 }
 
+impl DecoderLimits {
+    /// Checks that `len` fits within `max_message_bytes`.
+    pub fn check_message_bytes(&self, len: usize) -> Result<(), crate::error::DecodeError> {
+        if len > self.max_message_bytes {
+            Err(crate::error::DecodeError::LimitExceeded {
+                limit: self.max_message_bytes,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Checks that `len` fits within `max_string_bytes` (spec §18.1).
+    pub fn check_string_bytes(&self, len: usize) -> Result<(), crate::error::DecodeError> {
+        if len > self.max_string_bytes {
+            Err(crate::error::DecodeError::LimitExceeded {
+                limit: self.max_string_bytes,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Bounds nesting depth for recursive (descriptor-driven or generated)
+    /// decoders (spec §18.4). `depth` starts at 1 for the outermost message.
+    pub fn check_depth(&self, depth: usize) -> Result<(), crate::error::DecodeError> {
+        if depth > self.max_depth {
+            Err(crate::error::DecodeError::DepthExceeded)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Checks that a repeated field holds at most `max_repeated_entries`.
+    pub fn check_repeated_entries(&self, count: usize) -> Result<(), crate::error::DecodeError> {
+        if count > self.max_repeated_entries {
+            Err(crate::error::DecodeError::RepeatedEntriesExceeded)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Checks that a map holds at most `max_map_entries`.
+    pub fn check_map_entries(&self, count: usize) -> Result<(), crate::error::DecodeError> {
+        if count > self.max_map_entries {
+            Err(crate::error::DecodeError::MapEntriesExceeded)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// Policy for handling unknown (unrecognized) fields during decode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnknownFieldPolicy {

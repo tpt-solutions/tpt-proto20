@@ -1,0 +1,17 @@
+[package]
+name = "tpt20-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "tpt20 schema compiler command-line interface"
+
+[[bin]]
+name = "tpt20"
+path = "src/main.rs"
+
+[dependencies]
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
+tpt20-codegen-rust = { path = "../../compiler/tpt20-codegen-rust" }

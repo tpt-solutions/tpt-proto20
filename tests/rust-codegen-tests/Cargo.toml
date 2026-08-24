@@ -1,0 +1,18 @@
+[package]
+name = "tpt20-codegen-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Compile-and-run tests for generated Rust code (todo Phase 5)"
+
+[dependencies]
+tpt20-core = { path = "../../runtime/tpt20-core" }
+tpt20-json = { path = "../../runtime/tpt20-json" }
+
+[build-dependencies]
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
+tpt20-codegen-rust = { path = "../../compiler/tpt20-codegen-rust" }

@@ -1,0 +1,51 @@
+package codegen.test.v1;
+
+enum Status {
+    UNKNOWN = 0;
+    ACTIVE = 1;
+    SUSPENDED = 2;
+}
+
+open enum Feature {
+    NONE = 0;
+    BETA = 1;
+}
+
+message Address {
+    1: street string;
+    2: city string?;
+}
+
+message Outer {
+    1: id int64;
+    2: name string;
+    3: email string?;
+    4: age int32? @range(0, 150);
+    5: username string @max_len(8);
+    6: repeated tags string;
+    7: repeated scores int64;
+    8: map<string, string> attrs;
+    9: map<int64, string> counts;
+    oneof contact {
+        10: contact_email string;
+        11: contact_addr Address;
+    }
+    12: status Status;
+    13: feature Feature;
+    14: home Address;
+    15: blob bytes?;
+    16: ratio float64;
+    17: repeated flags fixed32;
+    18: inner Child;
+    19: zigzag sint64;
+
+    message Child {
+        1: note string;
+        2: depth int32;
+        3: leaf Leaf;
+
+        message Leaf {
+            1: value bool;
+        }
+    }
+}

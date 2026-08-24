@@ -5,7 +5,11 @@ members = [
     "compiler/tpt20-ir",
     "compiler/tpt20-descriptor",
     "compiler/tpt20-compiler",
+    "compiler/tpt20-codegen-rust",
     "runtime/tpt20-core",
+    "runtime/tpt20-json",
+    "tools/tpt20-cli",
+    "tests/rust-codegen-tests",
 ]
 exclude = []
 

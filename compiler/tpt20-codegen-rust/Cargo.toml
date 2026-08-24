@@ -1,0 +1,15 @@
+[package]
+name = "tpt20-codegen-rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Rust code generator for tpt20 schemas (spec §12)"
+
+[dependencies]
+tpt20-ir = { path = "../tpt20-ir" }
+
+[dev-dependencies]
+tpt20-compiler = { path = "../tpt20-compiler" }

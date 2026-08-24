@@ -118,6 +118,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "tpt20-cli"
+version = "0.1.0"
+dependencies = [
+ "tpt20-codegen-rust",
+ "tpt20-compiler",
+]
+
+[[package]]
+name = "tpt20-codegen-rust"
+version = "0.1.0"
+dependencies = [
+ "tpt20-compiler",
+ "tpt20-ir",
+]
+
+[[package]]
+name = "tpt20-codegen-tests"
+version = "0.1.0"
+dependencies = [
+ "tpt20-codegen-rust",
+ "tpt20-compiler",
+ "tpt20-core",
+ "tpt20-json",
+]
+
+[[package]]
 name = "tpt20-compiler"
 version = "0.1.0"
 dependencies = [
@@ -153,6 +179,14 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "tpt20-json"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

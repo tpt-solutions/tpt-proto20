@@ -51,6 +51,21 @@ pub enum DecodeError {
     #[error("malformed fixed-width scalar")]
     MalformedScalar,
 
+    /// A map entry was missing its key or value sub-field.
+    #[error("malformed map entry (missing key or value)")]
+    MalformedMapEntry,
+
+    /// An enum wire value was rejected by a closed enum.
+    #[error("enum value {0} is not valid for a closed enum")]
+    InvalidEnumValue(i32),
+
+    /// A field arrived with a wire class that does not match the schema.
+    #[error("field {field_id} arrived with an unexpected wire class")]
+    WireClassMismatch {
+        /// The offending field id.
+        field_id: u32,
+    },
+
     /// Unknown fields were present and the policy is `Fail`.
     #[error("unknown field encountered (fail policy)")]
     UnknownFieldForbidden,
