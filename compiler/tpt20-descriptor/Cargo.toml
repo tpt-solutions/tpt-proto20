@@ -7,6 +7,8 @@ authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Descriptor model and serialization for tpt20 (spec §8)"
+keywords = ["tpt20", "descriptor", "reflection", "schema", "serialization"]
+categories = ["encoding", "serialization"]
 
 [dependencies]
 tpt20-ir = { path = "../tpt20-ir" }

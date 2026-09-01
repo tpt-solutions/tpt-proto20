@@ -48,12 +48,12 @@ message Value {
 
 /// A list of `Value` objects.
 message ListValue {
-    1: values repeated Value;
+     1: values repeated Value;
 }
 
 /// A set of field paths used to select a subset of fields on an object.
 message FieldMask {
-    1: paths repeated string;
+     1: paths repeated string;
 }
 
 /// A UUID, represented as a string.
@@ -95,7 +95,7 @@ message Pagination {
 message ErrorDetail {
     1: code string;
     2: message string;
-    3: details repeated Any;
+     3: details repeated Any;
 }
 
 // ---- Wrapper types ---------------------------------------------------------

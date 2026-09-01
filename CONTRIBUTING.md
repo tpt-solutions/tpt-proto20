@@ -2,9 +2,13 @@
 
 Thank you for your interest in contributing to `tpt-proto20`.
 
-This project is developed under a **clean-room** process and an
-**AI-assisted contribution policy**. Both are described below. By contributing,
-you agree to follow these policies.
+## Issues only
+
+This project does not accept pull requests. Please use GitHub Issues to report bugs, request features, or discuss changes.
+
+## Development policies
+
+Even though code contributions are not accepted via PR, any code changes made by maintainers follow these policies.
 
 ## 1. Clean-room policy (spec §25.1)
 

@@ -7,6 +7,8 @@ authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Observability primitives for tpt20: metrics, tracing, and structured logging (spec §19)"
+keywords = ["tpt20", "observability", "metrics", "tracing", "logging"]
+categories = ["development-tools"]
 
 [dependencies]
 

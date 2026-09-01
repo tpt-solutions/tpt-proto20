@@ -7,6 +7,9 @@ authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "gRPC compatibility adapter for tpt20 (spec §10.3)"
+keywords = ["tpt20", "grpc", "compatibility", "http2", "rpc"]
+categories = ["network-programming", "asynchronous"]
+
 
 [dependencies]
 thiserror.workspace = true

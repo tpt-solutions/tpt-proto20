@@ -7,6 +7,8 @@ authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "JSON representation support for tpt20 messages (spec §14.2)"
+keywords = ["tpt20", "json", "serialization", "text-format", "encoding", "decoding"]
+categories = ["encoding", "serialization"]
 
 [dependencies]
 serde_json = { workspace = true }

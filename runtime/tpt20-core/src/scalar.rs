@@ -5,7 +5,7 @@
 //! centralize zigzag, sign-extension, fixed-width, and UTF-8 validation rules.
 
 use crate::error::DecodeError;
-use crate::message::Value;
+use crate::message::{BorrowedValue, Value};
 use crate::varint::{decode_varint, decode_zigzag, encode_varint, encode_zigzag};
 
 /// The wire representation class a scalar type maps to.
@@ -232,6 +232,93 @@ pub fn decode_float64(value: &Value) -> Result<f64, DecodeError> {
 /// Encodes an `f64` as a fixed64 value.
 pub fn encode_float64(v: f64) -> Value {
     Value::Fixed64(v.to_bits())
+}
+
+/// Decodes a varint payload as a `u64` from a borrowed value.
+pub fn decode_uint_borrowed(value: &BorrowedValue) -> Result<u64, DecodeError> {
+    match value {
+        BorrowedValue::Varint(v) => Ok(*v),
+        _ => Err(DecodeError::Internal("expected varint")),
+    }
+}
+
+/// Decodes a zigzag-encoded varint payload as an `i64` from a borrowed value.
+pub fn decode_sint_borrowed(value: &BorrowedValue) -> Result<i64, DecodeError> {
+    match value {
+        BorrowedValue::Varint(v) => Ok(decode_zigzag(*v)),
+        _ => Err(DecodeError::Internal("expected varint")),
+    }
+}
+
+/// Decodes a sign-extended varint payload as an `i64` from a borrowed value.
+pub fn decode_signed_borrowed(value: &BorrowedValue) -> Result<i64, DecodeError> {
+    match value {
+        BorrowedValue::Varint(v) => Ok(decode_signed_from_u64(*v)),
+        _ => Err(DecodeError::Internal("expected varint")),
+    }
+}
+
+/// Decodes a fixed32 payload as a `u32` from a borrowed value.
+pub fn decode_fixed32_borrowed(value: &BorrowedValue) -> Result<u32, DecodeError> {
+    match value {
+        BorrowedValue::Fixed32(v) => Ok(*v),
+        _ => Err(DecodeError::Internal("expected fixed32")),
+    }
+}
+
+/// Decodes a fixed64 payload as a `u64` from a borrowed value.
+pub fn decode_fixed64_borrowed(value: &BorrowedValue) -> Result<u64, DecodeError> {
+    match value {
+        BorrowedValue::Fixed64(v) => Ok(*v),
+        _ => Err(DecodeError::Internal("expected fixed64")),
+    }
+}
+
+/// Decodes a float32 payload from a borrowed value.
+pub fn decode_float32_borrowed(value: &BorrowedValue) -> Result<f32, DecodeError> {
+    match value {
+        BorrowedValue::Fixed32(v) => Ok(f32::from_bits(*v)),
+        _ => Err(DecodeError::Internal("expected fixed32")),
+    }
+}
+
+/// Decodes a float64 payload from a borrowed value.
+pub fn decode_float64_borrowed(value: &BorrowedValue) -> Result<f64, DecodeError> {
+    match value {
+        BorrowedValue::Fixed64(v) => Ok(f64::from_bits(*v)),
+        _ => Err(DecodeError::Internal("expected fixed64")),
+    }
+}
+
+/// Decodes a length-delimited value as raw bytes from a borrowed value.
+pub fn decode_bytes_borrowed<'a>(value: &'a BorrowedValue<'a>) -> Result<&'a [u8], DecodeError> {
+    match value {
+        BorrowedValue::Len(b) => Ok(b),
+        _ => Err(DecodeError::Internal("expected length-delimited")),
+    }
+}
+
+/// Decodes a length-delimited value as a UTF-8 string from a borrowed value.
+pub fn decode_string_borrowed<'a>(value: &'a BorrowedValue<'a>) -> Result<&'a str, DecodeError> {
+    match value {
+        BorrowedValue::Len(b) => std::str::from_utf8(b).map_err(|_| DecodeError::InvalidUtf8),
+        _ => Err(DecodeError::Internal("expected length-delimited")),
+    }
+}
+
+/// Decodes a length-delimited value as a UTF-8 string, enforcing
+/// `max_string_bytes` (spec §18.1), from a borrowed value.
+pub fn decode_string_limited_borrowed<'a>(
+    value: &'a BorrowedValue<'a>,
+    limits: &crate::limits::DecoderLimits,
+) -> Result<&'a str, DecodeError> {
+    let s = decode_string_borrowed(value)?;
+    limits.check_string_bytes(s.len())?;
+    Ok(s)
+}
+
+fn decode_signed_from_u64(v: u64) -> i64 {
+    i64::from_le_bytes(v.to_le_bytes())
 }
 
 #[cfg(test)]

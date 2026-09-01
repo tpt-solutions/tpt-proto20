@@ -21,10 +21,10 @@ message Outer {
   3: email string?;
   4: age int64?;
   5: username string @max_len(128);
-  6: repeated tags string;
-  7: repeated scores int64;
-  8: map<string, string> attrs;
-  9: map<int64, string> counts;
+  6: tags repeated string;
+  7: scores repeated int64;
+  8: attrs map<string, string>;
+  9: counts map<int64, string>;
   oneof contact {
     10: email_addr string;
     11: phone string;
@@ -35,16 +35,16 @@ message Outer {
     INACTIVE = 1;
     SUSPENDED = 2;
   }
-  13: Status status;
+  13: status Status;
   open enum Feature {
     NONE = 0;
     BETA = 1;
   }
-  14: Feature feature;
-  15: Address home;
-  16: bytes blob;
-  17: float64 ratio;
-  18: repeated flags uint32;
-  19: Outer_Child inner;
-  20: sint64 zigzag;
+  14: feature Feature;
+  15: home Address;
+  16: blob bytes;
+  17: ratio float64;
+  18: flags repeated uint32;
+  19: inner Outer_Child;
+  20: zigzag sint64;
 }

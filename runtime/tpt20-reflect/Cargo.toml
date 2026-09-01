@@ -7,6 +7,8 @@ authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Descriptor-driven reflection for tpt20 schemas (spec §13)"
+keywords = ["tpt20", "reflection", "descriptor", "dynamic", "runtime"]
+categories = ["encoding"]
 
 [dependencies]
 tpt20-core = { path = "../tpt20-core" }

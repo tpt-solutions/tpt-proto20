@@ -7,6 +7,8 @@ authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Transport layer for tpt20 (spec §17, §18.6)"
+keywords = ["tpt20", "transport", "http2", "tls", "networking", "async"]
+categories = ["network-programming", "asynchronous"]
 
 [dependencies]
 thiserror.workspace = true

@@ -972,23 +972,29 @@ r#"        for (k, v) in &self.{fname} {{
                             assign
                         )
                     }
-                     TypeKind::Message => {
-                         let ty = if view {
-                             self.view_type(scope, &t.path)
-                         } else {
-                             self.owned_type(scope, &t.path)
-                         };
-                         let method = if view {
-                             turbo_call(&ty, "decode_inner")
-                         } else {
-                             format!("{ty}::decode_inner")
-                         };
-                         format!(
-  "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    {target}.{fname} = Some({method}(sub, limits, depth + 1)?);\n                }}\n",
-                             f.id,
-                             class_name(crate::WireClass::Len),
-                         )
-                     }
+                      TypeKind::Message => {
+                          let ty = if view {
+                              self.view_type(scope, &t.path)
+                          } else {
+                              self.owned_type(scope, &t.path)
+                          };
+                          let method = if view {
+                              turbo_call(&ty, "decode_inner")
+                          } else {
+                              format!("{ty}::decode_inner")
+                          };
+                          let bytes_dec = if view {
+                              "__scalar::decode_bytes_borrowed(&field.value)"
+                          } else {
+                              "__scalar::decode_bytes(&field.value)"
+                          };
+                          format!(
+   "                ({}, {}) => {{\n                    let sub = {bytes_dec}?;\n                    {target}.{fname} = Some({method}(sub, limits, depth + 1)?);\n                }}\n",
+                              f.id,
+                              class_name(crate::WireClass::Len),
+                              bytes_dec = bytes_dec,
+                          )
+                      }
                 }
             }
             FieldLabelIr::Repeated(t) => {
@@ -1074,22 +1080,28 @@ r#"        for (k, v) in &self.{fname} {{
                     )
                 }
             }
-              TypeKind::Message => {
-                  let ty = if view {
-                      self.view_type(scope, f.label.unwrap_type().path.as_slice())
-                  } else {
-                      self.owned_type(scope, f.label.unwrap_type().path.as_slice())
-                  };
-                  let method = if view {
-                      turbo_call(&ty, "decode_inner")
-                  } else {
-                      format!("{ty}::decode_inner")
-                  };
-                  format!(
-  "                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{fname}.push({method}(sub, limits, depth + 1)?);\n                }}\n",
-                      len = class_name(crate::WireClass::Len),
-                  )
-              }
+               TypeKind::Message => {
+                   let ty = if view {
+                       self.view_type(scope, f.label.unwrap_type().path.as_slice())
+                   } else {
+                       self.owned_type(scope, f.label.unwrap_type().path.as_slice())
+                   };
+                   let method = if view {
+                       turbo_call(&ty, "decode_inner")
+                   } else {
+                       format!("{ty}::decode_inner")
+                   };
+                   let bytes_dec = if view {
+                       "__scalar::decode_bytes_borrowed(&field.value)"
+                   } else {
+                       "__scalar::decode_bytes(&field.value)"
+                   };
+                   format!(
+   "                ({id}, {len}) => {{\n                    let sub = {bytes_dec}?;\n                    out_msg.{fname}.push({method}(sub, limits, depth + 1)?);\n                }}\n",
+                       len = class_name(crate::WireClass::Len),
+                       bytes_dec = bytes_dec,
+                   )
+               }
         }
     }
 
@@ -1145,8 +1157,14 @@ r#"        for (k, v) in &self.{fname} {{
                   } else {
                       format!("{ty}::decode_inner")
                   };
+                  let bytes_dec = if view {
+                      "__scalar::decode_bytes_borrowed(&ef.value)"
+                  } else {
+                      "__scalar::decode_bytes(&ef.value)"
+                  };
                   format!(
-                      "{method}(__scalar::decode_bytes(&ef.value)?, limits, depth + 1)?",
+                      "{method}({bytes_dec}, limits, depth + 1)?",
+                      bytes_dec = bytes_dec,
                   )
               }
         };
@@ -1157,7 +1175,7 @@ r#"        for (k, v) in &self.{fname} {{
         };
         format!(
             r#"                ({id}, {len}) => {{
-                     let entry_bytes = __scalar::decode_bytes(&field.value)?;
+                     let entry_bytes = __scalar::decode_bytes_borrowed(&field.value)?;
                      let entry = __core::RawMessage::decode(
                          entry_bytes,
                          limits,
@@ -1211,7 +1229,15 @@ r#"        for (k, v) in &self.{fname} {{
         let kind = self.resolve_ref(scope, &t.path).1;
         let oname = naming::field_ident(&o.name);
         let ty_name = if view {
-            format!("{}{}View<'a>", parent_flat, naming::pascal(&o.name))
+            let base = format!("{}{}View", parent_flat, naming::pascal(&o.name));
+            if base.contains('<') {
+                let idx = base.find('<').unwrap();
+                let name = &base[..idx];
+                let lt = &base[idx + 1..base.len() - 1];
+                format!("{name}::<{lt}>")
+            } else {
+                base
+            }
         } else {
             format!("{}{}", parent_flat, naming::pascal(&o.name))
         };
@@ -1253,10 +1279,16 @@ r#"        for (k, v) in &self.{fname} {{
                  } else {
                      format!("{mty}::decode_inner")
                  };
+                 let bytes_dec = if view {
+                     "__scalar::decode_bytes_borrowed(&field.value)"
+                 } else {
+                     "__scalar::decode_bytes(&field.value)"
+                 };
                  format!(
-  "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({method}(sub, limits, depth + 1)?));\n                }}\n",
+   "                ({}, {}) => {{\n                    let sub = {bytes_dec}?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({method}(sub, limits, depth + 1)?));\n                }}\n",
                      mf.id,
                      class_name(crate::WireClass::Len),
+                     bytes_dec = bytes_dec,
                  )
              }
         }
@@ -1268,9 +1300,10 @@ r#"        for (k, v) in &self.{fname} {{
         let lt = "<'a>";
         let mut s = String::new();
         s.push_str(&format!(
-            "\n/// Borrowed view over `{}` bytes (spec \u{a7}11.2): strings/bytes borrow,\n/// numerics copy. Unknown fields are dropped here (use owned decoding to\n/// preserve them).\n#[derive(Debug, Clone, PartialEq)]\npub struct {flat}{lt} {{\n",
+            "\n/// Borrowed view over `{}` bytes (spec §11.2): strings/bytes borrow,\n/// numerics copy. Unknown fields are dropped here (use owned decoding to\n/// preserve them).\n#[derive(Debug, Clone, PartialEq)]\npub struct {flat}{lt} {{\n",
             ctx.flat
         ));
+        s.push_str(&format!("    __raw: __core::BorrowedMessage{lt},\n"));
         for f in &msg.fields {
             let fname = naming::field_ident(&f.name);
             let ty = self.view_field_type(scope, f);
@@ -1317,15 +1350,16 @@ r#"        for (k, v) in &self.{fname} {{
         depth: usize,
     ) -> Result<Self, __core::DecodeError> {{
         limits.check_depth(depth)?;
-        let raw = __core::RawMessage::decode_filtered(
+        let raw = __core::BorrowedMessage::decode_borrowed_filtered(
             bytes,
             limits,
             __core::UnknownFieldPolicy::Discard,
             &|id| Self::KNOWN_IDS.contains(&id),
         )?;
         let mut out_msg = Self {{
+            __raw: raw,
 {inits}        }};
-        for field in &raw.fields {{
+        for field in &out_msg.__raw.fields {{
             match (field.field_id, field.wire_class) {{
 {arms}                _ => {{
                     return Err(__core::DecodeError::WireClassMismatch {{

@@ -322,29 +322,27 @@ impl Parser {
             return Err(ParseError::RequiredNotAllowed(self.span()));
         }
 
+        let field_name = self.expect_ident()?;
+
         let mut repeated = false;
         if self.eat(&Token::Repeated) {
             repeated = true;
         }
 
-        let (label, field_name) = if self.peek() == &Token::Map {
+        let label = if self.peek() == &Token::Map {
             self.bump();
             self.expect(&Token::AngleOpen)?;
             let key = self.parse_type()?;
             self.expect(&Token::Comma)?;
             let value = self.parse_type()?;
             self.expect(&Token::AngleClose)?;
-            let name = self.expect_ident()?;
-            (FieldLabel::Map { key, value }, name)
-        } else {
-            let field_name = self.expect_ident()?;
+            FieldLabel::Map { key, value }
+        } else if repeated {
             let ty = self.parse_type()?;
-            let label = if repeated {
-                FieldLabel::Repeated(ty)
-            } else {
-                FieldLabel::Singular(ty)
-            };
-            (label, field_name)
+            FieldLabel::Repeated(ty)
+        } else {
+            let ty = self.parse_type()?;
+            FieldLabel::Singular(ty)
         };
 
         let presence = if self.eat(&Token::Question) {

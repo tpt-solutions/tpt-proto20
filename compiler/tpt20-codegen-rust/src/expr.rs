@@ -41,9 +41,22 @@ pub fn dec_owned(scalar: &str, v: &str, l: &str) -> String {
 /// Same as [`dec_owned`] but borrows string/bytes payloads (view decoding).
 pub fn dec_view(scalar: &str, v: &str, l: &str) -> String {
     match scalar {
-        "string" => format!("__scalar::decode_string_limited({v}, {l})"),
-        "bytes" => format!("__scalar::decode_bytes({v})"),
-        other => dec_numeric(other, v, l),
+        "string" => format!("__scalar::decode_string_limited_borrowed({v}, {l})"),
+        "bytes" => format!("__scalar::decode_bytes_borrowed({v})"),
+        "bool" => format!("__scalar::decode_uint_borrowed({v}).map(|x| x != 0)"),
+        "int32" => format!("__scalar::decode_signed_borrowed({v}).map(|x| x as i32)"),
+        "int64" => format!("__scalar::decode_signed_borrowed({v})"),
+        "uint32" => format!("__scalar::decode_uint_borrowed({v}).map(|x| x as u32)"),
+        "uint64" => format!("__scalar::decode_uint_borrowed({v})"),
+        "sint32" => format!("__scalar::decode_sint_borrowed({v}).map(|x| x as i32)"),
+        "sint64" => format!("__scalar::decode_sint_borrowed({v})"),
+        "fixed32" => format!("__scalar::decode_fixed32_borrowed({v}).map(|x| x as u32)"),
+        "sfixed32" => format!("__scalar::decode_fixed32_borrowed({v}).map(|x| x as i32)"),
+        "fixed64" => format!("__scalar::decode_fixed64_borrowed({v})"),
+        "sfixed64" => format!("__scalar::decode_fixed64_borrowed({v}).map(|x| x as i64)"),
+        "float32" => format!("__scalar::decode_float32_borrowed({v})"),
+        "float64" => format!("__scalar::decode_float64_borrowed({v})"),
+        other => unreachable!("not a scalar: {other}"),
     }
 }
 

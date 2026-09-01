@@ -8,6 +8,8 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 description = "Compile-and-run tests for generated Rust code (todo Phase 5)"
+keywords = ["tpt20", "tests", "codegen", "testing"]
+categories = ["development-tools", "testing"]
 
 [dependencies]
 tpt20-core = { path = "../../runtime/tpt20-core" }

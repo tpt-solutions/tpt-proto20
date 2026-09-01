@@ -17,7 +17,7 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
 
-use generated::{Address, Feature, Outer, OuterContact, Status};
+use generated::{Address, Outer, OuterContact, Outer_Feature, Outer_Status};
 
 fn sample() -> Outer {
     Outer {
@@ -30,15 +30,15 @@ fn sample() -> Outer {
         scores: vec![1, -2, 300],
         attrs: [("k".to_string(), "v".to_string())].into_iter().collect(),
         counts: [(-7i64, "neg".to_string())].into_iter().collect(),
-        contact: Some(OuterContact::ContactEmail("x@y.z".into())),
-        status: Status::SUSPENDED,
-        feature: Feature::Unknown(77),
+        contact: Some(OuterContact::EmailAddr("x@y.z".into())),
+        status: Outer_Status::SUSPENDED,
+        feature: Outer_Feature::Unknown(77),
         home: Some(Address {
             street: "1 Way".into(),
             city: None,
             ..Default::default()
         }),
-        blob: Some(vec![0xff, 0x00, 0x7f]),
+        blob: vec![0xff, 0x00, 0x7f],
         ratio: -2.5,
         flags: vec![1, u32::MAX],
         inner: Some(generated::Outer_Child {
@@ -91,11 +91,11 @@ fn zigzag_and_fixed_scalars_roundtrip() {
 #[test]
 fn oneof_last_wins_on_wire() {
     let email_only = Outer {
-        contact: Some(OuterContact::ContactEmail("first".into())),
+        contact: Some(OuterContact::EmailAddr("first".into())),
         ..Default::default()
     };
     let addr_only = Outer {
-        contact: Some(OuterContact::ContactAddr(Address {
+        contact: Some(OuterContact::Addr(Address {
             street: "second".into(),
             city: None,
         })),
@@ -106,8 +106,8 @@ fn oneof_last_wins_on_wire() {
     wire.extend(addr_only.encode());
     let decoded = Outer::decode(&wire).unwrap();
     match decoded.contact {
-        Some(OuterContact::ContactAddr(a)) => assert_eq!(a.street, "second"),
-        other => panic!("expected ContactAddr after last-wins, got {other:?}"),
+        Some(OuterContact::Addr(a)) => assert_eq!(a.street, "second"),
+        other => panic!("expected Addr after last-wins, got {other:?}"),
     }
 }
 
@@ -140,13 +140,13 @@ fn canonical_output_is_order_independent() {
     let email_only = Outer {
         id: 1,
         name: "x".into(),
-        contact: Some(OuterContact::ContactEmail("e".into())),
+        contact: Some(OuterContact::EmailAddr("e".into())),
         ..Default::default()
     };
     let addr_only = Outer {
         id: 1,
         name: "x".into(),
-        contact: Some(OuterContact::ContactAddr(Address {
+        contact: Some(OuterContact::Addr(Address {
             street: String::new(),
             city: None,
         })),
@@ -208,8 +208,8 @@ fn open_enum_captures_unknown_closed_enum_rejects() {
     };
 
     let open = Outer::decode(&mk(99, 1)).unwrap();
-    assert_eq!(open.feature, Feature::Unknown(99));
-    assert_eq!(open.status, Status::ACTIVE);
+    assert_eq!(open.feature, Outer_Feature::Unknown(99));
+    assert_eq!(open.status, Outer_Status::ACTIVE);
 
     assert!(matches!(
         Outer::decode(&mk(1, 55)),
@@ -269,8 +269,8 @@ fn json_accepts_camelcase_and_number_enums() {
     let m = Outer::from_json(json).unwrap();
     assert_eq!(m.id, 12);
     assert_eq!(m.username, "bob");
-    assert_eq!(m.status, Status::SUSPENDED);
-    assert_eq!(m.feature, Feature::Unknown(9));
+    assert_eq!(m.status, Outer_Status::SUSPENDED);
+    assert_eq!(m.feature, Outer_Feature::Unknown(9));
 }
 
 #[test]
@@ -280,13 +280,13 @@ fn borrowed_view_decodes_without_owned_strings() {
     assert_eq!(view.id, -5);
     assert_eq!(view.name, "Ada");
     assert_eq!(view.email, Some("ada@example.com"));
-    assert_eq!(view.blob, Some(&[0xffu8, 0x00, 0x7f][..]));
+    assert_eq!(view.blob, &[0xffu8, 0x00, 0x7f][..]);
     assert_eq!(view.tags, vec!["a", "b"]);
     match &view.contact {
-        Some(generated::OuterContactView::ContactEmail(e)) => {
+        Some(generated::OuterContactView::EmailAddr(e)) => {
             assert_eq!(*e, "x@y.z")
         }
-        other => panic!("expected ContactEmail view, got {other:?}"),
+        other => panic!("expected EmailAddr view, got {other:?}"),
     }
     let child = view.inner.as_ref().unwrap();
     assert_eq!(child.note, "n");
@@ -332,7 +332,7 @@ fn builders_validate_annotations() {
         .name("b")
         .tags(["t1".to_string(), "t2".to_string()])
         .attrs([("k".to_string(), "v".to_string())])
-        .contact(OuterContact::ContactEmail("c@d.e".into()))
+        .contact(OuterContact::EmailAddr("c@d.e".into()))
         .build()
         .unwrap();
     assert_eq!(

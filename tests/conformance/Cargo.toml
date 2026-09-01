@@ -8,6 +8,8 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 description = "Integration tests for tpt20 conformance suite"
+keywords = ["tpt20", "tests", "conformance", "integration-testing"]
+categories = ["development-tools", "testing"]
 
 [lib]
 path = "src/lib.rs"

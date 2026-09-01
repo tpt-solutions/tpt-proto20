@@ -7,6 +7,8 @@ authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Native binary wire format and core runtime for tpt20"
+keywords = ["tpt20", "wire-format", "binary", "encoding", "decoding", "runtime", "serialization"]
+categories = ["encoding", "network-programming"]
 
 [dependencies]
 thiserror.workspace = true

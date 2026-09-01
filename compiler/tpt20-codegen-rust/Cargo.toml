@@ -7,6 +7,8 @@ authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Rust code generator for tpt20 schemas (spec §12)"
+keywords = ["tpt20", "codegen", "rust", "code-generation", "schema"]
+categories = ["development-tools", "compilers"]
 
 [dependencies]
 tpt20-ir = { path = "../tpt20-ir" }

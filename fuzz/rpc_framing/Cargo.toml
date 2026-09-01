@@ -7,6 +7,8 @@ authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Fuzz target for RPC framing"
+keywords = ["tpt20", "fuzzing", "testing", "security", "rpc-framing"]
+categories = ["development-tools", "testing"]
 
 [[bin]]
 name = "fuzz_target"
