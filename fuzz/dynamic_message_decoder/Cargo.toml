@@ -1,0 +1,21 @@
+[package]
+name = "dynamic-message-decoder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Fuzz target for dynamic message decoder"
+
+[[bin]]
+name = "fuzz_target"
+path = "fuzz_targets/fuzz_target.rs"
+
+[dependencies]
+tpt20-core = { path = "../../runtime/tpt20-core" }
+tpt20-reflect = { path = "../../runtime/tpt20-reflect" }
+tpt20-ir = { path = "../../compiler/tpt20-ir" }
+tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
+libfuzzer-sys = "0.4"
+arbitrary = "1.3"

@@ -14,7 +14,7 @@
 use std::fmt;
 
 /// Diagnostic severity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum Severity {
     /// A hard error that prevents compilation.
     Error,

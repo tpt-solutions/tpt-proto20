@@ -1,0 +1,18 @@
+[package]
+name = "binary-decoder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Fuzz target for binary decoder"
+
+[[bin]]
+name = "fuzz_target"
+path = "fuzz_targets/fuzz_target.rs"
+
+[dependencies]
+tpt20-core = { path = "../../runtime/tpt20-core" }
+libfuzzer-sys = "0.4"
+arbitrary = "1.3"

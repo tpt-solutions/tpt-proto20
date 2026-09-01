@@ -13,14 +13,13 @@
 //! - cleartext h2c for local development (explicit opt-in)
 
 use crate::error::TransportError;
-use crate::frame::{encode_frame, Frame, FrameFlags};
+use crate::frame::{Frame, FrameFlags, FramedMessage};
 use crate::metadata::Metadata;
 use crate::traits::{Call, StreamingType, StreamItem, Transport};
 use async_trait::async_trait;
 use futures::{Sink, Stream};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::sync::oneshot;
 
 #[cfg(feature = "http2")]
 use bytes::Bytes;
@@ -84,7 +83,7 @@ impl Transport for Http2Transport {
                     .await
                     .map_err(|e| TransportError::Tls(e.to_string()))?;
 
-                let (mut client, connection) = client::Builder::new()
+            let (client, connection) = client::Builder::new()
                     .handshake::<_, Bytes>(tls_stream)
                     .await
                     .map_err(|e| TransportError::Internal(e.to_string()))?;
@@ -114,16 +113,13 @@ impl Transport for Http2Transport {
                     .await
                     .map_err(|e| TransportError::Internal(e.to_string()))?;
 
-                let (trailers_tx, trailers_rx) = oneshot::channel();
                 let response_stream = Http2ClientResponseStream {
                     response,
-                    trailers_rx,
                 };
 
                 Ok(Call {
                     sink: Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(Box::new(Http2ClientSink {
                         send_stream,
-                        trailers_tx,
                     })),
                     stream: Pin::<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>::new(Box::new(response_stream)),
                 })
@@ -135,7 +131,7 @@ impl Transport for Http2Transport {
                 ))
             }
         } else {
-            let (mut client, connection) = client::Builder::new()
+            let (client, connection) = client::Builder::new()
                 .handshake::<_, Bytes>(tcp)
                 .await
                 .map_err(|e| TransportError::Internal(e.to_string()))?;
@@ -165,16 +161,13 @@ impl Transport for Http2Transport {
                 .await
                 .map_err(|e| TransportError::Internal(e.to_string()))?;
 
-            let (trailers_tx, trailers_rx) = oneshot::channel();
             let response_stream = Http2ClientResponseStream {
                 response,
-                trailers_rx,
             };
 
             Ok(Call {
                 sink: Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(Box::new(Http2ClientSink {
                     send_stream,
-                    trailers_tx,
                 })),
                 stream: Pin::<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>::new(Box::new(response_stream)),
             })
@@ -229,7 +222,6 @@ impl Http2Transport {
 #[cfg(feature = "http2")]
 struct Http2ClientSink {
     send_stream: h2::SendStream<Bytes>,
-    trailers_tx: oneshot::Sender<Result<Metadata, TransportError>>,
 }
 
 #[cfg(feature = "http2")]
@@ -237,12 +229,10 @@ impl Sink<Vec<u8>> for Http2ClientSink {
     type Error = TransportError;
 
     fn poll_ready(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.send_stream)
-            .poll_ready(cx)
-            .map_err(|e| TransportError::Internal(e.to_string()))
+        Poll::Ready(Ok(()))
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
@@ -253,30 +243,23 @@ impl Sink<Vec<u8>> for Http2ClientSink {
     }
 
     fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.send_stream)
-            .poll_capacity(cx)
-            .map(|_| Ok(()))
-            .map_err(|e| TransportError::Internal(e.to_string()))
+        Poll::Ready(Ok(()))
     }
 
     fn poll_close(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.send_stream)
-            .poll_capacity(cx)
-            .map(|_| Ok(()))
-            .map_err(|e| TransportError::Internal(e.to_string()))
+        Poll::Ready(Ok(()))
     }
 }
 
 #[cfg(feature = "http2")]
 struct Http2ClientResponseStream {
     response: Response<RecvStream>,
-    trailers_rx: oneshot::Receiver<Result<Metadata, TransportError>>,
 }
 
 #[cfg(feature = "http2")]
@@ -284,10 +267,10 @@ impl Stream for Http2ClientResponseStream {
     type Item = Result<StreamItem, TransportError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut body = self.response.body_mut();
-        match Pin::new(&mut body).poll_data(cx) {
+        let body = self.response.body_mut();
+        match Pin::new(body).poll_data(cx) {
             Poll::Ready(Some(Ok(bytes))) => {
-                let frame = Frame::decode(&bytes)
+                let (frame, _) = Frame::decode(&bytes)
                     .map_err(|e| TransportError::MalformedFrame(e.to_string()))?;
                 if frame.flags.is_compressed() {
                     return Poll::Ready(Some(Err(TransportError::Compression(
@@ -379,7 +362,7 @@ impl Http2Server {
     {
         while let Some(request_result) = server.accept().await {
             match request_result {
-                Ok((request, mut respond)) => {
+                Ok((request, _respond)) => {
                     let method = request.uri().path().trim_start_matches('/').to_string();
                     let metadata = request
                         .headers()
@@ -392,7 +375,7 @@ impl Http2Server {
                     let body = request.into_body();
                     let request_bytes = collect_body(body).await;
 
-                    let (response_tx, response_rx) = tokio::sync::mpsc::channel(32);
+                    let (response_tx, _response_rx) = tokio::sync::mpsc::channel(32);
                     let (trailers_tx, _trailers_rx) = tokio::sync::oneshot::channel();
 
                     let call = IncomingHttp2Call {
@@ -400,7 +383,7 @@ impl Http2Server {
                         metadata,
                         request: request_bytes,
                         response_tx,
-                        trailers_tx,
+                        trailers_tx: Some(trailers_tx),
                     };
 
                     let handler = handler.clone();
@@ -442,7 +425,7 @@ pub struct IncomingHttp2Call {
     /// Channel to send response frames.
     pub response_tx: tokio::sync::mpsc::Sender<Result<FramedMessage, TransportError>>,
     /// Channel to send trailing metadata.
-    pub trailers_tx: tokio::sync::oneshot::Sender<Result<Metadata, TransportError>>,
+    pub trailers_tx: Option<tokio::sync::oneshot::Sender<Result<Metadata, TransportError>>>,
 }
 
 impl IncomingHttp2Call {
@@ -460,7 +443,9 @@ impl IncomingHttp2Call {
 
     /// Sends trailing metadata to the client.
     pub async fn send_trailers(&mut self, trailers: Metadata) -> Result<(), TransportError> {
-        let _ = self.trailers_tx.send(Ok(trailers));
+        if let Some(tx) = self.trailers_tx.take() {
+            let _ = tx.send(Ok(trailers));
+        }
         Ok(())
     }
 }

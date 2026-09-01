@@ -27,9 +27,9 @@ pub mod traits;
 
 pub use endpoint::{Endpoint, TlsConfig};
 pub use error::TransportError;
-pub use frame::{decode_frame, encode_frame, Frame, FrameFlags};
+pub use frame::{decode_frame, encode_frame, Frame, FrameFlags, FramedMessage};
 #[cfg(feature = "http2")]
 pub use http2::{Http2Server, Http2Transport};
 pub use in_process::{InProcessServer, InProcessTransport};
 pub use metadata::Metadata;
-pub use traits::{Call, StreamingType, Transport};
+pub use traits::{Call, StreamingType, StreamItem, Transport};

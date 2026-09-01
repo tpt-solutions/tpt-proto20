@@ -15,6 +15,15 @@ members = [
     "compat/tpt20-compat-grpc",
     "tools/tpt20-cli",
     "tests/rust-codegen-tests",
+    "tests/conformance",
+    "fuzz/binary_decoder",
+    "fuzz/json_decoder",
+    "fuzz/text_parser",
+    "fuzz/schema_parser",
+    "fuzz/descriptor_decoder",
+    "fuzz/dynamic_message_decoder",
+    "fuzz/rpc_framing",
+    "fuzz/metadata_parsing",
 ]
 exclude = []
 

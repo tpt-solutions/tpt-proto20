@@ -1,0 +1,19 @@
+[package]
+name = "rpc-framing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Fuzz target for RPC framing"
+
+[[bin]]
+name = "fuzz_target"
+path = "fuzz_targets/fuzz_target.rs"
+
+[dependencies]
+tpt20-transport = { path = "../../runtime/tpt20-transport" }
+tpt20-compat-grpc = { path = "../../compat/tpt20-compat-grpc" }
+libfuzzer-sys = "0.4"
+arbitrary = "1.3"

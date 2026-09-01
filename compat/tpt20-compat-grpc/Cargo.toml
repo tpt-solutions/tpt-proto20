@@ -1,0 +1,34 @@
+[package]
+name = "tpt20-compat-grpc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "gRPC compatibility adapter for tpt20 (spec §10.3)"
+
+[dependencies]
+thiserror.workspace = true
+tpt20-rpc = { path = "../../runtime/tpt20-rpc" }
+tpt20-transport = { path = "../../runtime/tpt20-transport" }
+tpt20-ir = { path = "../../compiler/tpt20-ir", optional = true }
+tpt20-descriptor = { path = "../../compiler/tpt20-descriptor", optional = true }
+tpt20-core = { path = "../../runtime/tpt20-core" }
+bytes = "1"
+http = "1"
+futures = "0.3"
+async-trait = "0.1"
+base64 = "0.22"
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util", "macros"] }
+
+[features]
+default = []
+server = ["tpt20-transport/http2"]
+client = ["tpt20-transport/http2"]
+reflection = ["tpt20-ir", "tpt20-descriptor"]
+full = ["server", "client", "reflection"]
+

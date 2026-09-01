@@ -50,5 +50,5 @@ pub enum TransportError {
 
     /// An internal invariant was violated.
     #[error("internal error: {0}")]
-    Internal(&'static str),
+    Internal(String),
 }

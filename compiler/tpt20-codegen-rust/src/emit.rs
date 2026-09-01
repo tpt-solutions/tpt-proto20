@@ -1178,7 +1178,7 @@ r#"        for (k, v) in &self.{fname} {{
                      }}
                       match (k, v) {{
                           (Some(k), Some(v)) => {{
-                              {map_push_stmt}
+                              out_msg.{fname}.{map_push}({map_args});
                           }}
                           _ => return Err(__core::DecodeError::MalformedMapEntry),
                       }}
@@ -1191,11 +1191,8 @@ r#"        for (k, v) in &self.{fname} {{
             vt = vt,
             kclass = class_name(kinfo.class),
             vclass = class_name(vclass.unwrap_or(crate::WireClass::Len)),
-            map_push_stmt = if view {
-                "out_msg.{fname}.push((k, v));".to_string()
-            } else {
-                "out_msg.{fname}.insert(k, v);".to_string()
-            },
+            map_push = if view { "push" } else { "insert" },
+            map_args = if view { "(k, v)" } else { "k, v" },
         )
     }
 
@@ -1213,7 +1210,11 @@ r#"        for (k, v) in &self.{fname} {{
         let t = mf.label.unwrap_type();
         let kind = self.resolve_ref(scope, &t.path).1;
         let oname = naming::field_ident(&o.name);
-        let ty_name = format!("{}{}", parent_flat, naming::pascal(&o.name));
+        let ty_name = if view {
+            format!("{}{}View<'a>", parent_flat, naming::pascal(&o.name))
+        } else {
+            format!("{}{}", parent_flat, naming::pascal(&o.name))
+        };
         let variant = naming::sanitize_ident(&naming::pascal(&mf.name));
         match kind {
             TypeKind::Scalar(info) => {

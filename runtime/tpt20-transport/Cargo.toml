@@ -21,7 +21,7 @@ h2 = { version = "0.4", optional = true }
 [features]
 default = ["in_process"]
 in_process = []
-http2 = ["dep:h2"]
+http2 = ["dep:h2", "dep:http"]
 tls = ["http2"]
 rustls = ["tls", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pemfile"]
 quic = []

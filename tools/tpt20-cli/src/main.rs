@@ -284,10 +284,10 @@ enum GenBackend {
     /// Generate Rust code
     Rust {
         /// Input schema file
-        #[arg(short, long)]
+        #[arg(short, long = "in")]
         input: PathBuf,
         /// Output directory
-        #[arg(short, long, default_value = "src/generated")]
+        #[arg(short, long = "out", default_value = "src/generated")]
         output: PathBuf,
         /// Emit validated builders
         #[arg(long)]
@@ -562,14 +562,14 @@ fn format_schema(src: &str) -> String {
     out.trim().to_string() + "\n"
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum FmtToken {
     Newline,
     Indent,
     OpenBrace,
     CloseBrace,
     Semicolon,
-    Text(&'static str),
+    Text(String),
 }
 
 fn tokenize(src: &str) -> Vec<FmtToken> {
@@ -583,7 +583,7 @@ fn tokenize(src: &str) -> Vec<FmtToken> {
         match c {
             '\n' | '\r' => {
                 if !current.is_empty() {
-                    tokens.push(FmtToken::Text(current.trim()));
+                    tokens.push(FmtToken::Text(current.trim().to_string()));
                     current.clear();
                 }
                 tokens.push(FmtToken::Newline);
@@ -593,21 +593,21 @@ fn tokenize(src: &str) -> Vec<FmtToken> {
             }
             '{' => {
                 if !current.is_empty() {
-                    tokens.push(FmtToken::Text(current.trim()));
+                    tokens.push(FmtToken::Text(current.trim().to_string()));
                     current.clear();
                 }
                 tokens.push(FmtToken::OpenBrace);
             }
             '}' => {
                 if !current.is_empty() {
-                    tokens.push(FmtToken::Text(current.trim()));
+                    tokens.push(FmtToken::Text(current.trim().to_string()));
                     current.clear();
                 }
                 tokens.push(FmtToken::CloseBrace);
             }
             ';' => {
                 if !current.is_empty() {
-                    tokens.push(FmtToken::Text(current.trim()));
+                    tokens.push(FmtToken::Text(current.trim().to_string()));
                     current.clear();
                 }
                 tokens.push(FmtToken::Semicolon);
@@ -623,7 +623,7 @@ fn tokenize(src: &str) -> Vec<FmtToken> {
     }
 
     if !current.is_empty() {
-        tokens.push(FmtToken::Text(current.trim()));
+        tokens.push(FmtToken::Text(current.trim().to_string()));
     }
 
     tokens
@@ -665,7 +665,7 @@ fn cmd_lint(
     match format {
         OutputFormat::Json => {
             let serializable: Vec<LintDiag> = all_diags.iter().map(|d| LintDiag {
-                code: d.code.clone(),
+                code: d.code.to_string(),
                 message: d.message.clone(),
                 severity: format!("{:?}", d.severity),
                 file: d.file.clone(),

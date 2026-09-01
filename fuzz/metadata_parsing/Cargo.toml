@@ -1,0 +1,19 @@
+[package]
+name = "metadata-parsing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Fuzz target for metadata parsing"
+
+[[bin]]
+name = "fuzz_target"
+path = "fuzz_targets/fuzz_target.rs"
+
+[dependencies]
+tpt20-rpc = { path = "../../runtime/tpt20-rpc" }
+tpt20-compat-grpc = { path = "../../compat/tpt20-compat-grpc" }
+libfuzzer-sys = "0.4"
+arbitrary = "1.3"

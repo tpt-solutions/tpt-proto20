@@ -1,0 +1,20 @@
+[package]
+name = "json-decoder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Fuzz target for JSON decoder"
+
+[[bin]]
+name = "fuzz_target"
+path = "fuzz_targets/fuzz_target.rs"
+
+[dependencies]
+tpt20-core = { path = "../../runtime/tpt20-core" }
+tpt20-json = { path = "../../runtime/tpt20-json" }
+serde_json = "1.0"
+libfuzzer-sys = "0.4"
+arbitrary = "1.3"
