@@ -10,9 +10,9 @@ members = [
     "runtime/tpt20-reflect",
     "runtime/tpt20-json",
     "runtime/tpt20-stdlib",
-    "runtime/tpt20-rpc",
     "runtime/tpt20-transport",
     "compat/tpt20-compat-protobuf",
+    "compat/tpt20-compat-grpc",
     "tools/tpt20-cli",
     "tests/rust-codegen-tests",
 ]

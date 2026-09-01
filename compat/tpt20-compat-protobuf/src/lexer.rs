@@ -150,11 +150,23 @@ impl<'a> Lexer<'a> {
                         self.bump();
                         tokens.push(Token::new(TokenKind::Dot, start_span));
                     }
+                    b'[' => {
+                        self.bump();
+                        tokens.push(Token::new(TokenKind::LBracket, start_span));
+                    }
+                    b']' => {
+                        self.bump();
+                        tokens.push(Token::new(TokenKind::RBracket, start_span));
+                    }
                     b'"' | b'\'' => {
                         let s = self.lex_string(b)?;
                         tokens.push(Token::new(TokenKind::StringLit(s), start_span));
                     }
-                    _ if b.is_ascii_digit() || (b == b'-' && self.peek_at(1).is_some() && self.peek_at(1).unwrap().is_ascii_digit()) => {
+                    _ if b.is_ascii_digit()
+                        || (b == b'-'
+                            && self.peek_at(1).is_some()
+                            && self.peek_at(1).unwrap().is_ascii_digit()) =>
+                    {
                         let n = self.lex_number()?;
                         tokens.push(Token::new(n, start_span));
                     }
@@ -177,12 +189,12 @@ impl<'a> Lexer<'a> {
                             "rpc" => TokenKind::Rpc,
                             "returns" => TokenKind::Returns,
                             "stream" => TokenKind::Stream,
+                            "to" => TokenKind::To,
                             "optional" => TokenKind::Optional,
                             "repeated" => TokenKind::Repeated,
                             "required" => TokenKind::Required,
                             "default" => TokenKind::Default,
                             "max" => TokenKind::Max,
-                            "deprecated" => TokenKind::Deprecated,
                             "packed" => TokenKind::Packed,
                             "float" => TokenKind::Float,
                             "double" => TokenKind::Double,
@@ -306,7 +318,16 @@ impl<'a> Lexer<'a> {
             self.bump();
         }
         while let Some(b) = self.peek() {
-            if b.is_ascii_digit() || b.is_ascii_hexdigit() || b == b'x' || b == b'X' || b == b'.' || b == b'e' || b == b'E' || b == b'+' || b == b'-' {
+            if b.is_ascii_digit()
+                || b.is_ascii_hexdigit()
+                || b == b'x'
+                || b == b'X'
+                || b == b'.'
+                || b == b'e'
+                || b == b'E'
+                || b == b'+'
+                || b == b'-'
+            {
                 s.push(b as char);
                 self.bump();
             } else {

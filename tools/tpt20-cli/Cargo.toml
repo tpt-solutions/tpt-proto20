@@ -15,3 +15,25 @@ path = "src/main.rs"
 [dependencies]
 tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
 tpt20-codegen-rust = { path = "../../compiler/tpt20-codegen-rust" }
+tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
+tpt20-ir = { path = "../../compiler/tpt20-ir" }
+tpt20-language = { path = "../../compiler/tpt20-language" }
+tpt20-core = { path = "../../runtime/tpt20-core" }
+tpt20-json = { path = "../../runtime/tpt20-json" }
+tpt20-reflect = { path = "../../runtime/tpt20-reflect" }
+tpt20-rpc = { path = "../../runtime/tpt20-rpc" }
+tpt20-transport = { path = "../../runtime/tpt20-transport" }
+tpt20-stdlib = { path = "../../runtime/tpt20-stdlib" }
+tpt20-compat-protobuf = { path = "../../compat/tpt20-compat-protobuf" }
+
+clap = { version = "4.6", features = ["derive"] }
+toml = "0.8"
+base64 = "0.22"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+home = "0.5"
+glob = "0.3"
+regex = "1.10"
+hex = "0.4"
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }

@@ -86,14 +86,14 @@ mod tests {
     fn metadata_basic() {
         let mut m = Metadata::new();
         m.insert("key", "value");
-        assert_eq!(m.get("key"), Some(&["value"][..]));
+        assert_eq!(m.get("key"), Some(&["value".to_string()][..]));
     }
 
     #[test]
     fn metadata_lowercase() {
         let mut m = Metadata::new();
         m.insert("KEY", "value");
-        assert_eq!(m.get("key"), Some(&["value"][..]));
+        assert_eq!(m.get("key"), Some(&["value".to_string()][..]));
     }
 
     #[test]
@@ -101,6 +101,6 @@ mod tests {
         let mut m = Metadata::new();
         m.insert("key", "v1");
         m.insert("key", "v2");
-        assert_eq!(m.get("key"), Some(&["v1", "v2"][..]));
+        assert_eq!(m.get("key"), Some(&["v1".to_string(), "v2".to_string()][..]));
     }
 }

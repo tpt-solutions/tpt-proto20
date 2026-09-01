@@ -1,60 +1,29 @@
-use crate::status::Status;
-use thiserror::Error;
+//! Peer information for an RPC connection (spec §16.1).
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerInfo {
     pub addr: String,
-    pub tls_peer: Option<TlsPeerIdentity>,
+    pub port: u16,
+    pub identity: Option<String>,
 }
 
 impl PeerInfo {
-    pub fn new(addr: impl Into<String>) -> Self {
-        Self {
-            addr: addr.into(),
-            tls_peer: None,
-        }
+    pub fn new(addr: impl Into<String>, port: u16) -> Self {
+        Self { addr: addr.into(), port, identity: None }
     }
-
-    pub fn with_tls(mut self, tls_peer: TlsPeerIdentity) -> Self {
-        self.tls_peer = Some(tls_peer);
+    pub fn with_identity(mut self, identity: impl Into<String>) -> Self {
+        self.identity = Some(identity.into());
         self
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct TlsPeerIdentity {
-    pub subject: String,
-    pub issuer: String,
-    pub san: Vec<String>,
-}
-
-impl TlsPeerIdentity {
-    pub fn new(subject: impl Into<String>, issuer: impl Into<String>) -> Self {
-        Self {
-            subject: subject.into(),
-            issuer: issuer.into(),
-            san: Vec::new(),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn peer_info() {
+        let peer = PeerInfo::new("10.0.0.1", 8080).with_identity("client-1");
+        assert_eq!(peer.addr, "10.0.0.1");
+        assert_eq!(peer.port, 8080);
     }
-
-    pub fn with_san(mut self, san: Vec<String>) -> Self {
-        self.san = san;
-        self
-    }
-}
-
-pub trait PeerInspector {
-    fn inspect(&self, peer: &PeerInfo) -> Result<(), PeerInspectionError>;
-}
-
-#[derive(Debug, Error)]
-pub enum PeerInspectionError {
-    #[error("peer address not allowed: {0}")]
-    AddressNotAllowed(String),
-    #[error("TLS peer not authenticated")]
-    NotAuthenticated,
-    #[error("peer certificate invalid: {0}")]
-    InvalidCertificate(String),
-    #[error("peer not authorized")]
-    NotAuthorized,
 }

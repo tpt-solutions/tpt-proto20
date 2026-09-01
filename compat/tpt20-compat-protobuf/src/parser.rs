@@ -31,7 +31,9 @@ impl Parser {
     }
 
     fn bump(&mut self) -> TokenKind {
-        let t = self.tokens[self.pos.min(self.tokens.len() - 1)].kind.clone();
+        let t = self.tokens[self.pos.min(self.tokens.len() - 1)]
+            .kind
+            .clone();
         if self.pos < self.tokens.len() - 1 {
             self.pos += 1;
         }
@@ -188,18 +190,21 @@ impl Parser {
     }
 
     fn parse_qualified_ident(&mut self) -> Result<String, ProtoError> {
-        let mut ident = self.expect_ident()?;
-        while self.eat(&TokenKind::Dot) {
-            ident.push('.');
-            ident.push_str(&self.expect_ident()?);
+        if self.eat(&TokenKind::LParen) {
+            let ident = self.expect_ident()?;
+            self.expect(&TokenKind::RParen)?;
+            Ok(ident)
+        } else {
+            let mut ident = self.expect_ident()?;
+            while self.eat(&TokenKind::Dot) {
+                ident.push('.');
+                ident.push_str(&self.expect_ident()?);
+            }
+            Ok(ident)
         }
-        Ok(ident)
     }
 
-    fn parse_message(
-        &mut self,
-        out: &mut Vec<Message>,
-    ) -> Result<(), ProtoError> {
+    fn parse_message(&mut self, out: &mut Vec<Message>) -> Result<(), ProtoError> {
         self.expect(&TokenKind::Message)?;
         let name = self.expect_ident()?;
         self.expect(&TokenKind::LBrace)?;
@@ -228,6 +233,7 @@ impl Parser {
                     self.parse_field(&mut msg.fields, false)?
                 }
                 _ if is_type_keyword(self.peek()) => self.parse_field(&mut msg.fields, false)?,
+                TokenKind::Ident(_) => self.parse_field(&mut msg.fields, false)?,
                 other => {
                     return Err(ProtoError::UnexpectedToken {
                         found: format!("{:?}", other),
@@ -253,7 +259,7 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_field(&mut self, out: &mut Vec<Field>, in_oneof: bool) -> Result<(), ProtoError> {
+    fn parse_field(&mut self, out: &mut Vec<Field>, _in_oneof: bool) -> Result<(), ProtoError> {
         let label = match self.peek() {
             TokenKind::Repeated => {
                 self.bump();
@@ -267,13 +273,7 @@ impl Parser {
                 self.bump();
                 FieldLabel::Required
             }
-            _ => {
-                if in_oneof {
-                    FieldLabel::Singular
-                } else {
-                    FieldLabel::Singular
-                }
-            }
+            _ => FieldLabel::Singular,
         };
 
         let field_type = self.parse_type()?;
@@ -304,21 +304,66 @@ impl Parser {
 
     fn parse_type(&mut self) -> Result<ProtoType, ProtoError> {
         match self.peek() {
-            TokenKind::Double => { self.bump(); Ok(ProtoType::Double) }
-            TokenKind::Float => { self.bump(); Ok(ProtoType::Float) }
-            TokenKind::Int32 => { self.bump(); Ok(ProtoType::Int32) }
-            TokenKind::Int64 => { self.bump(); Ok(ProtoType::Int64) }
-            TokenKind::UInt32 => { self.bump(); Ok(ProtoType::UInt32) }
-            TokenKind::UInt64 => { self.bump(); Ok(ProtoType::UInt64) }
-            TokenKind::SInt32 => { self.bump(); Ok(ProtoType::SInt32) }
-            TokenKind::SInt64 => { self.bump(); Ok(ProtoType::SInt64) }
-            TokenKind::Fixed32 => { self.bump(); Ok(ProtoType::Fixed32) }
-            TokenKind::Fixed64 => { self.bump(); Ok(ProtoType::Fixed64) }
-            TokenKind::SFixed32 => { self.bump(); Ok(ProtoType::SFixed32) }
-            TokenKind::SFixed64 => { self.bump(); Ok(ProtoType::SFixed64) }
-            TokenKind::Bool => { self.bump(); Ok(ProtoType::Bool) }
-            TokenKind::String => { self.bump(); Ok(ProtoType::String) }
-            TokenKind::Bytes => { self.bump(); Ok(ProtoType::Bytes) }
+            TokenKind::Double => {
+                self.bump();
+                Ok(ProtoType::Double)
+            }
+            TokenKind::Float => {
+                self.bump();
+                Ok(ProtoType::Float)
+            }
+            TokenKind::Int32 => {
+                self.bump();
+                Ok(ProtoType::Int32)
+            }
+            TokenKind::Int64 => {
+                self.bump();
+                Ok(ProtoType::Int64)
+            }
+            TokenKind::UInt32 => {
+                self.bump();
+                Ok(ProtoType::UInt32)
+            }
+            TokenKind::UInt64 => {
+                self.bump();
+                Ok(ProtoType::UInt64)
+            }
+            TokenKind::SInt32 => {
+                self.bump();
+                Ok(ProtoType::SInt32)
+            }
+            TokenKind::SInt64 => {
+                self.bump();
+                Ok(ProtoType::SInt64)
+            }
+            TokenKind::Fixed32 => {
+                self.bump();
+                Ok(ProtoType::Fixed32)
+            }
+            TokenKind::Fixed64 => {
+                self.bump();
+                Ok(ProtoType::Fixed64)
+            }
+            TokenKind::SFixed32 => {
+                self.bump();
+                Ok(ProtoType::SFixed32)
+            }
+            TokenKind::SFixed64 => {
+                self.bump();
+                Ok(ProtoType::SFixed64)
+            }
+            TokenKind::Bool => {
+                self.bump();
+                Ok(ProtoType::Bool)
+            }
+            TokenKind::String => {
+                self.bump();
+                Ok(ProtoType::String)
+            }
+            TokenKind::Bytes => {
+                self.bump();
+                Ok(ProtoType::Bytes)
+            }
             TokenKind::Map => {
                 self.bump();
                 self.expect(&TokenKind::LAngle)?;
@@ -326,7 +371,10 @@ impl Parser {
                 self.expect(&TokenKind::Comma)?;
                 let value = self.parse_type()?;
                 self.expect(&TokenKind::RAngle)?;
-                Ok(ProtoType::Map { key: Box::new(key), value: Box::new(value) })
+                Ok(ProtoType::Map {
+                    key: Box::new(key),
+                    value: Box::new(value),
+                })
             }
             TokenKind::Ident(_) => {
                 let mut path = vec![self.expect_ident()?];
@@ -347,12 +395,12 @@ impl Parser {
 
     fn parse_field_options(&mut self) -> Result<Vec<OptionDecl>, ProtoError> {
         let mut opts = Vec::new();
-        if self.eat(&TokenKind::LBrace) {
+        if self.eat(&TokenKind::LBracket) {
             loop {
-                if self.eat(&TokenKind::RBrace) {
+                if self.eat(&TokenKind::RBracket) {
                     break;
                 }
-                self.expect(&TokenKind::Option)?;
+                self.eat(&TokenKind::Option);
                 let name = self.parse_qualified_ident()?;
                 self.expect(&TokenKind::Eq)?;
                 let value = self.parse_option_value()?;
@@ -360,13 +408,11 @@ impl Parser {
                 if self.eat(&TokenKind::Comma) {
                     // optional trailing comma
                 }
-                if *self.peek() == TokenKind::RBrace {
+                if *self.peek() == TokenKind::RBracket {
                     break;
                 }
-                if *self.peek() == TokenKind::Semi {
-                    self.bump();
-                }
             }
+            self.expect(&TokenKind::RBracket)?;
         }
         Ok(opts)
     }
@@ -388,7 +434,10 @@ impl Parser {
                     self.expect(&TokenKind::Eq)?;
                     let value = self.parse_option_value()?;
                     self.expect(&TokenKind::Semi)?;
-                    oneof.options.push(OptionDecl { name: opt_name, value });
+                    oneof.options.push(OptionDecl {
+                        name: opt_name,
+                        value,
+                    });
                 }
                 _ if is_type_keyword(self.peek()) => {
                     self.parse_field(&mut oneof.fields, true)?;
@@ -411,10 +460,7 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_enum(
-        &mut self,
-        out: &mut Vec<Enum>,
-    ) -> Result<(), ProtoError> {
+    fn parse_enum(&mut self, out: &mut Vec<Enum>) -> Result<(), ProtoError> {
         self.expect(&TokenKind::Enum)?;
         let name = self.expect_ident()?;
         self.expect(&TokenKind::LBrace)?;
@@ -432,7 +478,10 @@ impl Parser {
                     self.expect(&TokenKind::Eq)?;
                     let value = self.parse_option_value()?;
                     self.expect(&TokenKind::Semi)?;
-                    en.options.push(OptionDecl { name: opt_name, value });
+                    en.options.push(OptionDecl {
+                        name: opt_name,
+                        value,
+                    });
                 }
                 TokenKind::Reserved => {
                     let r = self.parse_reserved()?;
@@ -479,13 +528,13 @@ impl Parser {
             self.expect(&TokenKind::Rpc)?;
             let method_name = self.expect_ident()?;
             self.expect(&TokenKind::LParen)?;
-            let request_type = self.parse_qualified_ident()?;
             let request_streaming = self.eat(&TokenKind::Stream);
+            let request_type = self.parse_qualified_ident()?;
             self.expect(&TokenKind::RParen)?;
             self.expect(&TokenKind::Returns)?;
             self.expect(&TokenKind::LParen)?;
-            let response_type = self.parse_qualified_ident()?;
             let response_streaming = self.eat(&TokenKind::Stream);
+            let response_type = self.parse_qualified_ident()?;
             self.expect(&TokenKind::RParen)?;
             let options = self.parse_field_options()?;
             self.expect(&TokenKind::Semi)?;
@@ -526,7 +575,10 @@ impl Parser {
             names: Vec::new(),
         };
         loop {
-            if *self.peek() == TokenKind::Semi || *self.peek() == TokenKind::RBrace || *self.peek() == TokenKind::Eof {
+            if *self.peek() == TokenKind::Semi
+                || *self.peek() == TokenKind::RBrace
+                || *self.peek() == TokenKind::Eof
+            {
                 break;
             }
             if let TokenKind::IntLit(n) = self.peek() {

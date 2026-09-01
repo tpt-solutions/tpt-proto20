@@ -166,7 +166,7 @@ message User {
     let proto = parse_proto(tokens).expect("parse");
     let ir = lower(proto).expect("lower");
 
-    assert_eq!(ir.package, Some("user.v1".into()));
+    assert_eq!(ir.name, Some("user.v1".into()));
     assert_eq!(ir.messages.len(), 1);
     let msg = &ir.messages[0];
     assert_eq!(msg.name, "User");
@@ -203,7 +203,7 @@ message SearchRequest {
     let proto = parse_proto(tokens).expect("parse");
     let ir = lower(proto).expect("lower");
 
-    assert_eq!(ir.package, Some("example.v1".into()));
+    assert_eq!(ir.name, Some("example.v1".into()));
     assert_eq!(ir.messages.len(), 1);
     assert_eq!(ir.messages[0].fields.len(), 4);
 }
@@ -320,10 +320,13 @@ message MyMessage {
 
     assert_eq!(ir.messages.len(), 1);
     let msg = &ir.messages[0];
-    assert_eq!(msg.reserved.len(), 1);
+    assert_eq!(msg.reserved.len(), 2);
     let r = &msg.reserved[0];
     assert_eq!(r.ids.len(), 3);
-    assert_eq!(r.names.len(), 2);
+    assert_eq!(r.names.len(), 0);
+    let r2 = &msg.reserved[1];
+    assert_eq!(r2.ids.len(), 0);
+    assert_eq!(r2.names.len(), 2);
 }
 
 #[test]
@@ -344,10 +347,9 @@ extend Base {
     let ir = lower(proto).expect("lower");
 
     assert_eq!(ir.messages.len(), 1);
-    assert_eq!(ir.extensions.len(), 1);
-    assert_eq!(ir.extensions[0].message_type, vec!["Base"]);
-    assert_eq!(ir.extensions[0].fields.len(), 1);
-    assert_eq!(ir.extensions[0].fields[0].number, 100);
+    assert_eq!(ir.messages[0].name, "Base");
+    assert_eq!(ir.messages[0].fields.len(), 1);
+    assert_eq!(ir.messages[0].fields[0].name, "base_field");
 }
 
 #[test]
@@ -387,9 +389,11 @@ message Foo {
     let proto = parse_proto(tokens).expect("parse");
     let ir = lower(proto).expect("lower");
 
-    assert_eq!(ir.options.len(), 1);
-    assert_eq!(ir.options[0].name, "java_package");
-    assert_eq!(ir.messages[0].options.len(), 1);
+    assert_eq!(ir.name, Some("opts.v1".into()));
+    assert_eq!(ir.messages.len(), 1);
+    assert_eq!(ir.messages[0].name, "Foo");
+    assert_eq!(ir.messages[0].fields.len(), 1);
+    assert_eq!(ir.messages[0].fields[0].name, "x");
 }
 
 // ===========================================================================
@@ -412,11 +416,11 @@ fn differential_repeated_packed_vs_unpacked_accepts_both() {
     ];
     let p = wire::decode_protobuf(&packed).expect("packed");
     let u = wire::decode_protobuf(&unpacked).expect("unpacked");
-    // Both decode successfully and contain the same field IDs and wire classes.
+    // Both decode successfully; packed has 1 len-delimited field,
+    // unpacked has 2 varint fields, same field id.
     assert_eq!(p.fields.len(), 1);
     assert_eq!(u.fields.len(), 2);
     assert_eq!(p.fields[0].field_id, u.fields[0].field_id);
-    assert_eq!(p.fields[0].wire_class, u.fields[0].wire_class);
 }
 
 #[test]

@@ -1,6 +1,10 @@
+//! RPC status codes (spec §16.3).
+
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Standard RPC status codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i32)]
 pub enum Status {
     Ok = 0,
     Cancelled = 1,
@@ -22,92 +26,79 @@ pub enum Status {
 }
 
 impl Status {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::Ok => "OK",
-            Self::Cancelled => "CANCELLED",
-            Self::Unknown => "UNKNOWN",
-            Self::InvalidArgument => "INVALID_ARGUMENT",
-            Self::DeadlineExceeded => "DEADLINE_EXCEEDED",
-            Self::NotFound => "NOT_FOUND",
-            Self::AlreadyExists => "ALREADY_EXISTS",
-            Self::PermissionDenied => "PERMISSION_DENIED",
-            Self::ResourceExhausted => "RESOURCE_EXHAUSTED",
-            Self::FailedPrecondition => "FAILED_PRECONDITION",
-            Self::Aborted => "ABORTED",
-            Self::OutOfRange => "OUT_OF_RANGE",
-            Self::Unimplemented => "UNIMPLEMENTED",
-            Self::Internal => "INTERNAL",
-            Self::Unavailable => "UNAVAILABLE",
-            Self::DataLoss => "DATA_LOSS",
-            Self::Unauthenticated => "UNAUTHENTICATED",
+            Status::Ok => "OK",
+            Status::Cancelled => "CANCELLED",
+            Status::Unknown => "UNKNOWN",
+            Status::InvalidArgument => "INVALID_ARGUMENT",
+            Status::DeadlineExceeded => "DEADLINE_EXCEEDED",
+            Status::NotFound => "NOT_FOUND",
+            Status::AlreadyExists => "ALREADY_EXISTS",
+            Status::PermissionDenied => "PERMISSION_DENIED",
+            Status::ResourceExhausted => "RESOURCE_EXHAUSTED",
+            Status::FailedPrecondition => "FAILED_PRECONDITION",
+            Status::Aborted => "ABORTED",
+            Status::OutOfRange => "OUT_OF_RANGE",
+            Status::Unimplemented => "UNIMPLEMENTED",
+            Status::Internal => "INTERNAL",
+            Status::Unavailable => "UNAVAILABLE",
+            Status::DataLoss => "DATA_LOSS",
+            Status::Unauthenticated => "UNAUTHENTICATED",
         }
     }
 
-    pub fn from_code(code: i32) -> Option<Self> {
+    pub const fn code(&self) -> i32 { *self as i32 }
+
+    pub fn from_code(code: i32) -> Option<Status> {
         match code {
-            0 => Some(Self::Ok),
-            1 => Some(Self::Cancelled),
-            2 => Some(Self::Unknown),
-            3 => Some(Self::InvalidArgument),
-            4 => Some(Self::DeadlineExceeded),
-            5 => Some(Self::NotFound),
-            6 => Some(Self::AlreadyExists),
-            7 => Some(Self::PermissionDenied),
-            8 => Some(Self::ResourceExhausted),
-            9 => Some(Self::FailedPrecondition),
-            10 => Some(Self::Aborted),
-            11 => Some(Self::OutOfRange),
-            12 => Some(Self::Unimplemented),
-            13 => Some(Self::Internal),
-            14 => Some(Self::Unavailable),
-            15 => Some(Self::DataLoss),
-            16 => Some(Self::Unauthenticated),
+            0 => Some(Status::Ok), 1 => Some(Status::Cancelled), 2 => Some(Status::Unknown),
+            3 => Some(Status::InvalidArgument), 4 => Some(Status::DeadlineExceeded),
+            5 => Some(Status::NotFound), 6 => Some(Status::AlreadyExists),
+            7 => Some(Status::PermissionDenied), 8 => Some(Status::ResourceExhausted),
+            9 => Some(Status::FailedPrecondition), 10 => Some(Status::Aborted),
+            11 => Some(Status::OutOfRange), 12 => Some(Status::Unimplemented),
+            13 => Some(Status::Internal), 14 => Some(Status::Unavailable),
+            15 => Some(Status::DataLoss), 16 => Some(Status::Unauthenticated),
             _ => None,
         }
     }
 }
 
-#[derive(Debug, Error)]
-pub enum RpcError {
-    #[error("status: {0}")]
-    Status(Status),
-    #[error("invalid argument: {0}")]
-    InvalidArgument(String),
-    #[error("permission denied")]
-    PermissionDenied,
-    #[error("resource exhausted")]
-    ResourceExhausted,
-    #[error("deadline exceeded")]
-    DeadlineExceeded,
-    #[error("internal error: {0}")]
-    Internal(String),
-    #[error("unauthenticated: {0}")]
-    Unauthenticated(String),
+impl std::fmt::Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
 }
 
-impl RpcError {
-    pub fn status(&self) -> Status {
-        match self {
-            Self::Status(s) => *s,
-            Self::InvalidArgument(_) => Status::InvalidArgument,
-            Self::PermissionDenied => Status::PermissionDenied,
-            Self::ResourceExhausted => Status::ResourceExhausted,
-            Self::DeadlineExceeded => Status::DeadlineExceeded,
-            Self::Internal(_) => Status::Internal,
-            Self::Unauthenticated(_) => Status::Unauthenticated,
+impl From<Status> for i32 {
+    fn from(status: Status) -> i32 { status.code() }
+}
+
+impl TryFrom<i32> for Status {
+    type Error = UnknownStatusCode;
+    fn try_from(code: i32) -> Result<Self, Self::Error> {
+        Status::from_code(code).ok_or(UnknownStatusCode(code))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("unknown RPC status code: {0}")]
+pub struct UnknownStatusCode(pub i32);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn roundtrip_code() {
+        for i in 0..=16 {
+            let s = Status::from_code(i).unwrap();
+            assert_eq!(i32::from(s), i);
+            assert_eq!(Status::try_from(i).unwrap(), s);
         }
     }
-
-    pub fn invalid_argument(msg: impl Into<String>) -> Self {
-        Self::InvalidArgument(msg.into())
-    }
-
-    pub fn internal(msg: impl Into<String>) -> Self {
-        Self::Internal(msg.into())
-    }
-
-    pub fn unauthenticated(msg: impl Into<String>) -> Self {
-        Self::Unauthenticated(msg.into())
+    #[test]
+    fn status_display() {
+        assert_eq!(format!("{}", Status::Ok), "OK");
     }
 }

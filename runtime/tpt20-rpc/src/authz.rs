@@ -1,7 +1,5 @@
 use crate::context::RpcContext;
-use crate::metadata::Metadata;
-use crate::peer::PeerInfo;
-use crate::status::{RpcError, Status};
+use crate::error::RpcError;
 use thiserror::Error;
 
 pub trait Authorizer {
@@ -31,9 +29,8 @@ impl RoleBasedAuthorizer {
 impl Authorizer for RoleBasedAuthorizer {
     fn authorize(&self, ctx: &RpcContext, _method: &str) -> Result<(), AuthzError> {
         let roles = ctx
-            .metadata
-            .get_first("x-role")
-            .and_then(|v| std::str::from_utf8(v).ok())
+            .metadata()
+            .get_first_text("x-role")
             .map(|s| s.split(',').collect::<Vec<_>>())
             .unwrap_or_default();
 
@@ -77,7 +74,7 @@ impl AclAuthorizer {
 impl Authorizer for AclAuthorizer {
     fn authorize(&self, ctx: &RpcContext, method: &str) -> Result<(), AuthzError> {
         let peer = ctx
-            .peer
+            .peer()
             .as_ref()
             .map(|p| p.addr.as_str())
             .unwrap_or("unknown");
@@ -89,9 +86,8 @@ impl Authorizer for AclAuthorizer {
                         return Ok(());
                     }
                     let roles = ctx
-                        .metadata
-                        .get_first("x-role")
-                        .and_then(|v| std::str::from_utf8(v).ok())
+                        .metadata()
+                        .get_first_text("x-role")
                         .map(|s| s.split(',').collect::<Vec<_>>())
                         .unwrap_or_default();
                     for role in &rule.allowed_roles {
@@ -122,9 +118,13 @@ pub enum AuthzError {
 impl From<AuthzError> for RpcError {
     fn from(e: AuthzError) -> Self {
         match e {
-            AuthzError::MethodNotAllowed | AuthzError::PeerNotAllowed(_) => RpcError::PermissionDenied,
-            AuthzError::RoleNotAllowed => RpcError::PermissionDenied,
-            AuthzError::Failed(_) => RpcError::Internal(e.to_string()),
+            AuthzError::MethodNotAllowed | AuthzError::PeerNotAllowed(_) => {
+                RpcError::permission_denied(e.to_string()).finish()
+            }
+            AuthzError::RoleNotAllowed => {
+                RpcError::permission_denied(e.to_string()).finish()
+            }
+            AuthzError::Failed(_) => RpcError::internal(e.to_string()).finish(),
         }
     }
 }

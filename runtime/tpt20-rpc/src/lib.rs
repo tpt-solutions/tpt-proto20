@@ -27,7 +27,7 @@ pub mod status;
 pub mod stream;
 pub mod trace;
 
-pub use auth::{AuthContext, AuthError, AuthzError, Authenticator, Authorizer};
+pub use auth::{AuthContext, AuthError, Authenticator, Authorizer, AllowAllAuthorizer, DenyAllAuthorizer, AclAuthorizer, RoleBasedAuthorizer, MetadataAuthenticator, TokenAuthenticator, AuthzError};
 pub use cancellation::CancellationToken;
 pub use compression::CompressionAlgorithm;
 pub use context::RpcContext;
@@ -44,7 +44,6 @@ pub use trace::TraceContext;
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn basic_context_creation() {
         let ctx = RpcContext::new();

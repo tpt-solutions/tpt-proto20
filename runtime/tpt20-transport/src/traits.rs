@@ -26,29 +26,24 @@ pub enum StreamItem {
     /// A message payload.
     Message(Vec<u8>),
     /// Trailers carrying final status and trailing metadata.
-    Trailers(Metadata),
+    Trailer(Metadata),
 }
 
-/// A boxed stream of response items, suitable for dynamic dispatch.
-pub type BoxedStream =
-    Pin<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>;
-
-/// A boxed sink for sending request messages, suitable for dynamic dispatch.
-pub type BoxedSink =
-    Pin<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>;
-
 /// A single RPC call, providing a sink for requests and a stream for responses.
-#[derive(Debug)]
 pub struct Call {
     /// Sink for sending request messages. Close with `Sink::close` when done.
-    pub sink: BoxedSink,
+    pub sink: Pin<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>,
     /// Stream of response messages and trailers.
-    pub stream: BoxedStream,
+    pub stream:
+        Pin<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>,
 }
 
 impl Call {
     /// Creates a new call from a sink and stream.
-    pub fn new(sink: BoxedSink, stream: BoxedStream) -> Self {
+    pub fn new(
+        sink: Pin<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>,
+        stream: Pin<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>,
+    ) -> Self {
         Call { sink, stream }
     }
 }

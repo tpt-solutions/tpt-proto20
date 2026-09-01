@@ -119,12 +119,7 @@ impl<'a> Emitter<'a> {
             return expr::view_rust_type(path[0].as_str()).to_string();
         }
         let base = self.resolve_ref(scope, path).0;
-        let needs_lt = self.type_needs_lifetime(scope, path);
-        if needs_lt {
-            format!("{base}View<'a>")
-        } else {
-            format!("{base}View")
-        }
+        format!("{base}View<'a>")
     }
 
     fn type_needs_lifetime(&self, scope: &[String], path: &[String]) -> bool {
@@ -142,31 +137,23 @@ impl<'a> Emitter<'a> {
         if path.is_empty() {
             return None;
         }
-        if let Some(msg) = self.pkg.messages.iter().find(|m| m.name == path[0]) {
-            if path.len() == 1 {
-                return Some(msg);
-            }
-            return self.find_nested_ir(&msg.messages, &path[1..]);
+        if let Some((flat, _)) = self.model.resolve(scope, path) {
+            return self.find_by_flat_name(&self.pkg.messages, flat);
         }
         None
     }
 
-    fn find_nested_ir(
-        &self,
-        messages: &[ir::MessageIr],
-        path: &[String],
-    ) -> Option<&'a ir::MessageIr> {
-        if path.is_empty() {
-            return None;
-        }
-        if let Some(msg) = messages.iter().find(|m| m.name == path[0]) {
-            if path.len() == 1 {
-                return Some(msg);
+    fn find_by_flat_name(&self, messages: &'a [ir::MessageIr], flat: &str) -> Option<&'a ir::MessageIr> {
+        for m in messages {
+            let self_flat = naming::flat_type_name(&[], &m.name);
+            if self_flat == flat {
+                return Some(m);
             }
-            self.find_nested_ir(&msg.messages, &path[1..])
-        } else {
-            None
+            if let Some(nested) = self.find_by_flat_name(&m.messages, flat) {
+                return Some(nested);
+            }
         }
+        None
     }
 
     fn header(&mut self) {
@@ -1189,22 +1176,26 @@ r#"        for (k, v) in &self.{fname} {{
                              _ => {{}}
                          }}
                      }}
-                     match (k, v) {{
-                         (Some(k), Some(v)) => {{
-                             out_msg.{fname}.{map_push}((k, v));
-                         }}
-                         _ => return Err(__core::DecodeError::MalformedMapEntry),
-                     }}
-                     limits.check_map_entries(out_msg.{fname}.len())?;
-                 }}
-"#,
+                      match (k, v) {{
+                          (Some(k), Some(v)) => {{
+                              {map_push_stmt}
+                          }}
+                          _ => return Err(__core::DecodeError::MalformedMapEntry),
+                      }}
+                      limits.check_map_entries(out_msg.{fname}.len())?;
+                  }}
+                "#,
             id = f.id,
             len = class_name(crate::WireClass::Len),
             kt = kt,
             vt = vt,
             kclass = class_name(kinfo.class),
             vclass = class_name(vclass.unwrap_or(crate::WireClass::Len)),
-            map_push = if view { "push" } else { "insert" },
+            map_push_stmt = if view {
+                "out_msg.{fname}.push((k, v));".to_string()
+            } else {
+                "out_msg.{fname}.insert(k, v);".to_string()
+            },
         )
     }
 
@@ -1273,8 +1264,7 @@ r#"        for (k, v) in &self.{fname} {{
     /// Emits the borrowed view struct and its decoder.
     fn emit_view(&mut self, scope: &[String], msg: &ir::MessageIr, ctx: &MsgCtx) {
         let flat = format!("{}View", ctx.flat);
-        let needs_lifetime = self.message_needs_lifetime(msg);
-        let lt = if needs_lifetime { "<'a>" } else { "" };
+        let lt = "<'a>";
         let mut s = String::new();
         s.push_str(&format!(
             "\n/// Borrowed view over `{}` bytes (spec \u{a7}11.2): strings/bytes borrow,\n/// numerics copy. Unknown fields are dropped here (use owned decoding to\n/// preserve them).\n#[derive(Debug, Clone, PartialEq)]\npub struct {flat}{lt} {{\n",
@@ -1315,7 +1305,7 @@ r#"        for (k, v) in &self.{fname} {{
             .map(|i| i.to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        let bytes_lt = if needs_lifetime { "'a" } else { "" };
+        let bytes_lt = "'a";
         s.push_str(&format!(
             r#"impl{lt} {flat}{lt} {{
     const KNOWN_IDS: &'static [u32] = &[{known}];
@@ -1395,7 +1385,7 @@ r#"        for (k, v) in &self.{fname} {{
             }
             ir::FieldLabelIr::Map { key, value } => format!(
                 "Vec<({}, {})>",
-                self.owned_type(scope, &key.path),
+                self.view_type(scope, &key.path),
                 self.view_type(scope, &value.path)
             ),
         }
@@ -1412,26 +1402,26 @@ r#"        for (k, v) in &self.{fname} {{
                         && matches!(t.path[0].as_str(), "string" | "bytes")
                     {
                         match f.presence {
-                            ir::Presence::Explicit => "None",
+                            ir::Presence::Explicit => String::from("None"),
                             ir::Presence::Implicit => {
                                 if t.path[0] == "string" {
-                                    "\"\""
+                                    String::from("\"\"")
                                 } else {
-                                    "&[][..]"
+                                    String::from("&[][..]")
                                 }
                             }
                         }
                     } else if self.resolve_ref(scope, &t.path).1 == TypeKind::Message
                         || f.presence == ir::Presence::Explicit
                     {
-                        "None"
+                        String::from("None")
                     } else if let TypeKind::Enum { .. } = self.resolve_ref(scope, &t.path).1 {
                         format!("{}::default()", self.owned_type(scope, &t.path))
                     } else {
-                        scalar_zero(t.path[0].as_str())
+                        scalar_zero(t.path[0].as_str()).to_string()
                     }
                 }
-                ir::FieldLabelIr::Repeated(_) | ir::FieldLabelIr::Map { .. } => "Vec::new()",
+                ir::FieldLabelIr::Repeated(_) | ir::FieldLabelIr::Map { .. } => String::from("Vec::new()"),
             };
             out.push_str(&format!("                {}: {},\n", fname, init));
         }
@@ -1842,7 +1832,7 @@ fn key_to_string(key_scalar: &str, k: &str) -> String {
 /// JSON string -> map key parse expression (`Result<K, JsonError>` on `ks`).
 fn key_from_string(key_scalar: &str) -> String {
     match key_scalar {
-        "string" => "Ok(ks.clone())".to_string(),
+        "string" => "Ok::<String, __json::JsonError>(ks.clone())".to_string(),
         "bool" => "ks.parse::<bool>().map_err(|_| __json::JsonError::TypeMismatch { expected: \"bool\" })".to_string(),
         "uint64" | "fixed64" => "ks.parse::<u64>().map_err(|_| __json::JsonError::TypeMismatch { expected: \"uint64\" })".to_string(),
         "uint32" | "fixed32" => "ks.parse::<u32>().map_err(|_| __json::JsonError::TypeMismatch { expected: \"uint32\" })".to_string(),
@@ -1949,7 +1939,8 @@ pub(crate) fn turbo_call(ty: &str, method: &str) -> String {
     if let Some(idx) = ty.find('<') {
         let base = &ty[..idx];
         let lt = &ty[idx..];
-        format!("{base}::<{lt}>::{method}")
+        let lt_inner = &lt[1..lt.len() - 1];
+        format!("{base}::<{lt_inner}>::{method}")
     } else {
         format!("{ty}::{method}")
     }

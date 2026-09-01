@@ -36,7 +36,7 @@ impl Severity {
 }
 
 /// A single compiler diagnostic.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Diagnostic {
     /// Severity of the diagnostic.
     pub severity: Severity,

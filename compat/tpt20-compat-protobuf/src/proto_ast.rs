@@ -3,8 +3,6 @@
 //! This is separate from the tpt20 schema AST; lowering converts this into
 //! `tpt20_ir::PackageIr`.
 
-use crate::error::WireError;
-
 // ---------------------------------------------------------------------------
 // Tokens
 // ---------------------------------------------------------------------------
@@ -47,7 +45,6 @@ pub enum TokenKind {
     Required,
     Default,
     Max,
-    Deprecated,
     Packed,
     Float,
     Double,
@@ -81,6 +78,8 @@ pub enum TokenKind {
     Lt,
     Gt,
     To,
+    LBracket,
+    RBracket,
 
     // Literals
     Ident(String),
@@ -194,9 +193,16 @@ pub enum ProtoType {
     Bool,
     String,
     Bytes,
-    Message { name: Vec<String> },
-    Enum { name: Vec<String> },
-    Map { key: Box<ProtoType>, value: Box<ProtoType> },
+    Message {
+        name: Vec<String>,
+    },
+    Enum {
+        name: Vec<String>,
+    },
+    Map {
+        key: Box<ProtoType>,
+        value: Box<ProtoType>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

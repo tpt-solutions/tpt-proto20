@@ -47,7 +47,7 @@ use thiserror::Error;
 // pulling the codegen crate into the runtime).
 // ---------------------------------------------------------------------------
 
-const SCALAR_NAMES: &[&str] = &[
+const _SCALAR_NAMES: &[&str] = &[
     "bool",
     "int32",
     "int64",
@@ -702,7 +702,7 @@ fn known_field_ids(message: &ir::MessageIr) -> Vec<u32> {
     ids
 }
 
-fn field_label_type_path(label: &ir::FieldLabelIr) -> Cow<[String]> {
+fn field_label_type_path(label: &ir::FieldLabelIr) -> Cow<'_, [String]> {
     match label {
         ir::FieldLabelIr::Singular(t) => Cow::Borrowed(&t.path),
         ir::FieldLabelIr::Repeated(t) => Cow::Borrowed(&t.path),
@@ -710,8 +710,8 @@ fn field_label_type_path(label: &ir::FieldLabelIr) -> Cow<[String]> {
     }
 }
 
-fn is_scalar_path(path: &[String]) -> bool {
-    path.len() == 1 && path.first().map_or(false, |p| SCALAR_NAMES.contains(&p.as_str()))
+fn _is_scalar_path(path: &[String]) -> bool {
+    path.len() == 1 && path.first().map_or(false, |p| _SCALAR_NAMES.contains(&p.as_str()))
 }
 
 fn interpret_value<'a>(

@@ -3,7 +3,6 @@
 //! An [`Endpoint`] describes how to connect to or listen on a transport.
 
 use crate::metadata::Metadata;
-use crate::TransportError;
 
 /// TLS configuration for a transport endpoint.
 #[derive(Debug, Clone)]

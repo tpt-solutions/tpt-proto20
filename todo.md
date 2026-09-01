@@ -362,38 +362,38 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 10 — RPC System (`tpt20-rpc`, spec §16)
 
-- [ ] `RpcContext` struct
-  - [ ] `deadline: Deadline`
-  - [ ] `cancellation: CancellationToken`
-  - [ ] `metadata: Metadata`
-  - [ ] `trace: TraceContext`
-  - [ ] `peer: Option<PeerInfo>`
-  - [ ] `extensions: Extensions`
-  - [ ] `ctx.is_expired()`
-  - [ ] `ctx.remaining_time()`
-  - [ ] `ctx.metadata()`
-  - [ ] `ctx.trace()`
-- [ ] Unary call support
-- [ ] Server-streaming support (`ServerStreamSink<T>`), backpressure-aware
-- [ ] Client-streaming support (`ClientStreamSource<T>`), backpressure-aware
-- [ ] Bidirectional-streaming support (`BidiStream<T>`), backpressure-aware
-- [ ] Status codes: `OK`, `CANCELLED`, `UNKNOWN`, `INVALID_ARGUMENT`, `DEADLINE_EXCEEDED`,
+- [x] `RpcContext` struct
+  - [x] `deadline: Deadline`
+  - [x] `cancellation: CancellationToken`
+  - [x] `metadata: Metadata`
+  - [x] `trace: TraceContext`
+  - [x] `peer: Option<PeerInfo>`
+  - [x] `extensions: Extensions`
+  - [x] `ctx.is_expired()`
+  - [x] `ctx.remaining_time()`
+  - [x] `ctx.metadata()`
+  - [x] `ctx.trace()`
+- [x] Unary call support
+- [x] Server-streaming support (`ServerStreamSink<T>`), backpressure-aware
+- [x] Client-streaming support (`ClientStreamSource<T>`), backpressure-aware
+- [x] Bidirectional-streaming support (`BidiStream<T>`), backpressure-aware
+- [x] Status codes: `OK`, `CANCELLED`, `UNKNOWN`, `INVALID_ARGUMENT`, `DEADLINE_EXCEEDED`,
       `NOT_FOUND`, `ALREADY_EXISTS`, `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`,
       `FAILED_PRECONDITION`, `ABORTED`, `OUT_OF_RANGE`, `UNIMPLEMENTED`, `INTERNAL`,
       `UNAVAILABLE`, `DATA_LOSS`, `UNAUTHENTICATED`
-- [ ] Rich error details
-  - [ ] `RpcError::invalid_argument(...).with_details(...)` style API
-  - [ ] Compatibility with descriptor-based dynamic decoding of error details
-- [ ] Metadata handling
-  - [ ] Lowercase metadata keys
-  - [ ] Binary metadata standard suffix convention
-  - [ ] Metadata size limit enforcement
-  - [ ] Reserved metadata key protection
-- [ ] Compression support
-- [ ] Authentication hooks
-- [ ] Authorization hooks
-- [ ] Retry support
-- [ ] Backpressure support end-to-end
+- [x] Rich error details
+  - [x] `RpcError::invalid_argument(...).with_details(...)` style API
+  - [x] Compatibility with descriptor-based dynamic decoding of error details
+- [x] Metadata handling
+  - [x] Lowercase metadata keys
+  - [x] Binary metadata standard suffix convention
+  - [x] Metadata size limit enforcement
+  - [x] Reserved metadata key protection
+- [x] Compression support
+- [x] Authentication hooks
+- [x] Authorization hooks
+- [x] Retry support
+- [x] Backpressure support end-to-end
 
 ---
 
@@ -462,15 +462,15 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 13 — RPC Security Hardening (`tpt20-rpc` / `tpt20-transport`, spec §18.6)
 
-- [ ] TLS support
-- [ ] mTLS support
-- [ ] Token authentication
-- [ ] Metadata-based authentication
-- [ ] Authorization middleware
-- [ ] Peer inspection
-- [ ] Rate-limiting hooks
-- [ ] Request limits
-- [ ] Deadline enforcement at the transport/RPC boundary
+- [x] TLS support
+- [x] mTLS support
+- [x] Token authentication
+- [x] Metadata-based authentication
+- [x] Authorization middleware
+- [x] Peer inspection
+- [x] Rate-limiting hooks
+- [x] Request limits
+- [x] Deadline enforcement at the transport/RPC boundary
 
 ---
 

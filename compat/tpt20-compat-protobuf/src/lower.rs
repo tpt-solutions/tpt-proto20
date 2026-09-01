@@ -4,8 +4,6 @@
 //! neutral tpt20 IR so that imported `.proto` schemas can participate in the
 //! full compiler pipeline.
 
-use std::collections::HashMap;
-
 use tpt20_ir as ir;
 
 use crate::proto_ast::*;
@@ -13,43 +11,28 @@ use crate::ProtoError;
 
 /// Lowers a parsed `.proto` file into a `PackageIr`.
 pub fn lower(proto: ProtoFile) -> Result<ir::PackageIr, ProtoError> {
-    let mut ctx = LowerCtx::new(proto);
-    let mut pkg = ir::PackageIr::default();
+    let mut pkg = ir::PackageIr {
+        name: proto.package.clone(),
+        imports: proto.imports.iter().map(|i| i.path.clone()).collect(),
+        ..Default::default()
+    };
 
-    pkg.name = ctx.proto.package.clone();
-    pkg.imports = ctx.proto.imports.iter().map(|i| i.path.clone()).collect();
-
-    for msg in &ctx.proto.messages {
-        pkg.messages.push(lower_message(msg.clone(), &mut ctx, "")?);
+    for msg in proto.messages {
+        pkg.messages.push(lower_message(msg, "")?);
     }
-    for en in &ctx.proto.enums {
-        pkg.enums.push(lower_enum(en.clone(), &mut ctx, "")?);
+    for en in proto.enums {
+        pkg.enums.push(lower_enum(en, "")?);
     }
-    for svc in &ctx.proto.services {
-        pkg.services.push(lower_service(svc.clone(), &mut ctx)?);
+    for svc in proto.services {
+        pkg.services.push(lower_service(svc)?);
     }
-    pkg.reserved = ctx.proto.reserved.iter().map(lower_reserved).collect();
+    pkg.reserved = proto.reserved.into_iter().map(lower_reserved).collect();
 
     Ok(pkg)
 }
 
-struct LowerCtx {
-    proto: ProtoFile,
-    type_map: HashMap<String, ir::TypeRefIr>,
-}
-
-impl LowerCtx {
-    fn new(proto: ProtoFile) -> Self {
-        LowerCtx {
-            proto,
-            type_map: HashMap::new(),
-        }
-    }
-}
-
 fn lower_message(
     msg: crate::proto_ast::Message,
-    ctx: &mut LowerCtx,
     parent_prefix: &str,
 ) -> Result<ir::MessageIr, ProtoError> {
     let full_name = if parent_prefix.is_empty() {
@@ -72,10 +55,18 @@ fn lower_message(
 
     for field in msg.fields {
         let label = match field.label {
-            FieldLabel::Singular => ir::FieldLabelIr::Singular(lower_type(field.field_type, ctx, &full_name)?),
-            FieldLabel::Repeated => ir::FieldLabelIr::Repeated(lower_type(field.field_type, ctx, &full_name)?),
-            FieldLabel::Optional => ir::FieldLabelIr::Singular(lower_type(field.field_type, ctx, &full_name)?),
-            FieldLabel::Required => ir::FieldLabelIr::Singular(lower_type(field.field_type, ctx, &full_name)?),
+            FieldLabel::Singular => {
+                ir::FieldLabelIr::Singular(lower_type(field.field_type, &full_name)?)
+            }
+            FieldLabel::Repeated => {
+                ir::FieldLabelIr::Repeated(lower_type(field.field_type, &full_name)?)
+            }
+            FieldLabel::Optional => {
+                ir::FieldLabelIr::Singular(lower_type(field.field_type, &full_name)?)
+            }
+            FieldLabel::Required => {
+                ir::FieldLabelIr::Singular(lower_type(field.field_type, &full_name)?)
+            }
         };
         let presence = match field.label {
             FieldLabel::Required | FieldLabel::Optional => ir::Presence::Explicit,
@@ -100,10 +91,18 @@ fn lower_message(
         };
         for field in oneof.fields {
             let label = match field.label {
-                FieldLabel::Singular => ir::FieldLabelIr::Singular(lower_type(field.field_type, ctx, &full_name)?),
-                FieldLabel::Repeated => ir::FieldLabelIr::Repeated(lower_type(field.field_type, ctx, &full_name)?),
-                FieldLabel::Optional => ir::FieldLabelIr::Singular(lower_type(field.field_type, ctx, &full_name)?),
-                FieldLabel::Required => ir::FieldLabelIr::Singular(lower_type(field.field_type, ctx, &full_name)?),
+                FieldLabel::Singular => {
+                    ir::FieldLabelIr::Singular(lower_type(field.field_type, &full_name)?)
+                }
+                FieldLabel::Repeated => {
+                    ir::FieldLabelIr::Repeated(lower_type(field.field_type, &full_name)?)
+                }
+                FieldLabel::Optional => {
+                    ir::FieldLabelIr::Singular(lower_type(field.field_type, &full_name)?)
+                }
+                FieldLabel::Required => {
+                    ir::FieldLabelIr::Singular(lower_type(field.field_type, &full_name)?)
+                }
             };
             let presence = match field.label {
                 FieldLabel::Required | FieldLabel::Optional => ir::Presence::Explicit,
@@ -123,36 +122,64 @@ fn lower_message(
 
     let child_prefix = format!("{}.{}", parent_prefix, msg_name);
     for child_msg in msg.messages {
-        ir_msg.messages.push(lower_message(child_msg, ctx, &child_prefix)?);
+        ir_msg
+            .messages
+            .push(lower_message(child_msg, &child_prefix)?);
     }
     for en in msg.enums {
-        ir_msg.enums.push(lower_enum(en, ctx, &child_prefix)?);
+        ir_msg.enums.push(lower_enum(en, &child_prefix)?);
     }
 
     Ok(ir_msg)
 }
 
-fn lower_type(
-    t: ProtoType,
-    ctx: &mut LowerCtx,
-    current_scope: &str,
-) -> Result<ir::TypeRefIr, ProtoError> {
+fn lower_type(t: ProtoType, current_scope: &str) -> Result<ir::TypeRefIr, ProtoError> {
     match t {
-        ProtoType::Double => Ok(ir::TypeRefIr { path: vec!["double".into()] }),
-        ProtoType::Float => Ok(ir::TypeRefIr { path: vec!["float".into()] }),
-        ProtoType::Int32 => Ok(ir::TypeRefIr { path: vec!["int32".into()] }),
-        ProtoType::Int64 => Ok(ir::TypeRefIr { path: vec!["int64".into()] }),
-        ProtoType::UInt32 => Ok(ir::TypeRefIr { path: vec!["uint32".into()] }),
-        ProtoType::UInt64 => Ok(ir::TypeRefIr { path: vec!["uint64".into()] }),
-        ProtoType::SInt32 => Ok(ir::TypeRefIr { path: vec!["sint32".into()] }),
-        ProtoType::SInt64 => Ok(ir::TypeRefIr { path: vec!["sint64".into()] }),
-        ProtoType::Fixed32 => Ok(ir::TypeRefIr { path: vec!["fixed32".into()] }),
-        ProtoType::Fixed64 => Ok(ir::TypeRefIr { path: vec!["fixed64".into()] }),
-        ProtoType::SFixed32 => Ok(ir::TypeRefIr { path: vec!["sfixed32".into()] }),
-        ProtoType::SFixed64 => Ok(ir::TypeRefIr { path: vec!["sfixed64".into()] }),
-        ProtoType::Bool => Ok(ir::TypeRefIr { path: vec!["bool".into()] }),
-        ProtoType::String => Ok(ir::TypeRefIr { path: vec!["string".into()] }),
-        ProtoType::Bytes => Ok(ir::TypeRefIr { path: vec!["bytes".into()] }),
+        ProtoType::Double => Ok(ir::TypeRefIr {
+            path: vec!["double".into()],
+        }),
+        ProtoType::Float => Ok(ir::TypeRefIr {
+            path: vec!["float".into()],
+        }),
+        ProtoType::Int32 => Ok(ir::TypeRefIr {
+            path: vec!["int32".into()],
+        }),
+        ProtoType::Int64 => Ok(ir::TypeRefIr {
+            path: vec!["int64".into()],
+        }),
+        ProtoType::UInt32 => Ok(ir::TypeRefIr {
+            path: vec!["uint32".into()],
+        }),
+        ProtoType::UInt64 => Ok(ir::TypeRefIr {
+            path: vec!["uint64".into()],
+        }),
+        ProtoType::SInt32 => Ok(ir::TypeRefIr {
+            path: vec!["sint32".into()],
+        }),
+        ProtoType::SInt64 => Ok(ir::TypeRefIr {
+            path: vec!["sint64".into()],
+        }),
+        ProtoType::Fixed32 => Ok(ir::TypeRefIr {
+            path: vec!["fixed32".into()],
+        }),
+        ProtoType::Fixed64 => Ok(ir::TypeRefIr {
+            path: vec!["fixed64".into()],
+        }),
+        ProtoType::SFixed32 => Ok(ir::TypeRefIr {
+            path: vec!["sfixed32".into()],
+        }),
+        ProtoType::SFixed64 => Ok(ir::TypeRefIr {
+            path: vec!["sfixed64".into()],
+        }),
+        ProtoType::Bool => Ok(ir::TypeRefIr {
+            path: vec!["bool".into()],
+        }),
+        ProtoType::String => Ok(ir::TypeRefIr {
+            path: vec!["string".into()],
+        }),
+        ProtoType::Bytes => Ok(ir::TypeRefIr {
+            path: vec!["bytes".into()],
+        }),
         ProtoType::Message { name } => {
             let full = if name.len() == 1 && !name[0].contains('.') {
                 if !current_scope.is_empty() {
@@ -163,7 +190,9 @@ fn lower_type(
             } else {
                 name.join(".")
             };
-            Ok(ir::TypeRefIr { path: full.split('.').map(|s| s.to_string()).collect() })
+            Ok(ir::TypeRefIr {
+                path: full.split('.').map(|s| s.to_string()).collect(),
+            })
         }
         ProtoType::Enum { name } => {
             let full = if name.len() == 1 && !name[0].contains('.') {
@@ -175,23 +204,25 @@ fn lower_type(
             } else {
                 name.join(".")
             };
-            Ok(ir::TypeRefIr { path: full.split('.').map(|s| s.to_string()).collect() })
+            Ok(ir::TypeRefIr {
+                path: full.split('.').map(|s| s.to_string()).collect(),
+            })
         }
         ProtoType::Map { key, value } => {
-            let key_path = lower_type(*key, ctx, current_scope)?.path;
-            let val_path = lower_type(*value, ctx, current_scope)?.path;
+            let key_path = lower_type(*key, current_scope)?.path;
+            let val_path = lower_type(*value, current_scope)?.path;
             Ok(ir::TypeRefIr {
-                path: vec![format!("map<{},{}>", key_path.join("."), val_path.join("."))],
+                path: vec![format!(
+                    "map<{},{}>",
+                    key_path.join("."),
+                    val_path.join(".")
+                )],
             })
         }
     }
 }
 
-fn lower_enum(
-    en: crate::proto_ast::Enum,
-    _ctx: &mut LowerCtx,
-    _parent_prefix: &str,
-) -> Result<ir::EnumIr, ProtoError> {
+fn lower_enum(en: crate::proto_ast::Enum, _parent_prefix: &str) -> Result<ir::EnumIr, ProtoError> {
     let mut ir_en = ir::EnumIr {
         name: en.name,
         values: Vec::new(),
@@ -211,10 +242,7 @@ fn lower_enum(
     Ok(ir_en)
 }
 
-fn lower_service(
-    svc: crate::proto_ast::Service,
-    _ctx: &mut LowerCtx,
-) -> Result<ir::ServiceIr, ProtoError> {
+fn lower_service(svc: crate::proto_ast::Service) -> Result<ir::ServiceIr, ProtoError> {
     let mut ir_svc = ir::ServiceIr {
         name: svc.name,
         methods: Vec::new(),
@@ -225,9 +253,13 @@ fn lower_service(
     for m in svc.methods {
         ir_svc.methods.push(ir::MethodIr {
             name: m.name,
-            request: ir::TypeRefIr { path: m.request_type },
+            request: ir::TypeRefIr {
+                path: m.request_type,
+            },
             request_streaming: m.request_streaming,
-            response: ir::TypeRefIr { path: m.response_type },
+            response: ir::TypeRefIr {
+                path: m.response_type,
+            },
             response_streaming: m.response_streaming,
             annotations: Vec::new(),
         });

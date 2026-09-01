@@ -9,9 +9,9 @@
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let src = std::fs::read_to_string("user.proto")?;
-//! let tokens = tpt20_compat_protobuf::lexer::lex(&src)?;
-//! let proto_ast = tpt20_compat_protobuf::parser::parse(tokens)?;
-//! let ir = tpt20_compat_protobuf::lower(&proto_ast)?;
+//! let tokens = tpt20_compat_protobuf::lex_proto(&src)?;
+//! let proto_ast = tpt20_compat_protobuf::parse_proto(tokens)?;
+//! let ir = tpt20_compat_protobuf::lower(proto_ast)?;
 //! # Ok(()) }
 //! ```
 //!
@@ -36,4 +36,4 @@ pub use error::{ProtoError, WireError};
 pub use lexer::lex as lex_proto;
 pub use lower::lower;
 pub use parser::parse as parse_proto;
-pub use wire::{decode_protobuf, encode_protobuf, decode_protobuf_with, encode_protobuf_with};
+pub use wire::{decode_protobuf, decode_protobuf_with, encode_protobuf, encode_protobuf_with};

@@ -13,16 +13,23 @@
 //! - cleartext h2c for local development (explicit opt-in)
 
 use crate::error::TransportError;
-use crate::frame::{encode_frame, Frame, FrameFlags, FramedMessage};
+use crate::frame::{encode_frame, Frame, FrameFlags};
 use crate::metadata::Metadata;
-use crate::traits::{BoxedSink, BoxedStream, Call, StreamingType, StreamItem, Transport};
+use crate::traits::{Call, StreamingType, StreamItem, Transport};
 use async_trait::async_trait;
 use futures::{Sink, Stream};
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use tokio::sync::oneshot;
 
 #[cfg(feature = "http2")]
+use bytes::Bytes;
+#[cfg(feature = "http2")]
+use http::{Request, Response};
+#[cfg(feature = "http2")]
 use h2::client;
+#[cfg(feature = "http2")]
+use h2::RecvStream;
 
 /// HTTP/2 client transport.
 ///
@@ -50,16 +57,14 @@ impl Transport for Http2Transport {
         &self,
         method: &str,
         request: Vec<u8>,
-        metadata: &Metadata,
-        streaming_type: StreamingType,
+        _metadata: &Metadata,
+        _streaming_type: StreamingType,
     ) -> Result<Call, TransportError> {
         use tokio::net::TcpStream;
 
         let tcp = TcpStream::connect(&self.endpoint.address)
             .await
             .map_err(|e| TransportError::Io(e.to_string()))?;
-
-        let mut client_builder = client::Builder::new();
 
         if self.endpoint.uses_tls() {
             #[cfg(feature = "tls")]
@@ -79,68 +84,99 @@ impl Transport for Http2Transport {
                     .await
                     .map_err(|e| TransportError::Tls(e.to_string()))?;
 
-                let (mut response, mut stream) = client_builder
-                    .handshake::<_, h2::RecvStream>(tls_stream)
+                let (mut client, connection) = client::Builder::new()
+                    .handshake::<_, Bytes>(tls_stream)
                     .await
                     .map_err(|e| TransportError::Internal(e.to_string()))?;
 
-                let request = ::http::Request::builder()
+                tokio::spawn(async move {
+                    let _ = connection.await;
+                });
+
+                let mut client = client.ready().await.map_err(|e| TransportError::Internal(e.to_string()))?;
+
+                let request_body = Bytes::from(request);
+                let http_request = Request::builder()
                     .method("POST")
                     .uri(format!("/{}", method))
                     .body(())
                     .map_err(|e| TransportError::Internal(e.to_string()))?;
 
-                let (_response_tx, mut recv) = stream.send_request(request, false)
+                let (response_fut, mut send_stream) = client
+                    .send_request(http_request, false)
+                    .map_err(|e| TransportError::Internal(e.to_string()))?;
+
+                send_stream
+                    .send_data(request_body, true)
+                    .map_err(|e| TransportError::Internal(e.to_string()))?;
+
+                let response = response_fut
+                    .await
                     .map_err(|e| TransportError::Internal(e.to_string()))?;
 
                 let (trailers_tx, trailers_rx) = oneshot::channel();
                 let response_stream = Http2ClientResponseStream {
-                    recv,
+                    response,
                     trailers_rx,
                 };
 
                 Ok(Call {
-                    sink: BoxedSink::new(Http2ClientSink {
-                        stream,
+                    sink: Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(Box::new(Http2ClientSink {
+                        send_stream,
                         trailers_tx,
-                    }),
-                    stream: BoxedStream::new(response_stream),
+                    })),
+                    stream: Pin::<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>::new(Box::new(response_stream)),
                 })
             }
             #[cfg(not(feature = "tls"))]
             {
-                let _ = tcp;
                 Err(TransportError::NotSupported(
                     "TLS support requires the `tls` feature".into(),
                 ))
             }
         } else {
-            let (mut response, mut stream) = client_builder
-                .handshake::<_, h2::RecvStream>(tcp)
+            let (mut client, connection) = client::Builder::new()
+                .handshake::<_, Bytes>(tcp)
                 .await
                 .map_err(|e| TransportError::Internal(e.to_string()))?;
 
-            let request = ::http::Request::builder()
+            tokio::spawn(async move {
+                let _ = connection.await;
+            });
+
+            let mut client = client.ready().await.map_err(|e| TransportError::Internal(e.to_string()))?;
+
+            let request_body = Bytes::from(request);
+            let http_request = Request::builder()
                 .method("POST")
                 .uri(format!("/{}", method))
                 .body(())
                 .map_err(|e| TransportError::Internal(e.to_string()))?;
 
-            let (_response_tx, mut recv) = stream.send_request(request, false)
+            let (response_fut, mut send_stream) = client
+                .send_request(http_request, false)
+                .map_err(|e| TransportError::Internal(e.to_string()))?;
+
+            send_stream
+                .send_data(request_body, true)
+                .map_err(|e| TransportError::Internal(e.to_string()))?;
+
+            let response = response_fut
+                .await
                 .map_err(|e| TransportError::Internal(e.to_string()))?;
 
             let (trailers_tx, trailers_rx) = oneshot::channel();
             let response_stream = Http2ClientResponseStream {
-                recv,
+                response,
                 trailers_rx,
             };
 
             Ok(Call {
-                sink: BoxedSink::new(Http2ClientSink {
-                    stream,
+                sink: Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(Box::new(Http2ClientSink {
+                    send_stream,
                     trailers_tx,
-                }),
-                stream: BoxedStream::new(response_stream),
+                })),
+                stream: Pin::<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>::new(Box::new(response_stream)),
             })
         }
     }
@@ -150,7 +186,7 @@ impl Transport for Http2Transport {
 impl Http2Transport {
     fn make_tls_connector(
         &self,
-        _tls_config: &TlsConfig,
+        _tls_config: &crate::TlsConfig,
     ) -> Result<tokio_rustls::TlsConnector, TransportError> {
         use rustls::ClientConfig;
         use std::sync::Arc;
@@ -192,7 +228,7 @@ impl Http2Transport {
 
 #[cfg(feature = "http2")]
 struct Http2ClientSink {
-    stream: h2::client::ClientRequestStream<h2::RecvStream>,
+    send_stream: h2::SendStream<Bytes>,
     trailers_tx: oneshot::Sender<Result<Metadata, TransportError>>,
 }
 
@@ -204,15 +240,15 @@ impl Sink<Vec<u8>> for Http2ClientSink {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.stream)
+        Pin::new(&mut self.send_stream)
             .poll_ready(cx)
             .map_err(|e| TransportError::Internal(e.to_string()))
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
-        let frame = encode_frame(&item, false);
-        Pin::new(&mut self.stream)
-            .start_send(frame.into())
+        let bytes = Bytes::from(item);
+        Pin::new(&mut self.send_stream)
+            .send_data(bytes, false)
             .map_err(|e| TransportError::Internal(e.to_string()))
     }
 
@@ -220,8 +256,9 @@ impl Sink<Vec<u8>> for Http2ClientSink {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.stream)
-            .poll_flush(cx)
+        Pin::new(&mut self.send_stream)
+            .poll_capacity(cx)
+            .map(|_| Ok(()))
             .map_err(|e| TransportError::Internal(e.to_string()))
     }
 
@@ -229,15 +266,16 @@ impl Sink<Vec<u8>> for Http2ClientSink {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.stream)
-            .poll_close(cx)
+        Pin::new(&mut self.send_stream)
+            .poll_capacity(cx)
+            .map(|_| Ok(()))
             .map_err(|e| TransportError::Internal(e.to_string()))
     }
 }
 
 #[cfg(feature = "http2")]
 struct Http2ClientResponseStream {
-    recv: h2::RecvStream,
+    response: Response<RecvStream>,
     trailers_rx: oneshot::Receiver<Result<Metadata, TransportError>>,
 }
 
@@ -246,7 +284,8 @@ impl Stream for Http2ClientResponseStream {
     type Item = Result<StreamItem, TransportError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match Pin::new(&mut self.recv.body()).poll_next(cx) {
+        let mut body = self.response.body_mut();
+        match Pin::new(&mut body).poll_data(cx) {
             Poll::Ready(Some(Ok(bytes))) => {
                 let frame = Frame::decode(&bytes)
                     .map_err(|e| TransportError::MalformedFrame(e.to_string()))?;
@@ -262,7 +301,7 @@ impl Stream for Http2ClientResponseStream {
             }
             Poll::Ready(None) => {
                 let trailers = Metadata::new();
-                Poll::Ready(Some(Ok(StreamItem::Trailers(trailers))))
+                Poll::Ready(Some(Ok(StreamItem::Trailer(trailers))))
             }
             Poll::Pending => Poll::Pending,
         }
@@ -287,11 +326,12 @@ impl Http2Server {
     }
 
     /// Runs the server, accepting connections and dispatching to the handler.
-    pub async fn serve<F>(&self, _handler: F) -> Result<(), TransportError>
+    pub async fn serve<F>(&self, handler: F) -> Result<(), TransportError>
     where
         F: Fn(IncomingHttp2Call) -> futures::future::BoxFuture<'static, Result<(), TransportError>>
             + Send
             + Sync
+            + Clone
             + 'static,
     {
         use tokio::net::TcpListener;
@@ -311,14 +351,14 @@ impl Http2Server {
                 server_builder.max_frame_size(max as u32);
             }
 
-            let server = server_builder
-                .handshake::<_, _>(stream)
+            let mut server = server_builder
+                .handshake::<_, Bytes>(stream)
                 .await
                 .map_err(|e| TransportError::Internal(e.to_string()))?;
 
-            let handler = _handler.clone();
+            let handler = handler.clone();
             tokio::spawn(async move {
-                if let Err(e) = Self::serve_connections(server, handler).await {
+                if let Err(e) = Self::serve_connections(&mut server, handler).await {
                     eprintln!("HTTP/2 server error: {:?}", e);
                 }
             });
@@ -327,20 +367,18 @@ impl Http2Server {
 
     #[cfg(feature = "http2")]
     async fn serve_connections<F>(
-        mut server: h2::server::Accept,
+        server: &mut h2::server::Connection<tokio::net::TcpStream, Bytes>,
         handler: F,
     ) -> Result<(), TransportError>
     where
         F: Fn(IncomingHttp2Call) -> futures::future::BoxFuture<'static, Result<(), TransportError>>
             + Send
             + Sync
+            + Clone
             + 'static,
     {
-        use futures::TryStreamExt;
-        use h2::server;
-
-        while let Some(result) = server.accept().await {
-            match result {
+        while let Some(request_result) = server.accept().await {
+            match request_result {
                 Ok((request, mut respond)) => {
                     let method = request.uri().path().trim_start_matches('/').to_string();
                     let metadata = request
@@ -382,14 +420,14 @@ impl Http2Server {
 }
 
 #[cfg(feature = "http2")]
-async fn collect_body(mut body: h2::RecvStream) -> Vec<u8> {
-    use futures::TryStreamExt;
-    body.try_fold(Vec::new(), |mut acc, chunk| async move {
-        acc.extend_from_slice(&chunk);
-        Ok(acc)
-    })
-    .await
-    .unwrap_or_default()
+async fn collect_body(mut body: RecvStream) -> Vec<u8> {
+    let mut acc = Vec::new();
+    while let Some(chunk) = body.data().await {
+        if let Ok(bytes) = chunk {
+            acc.extend_from_slice(&bytes);
+        }
+    }
+    acc
 }
 
 /// An incoming HTTP/2 call received by the server.
@@ -421,7 +459,7 @@ impl IncomingHttp2Call {
     }
 
     /// Sends trailing metadata to the client.
-    pub async fn send_trailers(&self, trailers: Metadata) -> Result<(), TransportError> {
+    pub async fn send_trailers(&mut self, trailers: Metadata) -> Result<(), TransportError> {
         let _ = self.trailers_tx.send(Ok(trailers));
         Ok(())
     }

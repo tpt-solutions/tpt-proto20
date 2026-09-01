@@ -35,7 +35,9 @@ pub fn decode_protobuf_with(
     bytes: &[u8],
     limits: &tpt20_core::limits::DecoderLimits,
 ) -> Result<RawMessage, WireError> {
-    limits.check_message_bytes(bytes.len()).map_err(|_| WireError::Internal("limit exceeded"))?;
+    limits
+        .check_message_bytes(bytes.len())
+        .map_err(|_| WireError::Internal("limit exceeded"))?;
 
     let mut msg = RawMessage::new();
     let mut cursor = 0usize;
@@ -162,8 +164,8 @@ fn split_len_delimited<'a>(
     cursor: &mut usize,
     limits: &tpt20_core::limits::DecoderLimits,
 ) -> Result<&'a [u8], WireError> {
-    let len = tpt20_core::varint::decode_varint(bytes, cursor)
-        .map_err(|_| WireError::Truncated)? as usize;
+    let len = tpt20_core::varint::decode_varint(bytes, cursor).map_err(|_| WireError::Truncated)?
+        as usize;
     if *cursor + len > bytes.len() {
         return Err(WireError::Truncated);
     }
@@ -193,7 +195,11 @@ mod tests {
     #[test]
     fn roundtrip_fixed32() {
         let mut msg = RawMessage::new();
-        msg.push(Field::new(5, WireClass::Fixed32, Value::Fixed32(0x12345678)));
+        msg.push(Field::new(
+            5,
+            WireClass::Fixed32,
+            Value::Fixed32(0x12345678),
+        ));
         let bytes = encode_protobuf(&msg).unwrap();
         let back = decode_protobuf(&bytes).unwrap();
         assert_eq!(msg, back);
@@ -202,7 +208,11 @@ mod tests {
     #[test]
     fn roundtrip_fixed64() {
         let mut msg = RawMessage::new();
-        msg.push(Field::new(3, WireClass::Fixed64, Value::Fixed64(0x1122334455667788)));
+        msg.push(Field::new(
+            3,
+            WireClass::Fixed64,
+            Value::Fixed64(0x1122334455667788),
+        ));
         let bytes = encode_protobuf(&msg).unwrap();
         let back = decode_protobuf(&bytes).unwrap();
         assert_eq!(msg, back);
