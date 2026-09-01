@@ -12,11 +12,9 @@
 //! and unknown-field policies are applied by callers; [`get_field`] accepts
 //! either spelling when looking up object members.
 
-use serde_json::Value;
-use thiserror::Error;
-
-/// Re-exported so generated code needs only this crate for JSON support.
+pub use serde_json::Value;
 pub use serde_json as json;
+use thiserror::Error;
 
 /// Errors that can occur while converting between tpt20 messages and JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

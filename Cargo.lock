@@ -159,7 +159,10 @@ dependencies = [
 name = "tpt20-core"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "thiserror",
+ "tpt20-json",
 ]
 
 [[package]]
@@ -194,6 +197,16 @@ name = "tpt20-language"
 version = "0.1.0"
 dependencies = [
  "thiserror",
+]
+
+[[package]]
+name = "tpt20-stdlib"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+ "tpt20-core",
+ "tpt20-json",
 ]
 
 [[package]]

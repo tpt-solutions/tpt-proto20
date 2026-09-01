@@ -28,11 +28,11 @@ diagram in spec §5 and the repo layout in spec §26.
   - [x] `compiler/tpt20-ir/`
   - [x] `compiler/tpt20-descriptor/`
   - [x] `compiler/tpt20-compiler/`
-  - [ ] `compiler/tpt20-codegen-rust/`
+  - [x] `compiler/tpt20-codegen-rust/`
   - [ ] `compiler/tpt20-codegen-backends/`
   - [x] `runtime/tpt20-core/`
   - [ ] `runtime/tpt20-reflect/`
-  - [ ] `runtime/tpt20-json/`
+  - [x] `runtime/tpt20-json/`
   - [ ] `runtime/tpt20-text/`
   - [ ] `runtime/tpt20-stdlib/`
   - [ ] `runtime/tpt20-rpc/`
@@ -40,14 +40,14 @@ diagram in spec §5 and the repo layout in spec §26.
   - [ ] `runtime/tpt20-observability/`
   - [ ] `compat/tpt20-compat-protobuf/`
   - [ ] `compat/tpt20-compat-grpc/`
-  - [ ] `tools/tpt20-cli/`
+  - [x] `tools/tpt20-cli/`
   - [ ] `tools/tpt20-lint/`
   - [ ] `tools/tpt20-diff/`
   - [ ] `tools/tpt20-conformance/`
   - [ ] `tools/tpt20-registry/`
   - [ ] `docs/`
   - [ ] `examples/`
-  - [ ] `tests/`
+  - [x] `tests/`
   - [ ] `fuzz/`
   - [ ] `benches/`
   - [x] `provenance/`
@@ -197,49 +197,49 @@ diagram in spec §5 and the repo layout in spec §26.
   - [x] Reject truncated payloads
   - [x] Reject invalid UTF-8 in string fields
   - [x] Reject payloads exceeding configured limits
-- [ ] Repeated field encoding/decoding
-  - [ ] Packed encoding
-  - [ ] Unpacked encoding
-  - [ ] Accept mixed packed/unpacked input for compatible scalar repeated fields
-- [ ] Map encoding/decoding
-  - [ ] Encode maps as repeated synthetic map-entry messages (key = field 1, value = field 2)
-  - [ ] Accept duplicate map entries on decode
-  - [ ] Later value overrides earlier value by default
-  - [ ] Deterministic map-entry ordering in canonical mode
-  - [ ] Enforce decoder limits on map entries
+- [x] Repeated field encoding/decoding
+  - [x] Packed encoding
+  - [x] Unpacked encoding
+  - [x] Accept mixed packed/unpacked input for compatible scalar repeated fields
+- [x] Map encoding/decoding
+  - [x] Encode maps as repeated synthetic map-entry messages (key = field 1, value = field 2)
+  - [x] Accept duplicate map entries on decode
+  - [x] Later value overrides earlier value by default
+  - [x] Deterministic map-entry ordering in canonical mode
+  - [x] Enforce decoder limits on map entries
 - [x] Oneof encoding/decoding
   - [x] Encode oneof fields as normal fields
-  - [ ] Last field wins when multiple oneof members appear on decode
-  - [ ] Expose oneof as mutually-exclusive generated type (ties into Phase 5)
+  - [x] Last field wins when multiple oneof members appear on decode
+  - [x] Expose oneof as mutually-exclusive generated type (ties into Phase 5)
 - [x] Unknown field handling
   - [x] Preserve policy (default)
-  - [ ] Discard policy
-  - [ ] Fail policy
+  - [x] Discard policy
+  - [x] Fail policy
   - [x] Ensure preserved unknown fields are re-encodable
 - [x] Canonical deterministic encoding mode
   - [x] Canonical field order
-  - [ ] Canonical map ordering
-  - [ ] Canonical unknown-field ordering
+  - [x] Canonical map ordering
+  - [x] Canonical unknown-field ordering
   - [x] Canonical varint representation
   - [x] Canonical repeated-field ordering where applicable
-  - [ ] Canonical oneof serialization behavior
+  - [x] Canonical oneof serialization behavior
   - [x] Validate suitability for hashing/signatures/auditing/reproducible builds/content
         addressing
 - [x] Optional `Envelope` message (`schema_id: bytes`, `schema_version: string`,
       `payload: bytes`) — optional, not required for normal RPC payloads
 - [x] `DecoderLimits` struct
   - [x] `max_message_bytes`
-  - [ ] `max_depth`
+  - [x] `max_depth`
   - [x] `max_field_count`
-  - [ ] `max_unknown_field_bytes`
-  - [ ] `max_string_bytes`
+  - [x] `max_unknown_field_bytes`
+  - [x] `max_string_bytes`
   - [x] `max_bytes_field_bytes`
-  - [ ] `max_repeated_entries`
-  - [ ] `max_map_entries`
+  - [x] `max_repeated_entries`
+  - [x] `max_map_entries`
   - [x] Enforce every limit in the decode path with sane defaults
 - [x] Checked-arithmetic integer safety throughout encode/decode
 - [x] UTF-8 validation for all string fields
-- [ ] Recursion/depth bounding for nested messages
+- [x] Recursion/depth bounding for nested messages
 - [ ] Allocation bounding/predictability
 - [x] Enforce "no unsafe in core decoding paths" default policy
   - [x] Any exception is isolated, documented, tested, feature-gated, and justified by
@@ -249,24 +249,24 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 5 — Rust Code Generation (`tpt20-codegen-rust`, spec §12)
 
-- [ ] Generate owned message structs from message schemas
-- [ ] Generated methods per message:
-  - [ ] `encode(&self) -> Vec<u8>`
-  - [ ] `decode(bytes: &[u8]) -> Result<Self, DecodeError>`
-  - [ ] `decode_borrowed(bytes: &[u8]) -> Result<XView<'_>, DecodeError>`
-  - [ ] `to_json(&self) -> Result<String, JsonError>`
-  - [ ] `from_json(json: &str) -> Result<Self, JsonError>`
-- [ ] Generate borrowed view types (e.g. `UserView<'a>`) mirroring owned structs
+- [x] Generate owned message structs from message schemas
+- [x] Generated methods per message:
+  - [x] `encode(&self) -> Vec<u8>`
+  - [x] `decode(bytes: &[u8]) -> Result<Self, DecodeError>`
+  - [x] `decode_borrowed(bytes: &[u8]) -> Result<XView<'_>, DecodeError>`
+  - [x] `to_json(&self) -> Result<String, JsonError>`
+  - [x] `from_json(json: &str) -> Result<Self, JsonError>`
+- [x] Generate borrowed view types (e.g. `UserView<'a>`) mirroring owned structs
 - [ ] Generate bytes-backed message variants
-- [ ] Generate builders (opt-in)
+- [x] Generate builders (opt-in)
   - [ ] Presence-requirement validation
   - [ ] Oneof-constraint validation
-  - [ ] Annotation-constraint validation
+  - [x] Annotation-constraint validation (`@max_len`, `@min_len`, `@range`)
   - [ ] Enum-validity validation
   - [ ] Map-key-validity validation
-- [ ] Generate Rust enums for schema enums with integer conversion support
-  - [ ] Respect open/closed unknown-value semantics
-- [ ] Generate Rust enums for oneofs (e.g. `enum ContactMethod { Email(String), ... }`)
+- [x] Generate Rust enums for schema enums with integer conversion support
+  - [x] Respect open/closed unknown-value semantics
+- [x] Generate Rust enums for oneofs (e.g. `enum ContactMethod { Email(String), ... }`)
 - [ ] Generate service code
   - [ ] Server traits (`#[async_trait]`)
   - [ ] Client stubs
@@ -274,7 +274,7 @@ diagram in spec §5 and the repo layout in spec §26.
   - [ ] Metadata helpers
   - [ ] Deadline helpers
   - [ ] Cancellation helpers
-- [ ] Wire `tpt20 gen rust --in schema --out src/generated` CLI command (stub now, full CLI
+- [x] Wire `tpt20 gen rust --in schema --out src/generated` CLI command (stub now, full CLI
       in Phase 16)
 
 ---
@@ -318,14 +318,14 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 8 — JSON & Text Representations (`tpt20-json`, `tpt20-text`, spec §14)
 
-- [ ] JSON mapping
-  - [ ] Support original field names on decode
-  - [ ] Support lowerCamelCase field names on decode
-  - [ ] Configurable field-name style on encode
-  - [ ] 64-bit integers representable as JSON strings
-  - [ ] Bytes fields as base64
-  - [ ] Enums representable by name or by number
-  - [ ] Configurable default-value emission
+- [x] JSON mapping
+  - [x] Support original field names on decode
+  - [x] Support lowerCamelCase field names on decode
+  - [ ] Configurable field-name style on encode (always emits original names)
+  - [x] 64-bit integers representable as JSON strings
+  - [x] Bytes fields as base64
+  - [x] Enums representable by name or by number
+  - [ ] Configurable default-value emission (defaults always omitted)
   - [ ] Configurable unknown-field handling
 - [ ] Text format
   - [ ] Printer (message → human-readable text, matching spec §14.3 example)
@@ -340,23 +340,23 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 9 — Standard Library Types (`tpt20-stdlib`, spec §15)
 
-- [ ] `Timestamp`
-- [ ] `Duration`
-- [ ] `Empty`
-- [ ] `Any`
-- [ ] `Struct`
-- [ ] `Value`
-- [ ] `ListValue`
-- [ ] `FieldMask`
-- [ ] `UUID`
-- [ ] `Decimal`
-- [ ] `Money`
-- [ ] `Interval`
-- [ ] `Pagination`
-- [ ] `ErrorDetail`
-- [ ] Wrapper types: `BoolValue`, `BytesValue`, `DoubleValue`, `FloatValue`, `Int32Value`,
+- [x] `Timestamp`
+- [x] `Duration`
+- [x] `Empty`
+- [x] `Any`
+- [x] `Struct`
+- [x] `Value`
+- [x] `ListValue`
+- [x] `FieldMask`
+- [x] `UUID`
+- [x] `Decimal`
+- [x] `Money`
+- [x] `Interval`
+- [x] `Pagination`
+- [x] `ErrorDetail`
+- [x] Wrapper types: `BoolValue`, `BytesValue`, `DoubleValue`, `FloatValue`, `Int32Value`,
       `Int64Value`, `UInt32Value`, `UInt64Value`, `StringValue`
-- [ ] Define stability/versioning policy for the standard library
+- [x] Define stability/versioning policy for the standard library
 
 ---
 
@@ -518,7 +518,8 @@ diagram in spec §5 and the repo layout in spec §26.
 - [ ] CLI command: `tpt20 fmt` (schema formatter)
 - [ ] CLI command: `tpt20 lint` (with configurable rule set)
 - [ ] CLI command: `tpt20 diff` — SAFE/WARNING/BREAKING output matching spec §21.4 format
-- [ ] CLI command: `tpt20 gen` (wires to Phase 5 Rust codegen, later Phase 21 backends)
+- [x] CLI command: `tpt20 gen rust` (wires to Phase 5 Rust codegen; `gen` for other
+      backends deferred to Phase 21)
 - [ ] CLI command: `tpt20 descriptors`
 - [ ] CLI command: `tpt20 decode`
 - [ ] CLI command: `tpt20 encode`

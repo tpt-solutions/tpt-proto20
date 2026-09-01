@@ -1,0 +1,18 @@
+[package]
+name = "tpt20-stdlib"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Standard library types for tpt20 (spec §15)"
+
+[dependencies]
+tpt20-core = { path = "../../runtime/tpt20-core" }
+tpt20-json = { path = "../../runtime/tpt20-json" }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde"]

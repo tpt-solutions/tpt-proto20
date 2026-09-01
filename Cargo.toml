@@ -8,6 +8,7 @@ members = [
     "compiler/tpt20-codegen-rust",
     "runtime/tpt20-core",
     "runtime/tpt20-json",
+    "runtime/tpt20-stdlib",
     "tools/tpt20-cli",
     "tests/rust-codegen-tests",
 ]

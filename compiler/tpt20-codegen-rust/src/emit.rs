@@ -94,7 +94,8 @@ impl<'a> Emitter<'a> {
         if model::is_scalar_path(path) {
             return expr::view_rust_type(path[0].as_str()).to_string();
         }
-        format!("{}<'a>", self.resolve_ref(scope, path).0)
+        let base = self.resolve_ref(scope, path).0;
+        format!("{base}View<'a>")
     }
 
     fn header(&mut self) {
@@ -112,9 +113,6 @@ impl<'a> Emitter<'a> {
 //
 // This file is a Rust module: include it with `mod <name>;`,
 // `include!`, or the build-system integration of your choice.
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(clippy::all)]
 use std::collections::BTreeMap;
 use {core} as __core;
 use {core}::scalar as __scalar;
@@ -130,6 +128,9 @@ use {json} as __json;
 /// Hidden helpers shared by generated code.
 #[doc(hidden)]
 pub mod __support {
+    use super::__core;
+    use super::__json;
+
     /// Reads a sign-extended varint as an i32 (enum / int32 wire form).
     pub fn wire_i32(v: &__core::Value) -> Result<i32, __core::DecodeError> {
         __core::scalar::decode_signed(v).map(|x| x as i32)
@@ -224,6 +225,38 @@ impl std::error::Error for BuildError {}
             oneof_groups,
             map_ids,
         }
+    }
+
+    fn emit_oneof_enum(&mut self, scope: &[String], msg: &ir::MessageIr, o: &ir::OneofIr, view: bool) {
+        let oty = if view {
+            format!("{}{}<'a>", naming::flat_type_name(scope, &msg.name), naming::pascal(&o.name))
+        } else {
+            format!("{}{}", naming::flat_type_name(scope, &msg.name), naming::pascal(&o.name))
+        };
+        let mut s = String::new();
+        if view {
+            s.push_str(&format!(
+                "\n/// Borrowed oneof view for `{}`.\n#[derive(Debug, Clone, PartialEq)]\npub enum {oty}<'a> {{\n",
+                o.name
+            ));
+        } else {
+            s.push_str(&format!(
+                "\n/// Oneof `{}`.\n#[derive(Debug, Clone, PartialEq)]\npub enum {oty} {{\n",
+                o.name
+            ));
+        }
+        for mf in &o.fields {
+            let variant = naming::sanitize_ident(&naming::pascal(&mf.name));
+            let t = mf.label.unwrap_type();
+            let vty = if view {
+                self.view_type(scope, &t.path)
+            } else {
+                self.owned_type(scope, &t.path)
+            };
+            s.push_str(&format!("    /// Field id {}.\n    {variant}({vty}),\n", mf.id));
+        }
+        s.push_str("}\n");
+        self.out.push_str(&s);
     }
 
     /// Emits a schema enum as a Rust enum (spec §12.4).
@@ -422,6 +455,12 @@ impl Default for {flat} {{
             ctx.flat, ctx.flat
         ));
         self.push_struct_fields(scope, msg, &ctx, &mut s);
+        self.out.push_str(&s);
+
+        // ---- Owned oneof enums -------------------------------------------------
+        for o in &msg.oneofs {
+            self.emit_oneof_enum(scope, msg, o, false);
+        }
 
         // ---- Methods --------------------------------------------------------
         self.emit_encode_impls(scope, msg, &ctx);
@@ -461,7 +500,7 @@ impl Default for {flat} {{
         }
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
-            let oty = format!("{}_{}", ctx.flat, naming::pascal(&o.name));
+            let oty = format!("{}{}", ctx.flat, naming::pascal(&o.name));
             out.push_str(&format!(
                 "    /// Oneof `{}`.\n    pub {oname}: Option<{oty}>,\n",
                 o.name
@@ -711,7 +750,7 @@ r#"        for (k, v) in &self.{fname} {{
     ) {
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
-            let oty = format!("{}_{}", ctx.flat, naming::pascal(&o.name));
+            let oty = format!("{}{}", ctx.flat, naming::pascal(&o.name));
             b.push_str(&format!("        match &self.{oname} {{\n"));
             for mf in &o.fields {
                 let variant = naming::sanitize_ident(&naming::pascal(&mf.name));
@@ -875,18 +914,18 @@ r#"        for (k, v) in &self.{fname} {{
                             assign
                         )
                     }
-                    TypeKind::Message => {
-                        let ty = if view {
-                            format!("{}View<'a>", self.resolve_ref(scope, &t.path).0)
-                        } else {
-                            self.resolve_ref(scope, &t.path).0.clone()
-                        };
-                        format!(
-"                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    {target}.{fname} = Some({ty}::decode_inner(sub, limits, depth + 1)?);\n                }}\n",
-                            f.id,
-                            class_name(crate::WireClass::Len),
-                        )
-                    }
+                     TypeKind::Message => {
+                         let ty = if view {
+                             self.view_type(scope, &t.path)
+                         } else {
+                             self.owned_type(scope, &t.path)
+                         };
+                         format!(
+ "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    {target}.{fname} = Some({ty}::decode_inner(sub, limits, depth + 1)?);\n                }}\n",
+                             f.id,
+                             class_name(crate::WireClass::Len),
+                         )
+                     }
                 }
             }
             FieldLabelIr::Repeated(t) => {
@@ -972,17 +1011,17 @@ r#"        for (k, v) in &self.{fname} {{
                     )
                 }
             }
-            TypeKind::Message => {
-                let ty = if view {
-                    format!("{}View<'a>", self.resolve_ref(scope, f.label.unwrap_type().path.as_slice()).0)
-                } else {
-                    self.resolve_ref(scope, f.label.unwrap_type().path.as_slice()).0.clone()
-                };
-                format!(
-"                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{fname}.push({ty}::decode_inner(sub, limits, depth + 1)?);\n                }}\n",
-                    len = class_name(crate::WireClass::Len),
-                )
-            }
+             TypeKind::Message => {
+                 let ty = if view {
+                     self.view_type(scope, f.label.unwrap_type().path.as_slice())
+                 } else {
+                     self.owned_type(scope, f.label.unwrap_type().path.as_slice())
+                 };
+                 format!(
+ "                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{fname}.push({ty}::decode_inner(sub, limits, depth + 1)?);\n                }}\n",
+                     len = class_name(crate::WireClass::Len),
+                 )
+             }
         }
     }
 
@@ -1027,10 +1066,16 @@ r#"        for (k, v) in &self.{fname} {{
                     format!("{ety}::from_i32(__support::wire_i32(&ef.value)?)?")
                 }
             }
-            TypeKind::Message => format!(
-                "{}::decode_inner(__scalar::decode_bytes(&ef.value)?, limits, depth + 1)?",
-                self.resolve_ref(scope, &value.path).0
-            ),
+             TypeKind::Message => {
+                 let ty = if view {
+                     self.view_type(scope, &value.path)
+                 } else {
+                     self.owned_type(scope, &value.path)
+                 };
+                 format!(
+                     "{ty}::decode_inner(__scalar::decode_bytes(&ef.value)?, limits, depth + 1)?",
+                 )
+             }
         };
         let kt = if view {
             expr::view_rust_type(key_scalar).to_string()
@@ -1090,7 +1135,7 @@ r#"                ({id}, {len}) => {{
         let t = mf.label.unwrap_type();
         let kind = self.resolve_ref(scope, &t.path).1;
         let oname = naming::field_ident(&o.name);
-        let ty_name = format!("{}_{}", parent_flat, naming::pascal(&o.name));
+        let ty_name = format!("{}{}", parent_flat, naming::pascal(&o.name));
         let variant = naming::sanitize_ident(&naming::pascal(&mf.name));
         match kind {
             TypeKind::Scalar(info) => {
@@ -1118,18 +1163,18 @@ r#"                ({id}, {len}) => {{
                     class_name(crate::WireClass::Varint),
                 )
             }
-            TypeKind::Message => {
-                let mty = if view {
-                    self.view_type(scope, &t.path)
-                } else {
-                    self.owned_type(scope, &t.path)
-                };
-                format!(
-"                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({mty}::decode_inner(sub, limits, depth + 1)?));\n                }}\n",
-                    mf.id,
-                    class_name(crate::WireClass::Len),
-                )
-            }
+             TypeKind::Message => {
+                 let mty = if view {
+                     self.view_type(scope, &t.path)
+                 } else {
+                     self.owned_type(scope, &t.path)
+                 };
+                 format!(
+ "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({mty}::decode_inner(sub, limits, depth + 1)?));\n                }}\n",
+                     mf.id,
+                     class_name(crate::WireClass::Len),
+                 )
+             }
         }
     }
 
@@ -1148,14 +1193,14 @@ r#"                ({id}, {len}) => {{
         }
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
-            let oty = format!("{}{}_{}<'a>", "", ctx.flat, naming::pascal(&o.name));
+            let oty = format!("{}{}View<'a>", ctx.flat, naming::pascal(&o.name));
             s.push_str(&format!("    pub {oname}: Option<{oty}>,\n"));
         }
         s.push_str("}\n");
 
         // Oneof view enum.
         for o in &msg.oneofs {
-            let oty = format!("{}_{}", ctx.flat, naming::pascal(&o.name));
+            let oty = format!("{}{}View", ctx.flat, naming::pascal(&o.name));
             s.push_str(&format!(
 "\n/// Borrowed oneof view for `{}`.\n#[derive(Debug, Clone, PartialEq)]\npub enum {oty}<'a> {{\n",
                 o.name
@@ -1400,7 +1445,7 @@ r#"impl<'a> {flat}<'a> {{
     ) {
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
-            let oty = format!("{}_{}", ctx.flat, naming::pascal(&o.name));
+            let oty = format!("{}{}", ctx.flat, naming::pascal(&o.name));
             s.push_str(&format!("        match &self.{oname} {{\n"));
             for mf in &o.fields {
                 let variant = naming::sanitize_ident(&naming::pascal(&mf.name));
@@ -1465,7 +1510,7 @@ r#"impl<'a> {flat}<'a> {{
                     let kparse = key_from_string(key.path[0].as_str());
                     let vjf = self.json_from_expr(scope, value);
                     b.push_str(&format!(
-"        if let Some(jv) = __json::get_field(obj, {names}) {{\n            if let __json::Value::Object(m) = jv {{\n                for (ks, vv) in m {{\n                    let k = {kparse}?;\n                    let v = {vjf}?;\n                    out_msg.{fname}.insert(k, v);\n                }}\n            }} else {{\n                return Err(__json::JsonError::TypeMismatch {{ expected: \"object\" }});\n            }}\n        }}\n"
+"        if let Some(jv) = __json::get_field(obj, {names}) {{\n            if let __json::Value::Object(m) = jv {{\n                for (ks, item) in m {{\n                    let k = {kparse}?;\n                    let v = {vjf}?;\n                    out_msg.{fname}.insert(k, v);\n                }}\n            }} else {{\n                return Err(__json::JsonError::TypeMismatch {{ expected: \"object\" }});\n            }}\n        }}\n"
                     ));
                 }
             }
@@ -1487,7 +1532,7 @@ r#"impl<'a> {flat}<'a> {{
         let mut b = String::new();
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
-            let ty_name = format!("{}_{}", ctx.flat, naming::pascal(&o.name));
+            let ty_name = format!("{}{}", ctx.flat, naming::pascal(&o.name));
             for mf in &o.fields {
                 let names = format!("&[{:?}, {:?}]", mf.name, naming::lower_camel(&mf.name));
                 let t = mf.label.unwrap_type();
@@ -1545,10 +1590,9 @@ r#"impl<'a> {flat}<'a> {{
         }
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
+            let oty = format!("{}{}", ctx.flat, naming::pascal(&o.name));
             s.push_str(&format!(
-"    {oname}: Option<{}_{}>,\n",
-                ctx.flat,
-                naming::pascal(&o.name)
+"    {oname}: Option<{oty}>,\n"
             ));
         }
         s.push_str("}\n");
@@ -1628,10 +1672,9 @@ r#"impl<'a> {flat}<'a> {{
         }
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
+            let oty = format!("{}{}", ctx.flat, naming::pascal(&o.name));
             s.push_str(&format!(
-"    pub fn {oname}(mut self, v: {}_{}) -> Self {{\n        self.{oname} = Some(v);\n        self\n    }}\n",
-                ctx.flat,
-                naming::pascal(&o.name)
+"    pub fn {oname}(mut self, v: {oty}) -> Self {{\n        self.{oname} = Some(v);\n        self\n    }}\n"
             ));
         }
         // build(): validations + construction.
@@ -1692,10 +1735,10 @@ fn key_to_string(key_scalar: &str, k: &str) -> String {
 /// JSON string -> map key parse expression (`Result<K, JsonError>` on `ks`).
 fn key_from_string(key_scalar: &str) -> String {
     match key_scalar {
-        "string" => "__json::as_str(ks)?.to_string()".to_string(),
-        "bool" => "__json::as_bool(ks)?".to_string(),
-        "uint64" | "fixed64" => "__json::as_u64(ks)?".to_string(),
-        "uint32" | "fixed32" => "__support::as_u32(ks)?".to_string(),
+        "string" => "__json::as_str(ks).map(str::to_string)".to_string(),
+        "bool" => "__json::as_bool(ks)".to_string(),
+        "uint64" | "fixed64" => "__json::as_u64(ks)".to_string(),
+        "uint32" | "fixed32" => "__support::as_u32(ks)".to_string(),
         "int32" | "sint32" => "__json::as_i64(ks)? as i32".to_string(),
         _ => "__json::as_i64(ks)?".to_string(),
     }

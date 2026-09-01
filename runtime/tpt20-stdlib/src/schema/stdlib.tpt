@@ -1,0 +1,146 @@
+package tpt20.stdlib.v1;
+
+// ---- Core standard types ---------------------------------------------------
+
+/// A point in time, represented as seconds since the Unix epoch plus
+/// fractional nanoseconds.
+message Timestamp {
+    1: seconds int64;
+    2: nanos int32;
+}
+
+/// A signed, fixed-length span of time, represented as seconds plus
+/// nanoseconds.
+message Duration {
+    1: seconds int64;
+    2: nanos int32;
+}
+
+/// An empty message that carries no data.
+message Empty {
+}
+
+/// A dynamically typed value that carries a type URL and opaque bytes.
+message Any {
+    1: type_url string;
+    2: value bytes;
+}
+
+/// A structured value equivalent to a JSON object.
+message Struct {
+    1: fields map<string, Value>;
+}
+
+/// The empty JSON null value.
+enum NullValue {
+    NULL_VALUE = 0;
+}
+
+/// A dynamically typed value, mirroring a JSON value.
+message Value {
+    1: null_value NullValue;
+    2: number_value double;
+    3: string_value string;
+    4: bool_value bool;
+    5: struct_value Struct;
+    6: list_value ListValue;
+}
+
+/// A list of `Value` objects.
+message ListValue {
+    1: values repeated Value;
+}
+
+/// A set of field paths used to select a subset of fields on an object.
+message FieldMask {
+    1: paths repeated string;
+}
+
+/// A UUID, represented as a string.
+message Uuid {
+    1: value string;
+}
+
+/// An arbitrary-precision decimal value.
+///
+/// The `value` bytes encode the decimal in an implementation-defined format.
+/// Consumers should agree on a serialization convention (e.g. BCD, string
+/// UTF-8, or a binary significand/exponent encoding) before exchanging
+/// `Decimal` messages.
+message Decimal {
+    1: value bytes;
+}
+
+/// A monetary value with currency code.
+message Money {
+    1: currency_code string;
+    2: units int64;
+    3: nanos int32;
+}
+
+/// A closed time interval, identified by its start and end points.
+message Interval {
+    1: start Timestamp;
+    2: end Timestamp;
+}
+
+/// Pagination state returned by list operations.
+message Pagination {
+    1: page_token string;
+    2: page_size int32?;
+    3: total int64?;
+}
+
+/// Structured error detail returned alongside an RPC status.
+message ErrorDetail {
+    1: code string;
+    2: message string;
+    3: details repeated Any;
+}
+
+// ---- Wrapper types ---------------------------------------------------------
+
+/// Wrapper for `bool` using explicit presence.
+message BoolValue {
+    1: value bool?;
+}
+
+/// Wrapper for `bytes` using explicit presence.
+message BytesValue {
+    1: value bytes?;
+}
+
+/// Wrapper for `double` using explicit presence.
+message DoubleValue {
+    1: value double?;
+}
+
+/// Wrapper for `float32` using explicit presence.
+message FloatValue {
+    1: value float32?;
+}
+
+/// Wrapper for `int32` using explicit presence.
+message Int32Value {
+    1: value int32?;
+}
+
+/// Wrapper for `int64` using explicit presence.
+message Int64Value {
+    1: value int64?;
+}
+
+/// Wrapper for `uint32` using explicit presence.
+message UInt32Value {
+    1: value uint32?;
+}
+
+/// Wrapper for `uint64` using explicit presence.
+message UInt64Value {
+    1: value uint64?;
+}
+
+/// Wrapper for `string` using explicit presence.
+message StringValue {
+    1: value string?;
+}

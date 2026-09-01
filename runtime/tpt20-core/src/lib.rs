@@ -14,11 +14,14 @@ pub mod message;
 pub mod scalar;
 pub mod varint;
 pub mod wire;
+pub mod descriptor;
 
 pub use error::{DecodeError, EncodeError};
 pub use limits::{DecoderLimits, UnknownFieldPolicy};
-pub use message::{split_len_delimited, Field, RawMessage, Value};
+pub use message::{BorrowedField, BorrowedMessage, BorrowedValue, split_len_delimited, Field, RawMessage, Value};
 pub use wire::{Tag, WireClass};
+pub use descriptor::{FieldDescriptor, FieldKind, MessageDescriptor, OneofDescriptor, ScalarKind};
+pub use dynamic::DynamicMessage;
 
 /// Optional envelope wrapping a schema-identified payload (spec §9).
 ///

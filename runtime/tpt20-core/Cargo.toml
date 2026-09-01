@@ -10,3 +10,6 @@ description = "Native binary wire format and core runtime for tpt20"
 
 [dependencies]
 thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tpt20-json = { path = "../tpt20-json" }

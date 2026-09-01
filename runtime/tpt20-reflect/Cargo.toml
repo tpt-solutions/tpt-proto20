@@ -1,0 +1,15 @@
+[package]
+name = "tpt20-reflect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Descriptor-driven reflection for tpt20 schemas (spec §13)"
+
+[dependencies]
+tpt20-core = { path = "../tpt20-core" }
+tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
+tpt20-ir = { path = "../../compiler/tpt20-ir" }
+thiserror = { workspace = true }

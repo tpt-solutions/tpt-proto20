@@ -373,6 +373,224 @@ fn encode_message(msg: &RawMessage, out: &mut Vec<u8>) -> Result<(), EncodeError
 /// private helper above.
 pub use crate::varint::encode_varint_vec as canonical_varint;
 
+// ---------------------------------------------------------------------------
+// Borrowed (zero-copy) message types
+// ---------------------------------------------------------------------------
+
+/// A decoded scalar value borrowed from the original message bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorrowedValue<'a> {
+    /// A varint payload.
+    Varint(u64),
+    /// A 32-bit fixed-width little-endian value.
+    Fixed32(u32),
+    /// A 64-bit fixed-width little-endian value.
+    Fixed64(u64),
+    /// A length-delimited payload borrowed from the source slice.
+    Len(&'a [u8]),
+}
+
+/// A single field occurrence borrowed from the original message bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BorrowedField<'a> {
+    /// The field identifier.
+    pub field_id: u32,
+    /// The wire class determined by the tag.
+    pub wire_class: WireClass,
+    /// The borrowed value.
+    pub value: BorrowedValue<'a>,
+}
+
+impl<'a> BorrowedField<'a> {
+    /// Constructs a borrowed field from its parts.
+    pub fn new(field_id: u32, wire_class: WireClass, value: BorrowedValue<'a>) -> BorrowedField<'a> {
+        BorrowedField {
+            field_id,
+            wire_class,
+            value,
+        }
+    }
+}
+
+/// A message decoded in borrowed form: length-delimited payloads reference the
+/// original byte slice, avoiding allocation (spec §11.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BorrowedMessage<'a> {
+    /// The original source bytes. Kept alive for the lifetime of the message.
+    pub bytes: &'a [u8],
+    /// Fields in encounter order.
+    pub fields: Vec<BorrowedField<'a>>,
+}
+
+impl<'a> BorrowedMessage<'a> {
+    /// Creates an empty borrowed message.
+    pub fn new(bytes: &'a [u8]) -> BorrowedMessage<'a> {
+        BorrowedMessage {
+            bytes,
+            fields: Vec::new(),
+        }
+    }
+
+    /// Pushes a borrowed field onto the message.
+    pub fn push(&mut self, field: BorrowedField<'a>) {
+        self.fields.push(field);
+    }
+
+    /// Returns the number of field occurrences.
+    pub fn field_count(&self) -> usize {
+        self.fields.len()
+    }
+
+    /// Iterates over fields with the given id.
+    pub fn get(&self, field_id: u32) -> impl Iterator<Item = &BorrowedField<'a>> {
+        self.fields.iter().filter(move |f| f.field_id == field_id)
+    }
+
+    /// Returns the first value for `field_id`, if present.
+    pub fn get_first(&self, field_id: u32) -> Option<&BorrowedValue<'a>> {
+        self.fields.iter().find(|f| f.field_id == field_id).map(|f| &f.value)
+    }
+
+    /// Reads a bytes field by id.
+    pub fn get_bytes(&self, field_id: u32) -> Option<&'a [u8]> {
+        self.get_first(field_id).and_then(|v| match v {
+            BorrowedValue::Len(b) => Some(*b),
+            _ => None,
+        })
+    }
+
+    /// Reads a varint field by id.
+    pub fn get_varint(&self, field_id: u32) -> Option<u64> {
+        self.get_first(field_id).and_then(|v| match v {
+            BorrowedValue::Varint(v) => Some(*v),
+            _ => None,
+        })
+    }
+
+    /// Reads a fixed32 field by id.
+    pub fn get_fixed32(&self, field_id: u32) -> Option<u32> {
+        self.get_first(field_id).and_then(|v| match v {
+            BorrowedValue::Fixed32(v) => Some(*v),
+            _ => None,
+        })
+    }
+
+    /// Reads a fixed64 field by id.
+    pub fn get_fixed64(&self, field_id: u32) -> Option<u64> {
+        self.get_first(field_id).and_then(|v| match v {
+            BorrowedValue::Fixed64(v) => Some(*v),
+            _ => None,
+        })
+    }
+
+    /// Converts this borrowed message into an owned `RawMessage`.
+    pub fn to_owned(&self) -> RawMessage {
+        RawMessage {
+            fields: self
+                .fields
+                .iter()
+                .map(|f| Field {
+                    field_id: f.field_id,
+                    wire_class: f.wire_class,
+                    value: match f.value {
+                        BorrowedValue::Varint(v) => Value::Varint(v),
+                        BorrowedValue::Fixed32(v) => Value::Fixed32(v),
+                        BorrowedValue::Fixed64(v) => Value::Fixed64(v),
+                        BorrowedValue::Len(b) => Value::Len(b.to_vec()),
+                    },
+                })
+                .collect(),
+        }
+    }
+
+    /// Encodes the borrowed message by re-emitting from the original bytes
+    /// where possible (zero-copy for unknown/untouched fields), falling back to
+    /// owned re-encoding for mutated fields.
+    pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
+        self.to_owned().encode()
+    }
+
+    /// Encodes the borrowed message in canonical form.
+    pub fn encode_canonical(&self) -> Result<Vec<u8>, EncodeError> {
+        self.to_owned().encode_canonical()
+    }
+}
+
+/// Decodes a message from `bytes` in borrowed form: length-delimited payloads
+/// reference the source slice without copying (spec §11.3).
+pub fn decode_borrowed<'a>(
+    bytes: &'a [u8],
+    limits: &DecoderLimits,
+    policy: UnknownFieldPolicy,
+) -> Result<BorrowedMessage<'a>, DecodeError> {
+    decode_borrowed_filtered(bytes, limits, policy, &|_| true)
+}
+
+/// Decodes a message from `bytes` in borrowed form, applying unknown-field
+/// policy with a schema-known predicate.
+pub fn decode_borrowed_filtered<'a>(
+    bytes: &'a [u8],
+    limits: &DecoderLimits,
+    policy: UnknownFieldPolicy,
+    is_known: &dyn Fn(u32) -> bool,
+) -> Result<BorrowedMessage<'a>, DecodeError> {
+    limits.check_message_bytes(bytes.len())?;
+    let mut msg = BorrowedMessage::new(bytes);
+    let mut cursor = 0usize;
+    let mut field_count = 0usize;
+    let mut unknown_bytes = 0usize;
+    while cursor < bytes.len() {
+        if field_count >= limits.max_field_count {
+            return Err(DecodeError::FieldCountExceeded);
+        }
+        let tag_value = decode_varint(bytes, &mut cursor)?;
+        let tag = Tag::from_u64(tag_value)?;
+        let known = is_known(tag.field_id);
+        if !known && policy == UnknownFieldPolicy::Fail {
+            return Err(DecodeError::UnknownFieldForbidden);
+        }
+        let value = match tag.wire_class {
+            WireClass::Varint => BorrowedValue::Varint(decode_varint(bytes, &mut cursor)?),
+            WireClass::Fixed32 => {
+                let b = read_fixed(bytes, &mut cursor, 4)?;
+                BorrowedValue::Fixed32(u32::from_le_bytes(b[..4].try_into().expect("4 bytes")))
+            }
+            WireClass::Fixed64 => {
+                let b = read_fixed(bytes, &mut cursor, 8)?;
+                BorrowedValue::Fixed64(u64::from_le_bytes(b))
+            }
+            WireClass::Len => {
+                let payload = split_len_delimited(bytes, &mut cursor, limits)?;
+                BorrowedValue::Len(payload)
+            }
+        };
+        field_count += 1;
+        if known {
+            msg.push(BorrowedField::new(tag.field_id, tag.wire_class, value));
+        } else if policy == UnknownFieldPolicy::Preserve {
+            unknown_bytes += encoded_field_size_borrowed(tag.field_id, tag.wire_class, &value);
+            if unknown_bytes > limits.max_unknown_field_bytes {
+                return Err(DecodeError::LimitExceeded {
+                    limit: limits.max_unknown_field_bytes,
+                });
+            }
+            msg.push(BorrowedField::new(tag.field_id, tag.wire_class, value));
+        }
+    }
+    Ok(msg)
+}
+
+fn encoded_field_size_borrowed(field_id: u32, class: WireClass, value: &BorrowedValue) -> usize {
+    let tag_len = encode_varint_vec(Tag::new(field_id, class).to_u64()).len();
+    let payload_len = match value {
+        BorrowedValue::Varint(v) => encode_varint_vec(*v).len(),
+        BorrowedValue::Fixed32(_) => 4,
+        BorrowedValue::Fixed64(_) => 8,
+        BorrowedValue::Len(v) => encode_varint_vec(v.len() as u64).len() + v.len(),
+    };
+    tag_len + payload_len
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
