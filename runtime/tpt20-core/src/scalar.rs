@@ -214,6 +214,60 @@ pub fn decode_packed_fixed64(
         .collect())
 }
 
+/// Decodes a packed repeated varint field from a borrowed value.
+pub fn decode_packed_varints_borrowed(
+    value: &BorrowedValue,
+    limits: &crate::limits::DecoderLimits,
+) -> Result<Vec<u64>, DecodeError> {
+    let payload = decode_bytes_borrowed(value)?;
+    if payload.len() > limits.max_repeated_entries {
+        return Err(DecodeError::RepeatedEntriesExceeded);
+    }
+    let mut out = Vec::with_capacity(payload.len());
+    let mut cursor = 0usize;
+    while cursor < payload.len() {
+        out.push(decode_varint(payload, &mut cursor)?);
+        limits.check_repeated_entries(out.len())?;
+    }
+    Ok(out)
+}
+
+/// Decodes a packed repeated fixed32 field from a borrowed value.
+pub fn decode_packed_fixed32_borrowed(
+    value: &BorrowedValue,
+    limits: &crate::limits::DecoderLimits,
+) -> Result<Vec<u32>, DecodeError> {
+    let payload = decode_bytes_borrowed(value)?;
+    if payload.len() / 4 > limits.max_repeated_entries {
+        return Err(DecodeError::RepeatedEntriesExceeded);
+    }
+    if payload.len() % 4 != 0 {
+        return Err(DecodeError::MalformedScalar);
+    }
+    Ok(payload
+        .chunks_exact(4)
+        .map(|c| u32::from_le_bytes(c.try_into().expect("4 bytes")))
+        .collect())
+}
+
+/// Decodes a packed repeated fixed64 field from a borrowed value.
+pub fn decode_packed_fixed64_borrowed(
+    value: &BorrowedValue,
+    limits: &crate::limits::DecoderLimits,
+) -> Result<Vec<u64>, DecodeError> {
+    let payload = decode_bytes_borrowed(value)?;
+    if payload.len() / 8 > limits.max_repeated_entries {
+        return Err(DecodeError::RepeatedEntriesExceeded);
+    }
+    if payload.len() % 8 != 0 {
+        return Err(DecodeError::MalformedScalar);
+    }
+    Ok(payload
+        .chunks_exact(8)
+        .map(|c| u64::from_le_bytes(c.try_into().expect("8 bytes")))
+        .collect())
+}
+
 /// Decodes a fixed32 value interpreted as an `f32`.
 pub fn decode_float32(value: &Value) -> Result<f32, DecodeError> {
     Ok(f32::from_bits(decode_fixed32(value)?))

@@ -188,9 +188,8 @@ impl Http2Transport {
 
         if let Some(ref cert_pem) = _tls_config.cert_pem {
             let mut reader = cert_pem.as_slice();
-            for cert in rustls_pemfile::certs(&mut reader)
-                .map_err(|e| TransportError::Tls(e.to_string()))?
-            {
+            let certs: Result<Vec<_>, _> = rustls_pemfile::certs(&mut reader).collect();
+            for cert in certs.map_err(|e| TransportError::Tls(e.to_string()))? {
                 root_store.add(cert).map_err(|e| TransportError::Tls(e.to_string()))?;
             }
         }

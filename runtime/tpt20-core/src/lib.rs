@@ -18,7 +18,7 @@ pub mod descriptor;
 
 pub use error::{DecodeError, EncodeError};
 pub use limits::{DecoderLimits, UnknownFieldPolicy};
-pub use message::{BorrowedField, BorrowedMessage, BorrowedValue, split_len_delimited, Field, RawMessage, Value};
+pub use message::{decode_borrowed, decode_borrowed_filtered, BorrowedField, BorrowedMessage, BorrowedValue, split_len_delimited, Field, RawMessage, Value};
 pub use wire::{Tag, WireClass};
 pub use descriptor::{FieldDescriptor, FieldKind, MessageDescriptor, OneofDescriptor, ScalarKind};
 pub use dynamic::DynamicMessage;

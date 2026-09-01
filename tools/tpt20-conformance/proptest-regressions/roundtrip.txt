@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 1347d8639a9a5125acc5e9687fb5e58ab9346733a8bbce4b09410d488e2bff5b # shrinks to msg = RawMessage { fields: [Field { field_id: 1, wire_class: Varint, value: Fixed32(43136) }] }
+cc 1223a1c16cd5c8c0c760571a648672f881c56dd2fa6b3f36ba5e2829cda744d0 # shrinks to msg = RawMessage { fields: [Field { field_id: 1, wire_class: Varint, value: Fixed32(0) }] }

@@ -36,7 +36,7 @@ fn encode_decode_with_descriptor_roundtrip() {
     let back = DynamicMessage::decode_descriptor(desc, &bytes, &DecoderLimits::default()).unwrap();
     assert_eq!(back.get_varint_by_name("id").unwrap(), Some(7));
     assert_eq!(back.get_string_by_name("name").unwrap(), Some("test"));
-    assert_eq!(back.get_bytes_by_name("tags"), Some(b"tag1"));
+    assert_eq!(back.get_bytes_by_name("tags"), Some(&b"tag1"[..]));
 }
 
 #[test]

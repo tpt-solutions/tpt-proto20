@@ -13,8 +13,10 @@ efficiently, and predictably over time.
 
 ## Documentation
 
-See [`docs/`](docs/) for in-depth guides once available, and [`spec.txt`](spec.txt)
-for the full-scope design document.
+See [`docs/`](docs/) for in-depth guides — quickstart, schema language,
+wire format, RPC model, compatibility adapters, security limits,
+observability, code generation, CLI reference, and provenance policy — and
+[`spec.txt`](spec.txt) for the full-scope design document.
 
 ## Status
 

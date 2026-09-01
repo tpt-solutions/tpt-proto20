@@ -480,6 +480,11 @@ impl<'a> DynamicMessage<'a> {
         &self.raw.fields
     }
 
+    /// Returns the underlying raw message.
+    pub fn raw(&self) -> &RawMessage {
+        &self.raw
+    }
+
     /// Returns the number of unknown field occurrences.
     pub fn unknown_field_count(&self) -> usize {
         self.raw.fields.len()

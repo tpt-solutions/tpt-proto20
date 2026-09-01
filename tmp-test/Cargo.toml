@@ -1,0 +1,5 @@
+use std::sync::Arc;
+
+fn main() {
+    let _ = rustls::ClientConfig::new();
+}

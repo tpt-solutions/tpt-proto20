@@ -61,7 +61,7 @@ fn json_roundtrip_dynamic_message() {
     let json = msg.to_json().unwrap();
     let back = DynamicMessage::from_json(desc, &json).unwrap();
     assert_eq!(back.get_varint_by_name("id").unwrap(), Some(42));
-    assert_eq!(back.get_bytes_by_name("data"), Some(b"hello"));
+    assert_eq!(back.get_bytes_by_name("data"), Some(&b"hello"[..]));
 }
 
 #[test]

@@ -13,6 +13,7 @@
 //! optional fields is safe; removing or changing existing field IDs is
 //! breaking.
 
+pub mod json;
 pub mod schema;
 
 use std::collections::BTreeMap;

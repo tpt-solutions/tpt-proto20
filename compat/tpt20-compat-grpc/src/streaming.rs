@@ -20,6 +20,9 @@ pub enum GrpcStreamingType {
     Bidi,
 }
 
+/// Placeholder for streaming semantics documentation.
+pub struct StreamingSemantics;
+
 impl From<GrpcStreamingType> for StreamingType {
     fn from(streaming: GrpcStreamingType) -> Self {
         match streaming {

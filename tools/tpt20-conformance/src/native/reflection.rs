@@ -251,5 +251,5 @@ fn proxy_gateway_use_case() {
 
     let outbound = inbound.encode().unwrap();
     let roundtrip = ReflectDynamicMessage::decode(msg_ir, &descriptor, &outbound, &DecoderLimits::default(), UnknownFieldPolicy::Preserve).unwrap();
-    assert_eq!(inbound.raw.fields, roundtrip.raw.fields);
+    assert_eq!(inbound.raw().fields, roundtrip.raw().fields);
 }
