@@ -79,6 +79,30 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// Returns true if the message or any of its transitive fields borrow
+    /// string/bytes payloads, which forces the view struct to carry a lifetime.
+    fn message_needs_lifetime(&self, msg: &ir::MessageIr) -> bool {
+        fn field_needs(f: &ir::FieldIr) -> bool {
+            match &f.label {
+                ir::FieldLabelIr::Singular(t) => {
+                    model::is_scalar_path(&t.path)
+                        && matches!(t.path[0].as_str(), "string" | "bytes")
+                }
+                ir::FieldLabelIr::Repeated(t) => {
+                    model::is_scalar_path(&t.path)
+                        && matches!(t.path[0].as_str(), "string" | "bytes")
+                }
+                ir::FieldLabelIr::Map { value, .. } => {
+                    model::is_scalar_path(&value.path)
+                        && matches!(value.path[0].as_str(), "string" | "bytes")
+                }
+            }
+        }
+        msg.fields.iter().any(field_needs)
+            || msg.oneofs.iter().any(|o| o.fields.iter().any(field_needs))
+            || msg.messages.iter().any(|m| self.message_needs_lifetime(m))
+    }
+
     /// Owned Rust type for a referenced type relative to `scope`.
     fn owned_type(&self, scope: &[String], path: &[String]) -> String {
         if model::is_scalar_path(path) {
@@ -95,7 +119,54 @@ impl<'a> Emitter<'a> {
             return expr::view_rust_type(path[0].as_str()).to_string();
         }
         let base = self.resolve_ref(scope, path).0;
-        format!("{base}View<'a>")
+        let needs_lt = self.type_needs_lifetime(scope, path);
+        if needs_lt {
+            format!("{base}View<'a>")
+        } else {
+            format!("{base}View")
+        }
+    }
+
+    fn type_needs_lifetime(&self, scope: &[String], path: &[String]) -> bool {
+        if model::is_scalar_path(path) {
+            return matches!(path[0].as_str(), "string" | "bytes");
+        }
+        if let Some(msg) = self.find_message_ir(scope, path) {
+            self.message_needs_lifetime(msg)
+        } else {
+            true
+        }
+    }
+
+    fn find_message_ir(&self, scope: &[String], path: &[String]) -> Option<&'a ir::MessageIr> {
+        if path.is_empty() {
+            return None;
+        }
+        if let Some(msg) = self.pkg.messages.iter().find(|m| m.name == path[0]) {
+            if path.len() == 1 {
+                return Some(msg);
+            }
+            return self.find_nested_ir(&msg.messages, &path[1..]);
+        }
+        None
+    }
+
+    fn find_nested_ir(
+        &self,
+        messages: &[ir::MessageIr],
+        path: &[String],
+    ) -> Option<&'a ir::MessageIr> {
+        if path.is_empty() {
+            return None;
+        }
+        if let Some(msg) = messages.iter().find(|m| m.name == path[0]) {
+            if path.len() == 1 {
+                return Some(msg);
+            }
+            self.find_nested_ir(&msg.messages, &path[1..])
+        } else {
+            None
+        }
     }
 
     fn header(&mut self) {
@@ -686,13 +757,13 @@ r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
                     let word = expr::to_wire_word(scalar, "*v");
                     let pfn = packed_encode_fn(pack);
                     b.push_str(&format!(
-"        if !self.{fname}.is_empty() {{\n            let words: Vec<_> = self.{fname}.iter().map(|v| {word}).collect();\n            raw.push(__core::Field::new({id}, {}, __core::Value::Len({pfn}(&words))));\n        }}\n",
+"        if !self.{fname}.is_empty() {{\n            let words: Vec<_> = self.{fname}.iter().map(|v| {word}).collect();\n            raw.push(__core::Field::new({id}, {}, {pfn}(&words)));\n        }}\n",
                         class_name(crate::WireClass::Len),
                     ));
                 }
             },
             TypeKind::Enum { .. } => b.push_str(&format!(
-"        if !self.{fname}.is_empty() {{\n            let words: Vec<u64> = self.{fname}.iter().map(|v| v.to_i32() as u64).collect();\n            raw.push(__core::Field::new({id}, {}, __core::Value::Len(__scalar::encode_packed_varints(&words))));\n        }}\n",
+"        if !self.{fname}.is_empty() {{\n            let words: Vec<u64> = self.{fname}.iter().map(|v| v.to_i32() as u64).collect();\n            raw.push(__core::Field::new({id}, {}, __scalar::encode_packed_varints(&words)));\n        }}\n",
                 class_name(crate::WireClass::Len),
             )),
             TypeKind::Message => b.push_str(&format!(
@@ -920,8 +991,13 @@ r#"        for (k, v) in &self.{fname} {{
                          } else {
                              self.owned_type(scope, &t.path)
                          };
+                         let method = if view {
+                             turbo_call(&ty, "decode_inner")
+                         } else {
+                             format!("{ty}::decode_inner")
+                         };
                          format!(
- "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    {target}.{fname} = Some({ty}::decode_inner(sub, limits, depth + 1)?);\n                }}\n",
+  "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    {target}.{fname} = Some({method}(sub, limits, depth + 1)?);\n                }}\n",
                              f.id,
                              class_name(crate::WireClass::Len),
                          )
@@ -1011,17 +1087,22 @@ r#"        for (k, v) in &self.{fname} {{
                     )
                 }
             }
-             TypeKind::Message => {
-                 let ty = if view {
-                     self.view_type(scope, f.label.unwrap_type().path.as_slice())
-                 } else {
-                     self.owned_type(scope, f.label.unwrap_type().path.as_slice())
-                 };
-                 format!(
- "                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{fname}.push({ty}::decode_inner(sub, limits, depth + 1)?);\n                }}\n",
-                     len = class_name(crate::WireClass::Len),
-                 )
-             }
+              TypeKind::Message => {
+                  let ty = if view {
+                      self.view_type(scope, f.label.unwrap_type().path.as_slice())
+                  } else {
+                      self.owned_type(scope, f.label.unwrap_type().path.as_slice())
+                  };
+                  let method = if view {
+                      turbo_call(&ty, "decode_inner")
+                  } else {
+                      format!("{ty}::decode_inner")
+                  };
+                  format!(
+  "                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{fname}.push({method}(sub, limits, depth + 1)?);\n                }}\n",
+                      len = class_name(crate::WireClass::Len),
+                  )
+              }
         }
     }
 
@@ -1066,16 +1147,21 @@ r#"        for (k, v) in &self.{fname} {{
                     format!("{ety}::from_i32(__support::wire_i32(&ef.value)?)?")
                 }
             }
-             TypeKind::Message => {
-                 let ty = if view {
-                     self.view_type(scope, &value.path)
-                 } else {
-                     self.owned_type(scope, &value.path)
-                 };
-                 format!(
-                     "{ty}::decode_inner(__scalar::decode_bytes(&ef.value)?, limits, depth + 1)?",
-                 )
-             }
+              TypeKind::Message => {
+                  let ty = if view {
+                      self.view_type(scope, &value.path)
+                  } else {
+                      self.owned_type(scope, &value.path)
+                  };
+                  let method = if view {
+                      turbo_call(&ty, "decode_inner")
+                  } else {
+                      format!("{ty}::decode_inner")
+                  };
+                  format!(
+                      "{method}(__scalar::decode_bytes(&ef.value)?, limits, depth + 1)?",
+                  )
+              }
         };
         let kt = if view {
             expr::view_rust_type(key_scalar).to_string()
@@ -1083,34 +1169,34 @@ r#"        for (k, v) in &self.{fname} {{
             self.owned_type(&[], &[key_scalar.to_string()])
         };
         format!(
-r#"                ({id}, {len}) => {{
-                    let entry_bytes = __scalar::decode_bytes(&field.value)?;
-                    let entry = __core::RawMessage::decode(
-                        entry_bytes,
-                        limits,
-                        __core::UnknownFieldPolicy::Preserve,
-                    )?;
-                    let mut k: Option<{kt}> = None;
-                    let mut v: Option<{vt}> = None;
-                    for ef in &entry.fields {{
-                        match (ef.field_id, ef.wire_class) {{
-                            (1, {kclass}) => {{
-                                k = Some({kdec}?);
-                            }}
-                            (2, {vclass}) => {{
-                                v = Some({vexpr});
-                            }}
-                            _ => {{}}
-                        }}
-                    }}
-                    match (k, v) {{
-                        (Some(k), Some(v)) => {{
-                            out_msg.{fname}.insert(k, v);
-                        }}
-                        _ => return Err(__core::DecodeError::MalformedMapEntry),
-                    }}
-                    limits.check_map_entries(out_msg.{fname}.len())?;
-                }}
+            r#"                ({id}, {len}) => {{
+                     let entry_bytes = __scalar::decode_bytes(&field.value)?;
+                     let entry = __core::RawMessage::decode(
+                         entry_bytes,
+                         limits,
+                         __core::UnknownFieldPolicy::Preserve,
+                     )?;
+                     let mut k: Option<{kt}> = None;
+                     let mut v: Option<{vt}> = None;
+                     for ef in &entry.fields {{
+                         match (ef.field_id, ef.wire_class) {{
+                             (1, {kclass}) => {{
+                                 k = Some({kdec}?);
+                             }}
+                             (2, {vclass}) => {{
+                                 v = Some({vexpr});
+                             }}
+                             _ => {{}}
+                         }}
+                     }}
+                     match (k, v) {{
+                         (Some(k), Some(v)) => {{
+                             out_msg.{fname}.{map_push}((k, v));
+                         }}
+                         _ => return Err(__core::DecodeError::MalformedMapEntry),
+                     }}
+                     limits.check_map_entries(out_msg.{fname}.len())?;
+                 }}
 "#,
             id = f.id,
             len = class_name(crate::WireClass::Len),
@@ -1118,6 +1204,7 @@ r#"                ({id}, {len}) => {{
             vt = vt,
             kclass = class_name(kinfo.class),
             vclass = class_name(vclass.unwrap_or(crate::WireClass::Len)),
+            map_push = if view { "push" } else { "insert" },
         )
     }
 
@@ -1169,8 +1256,13 @@ r#"                ({id}, {len}) => {{
                  } else {
                      self.owned_type(scope, &t.path)
                  };
+                 let method = if view {
+                     turbo_call(&mty, "decode_inner")
+                 } else {
+                     format!("{mty}::decode_inner")
+                 };
                  format!(
- "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({mty}::decode_inner(sub, limits, depth + 1)?));\n                }}\n",
+  "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({method}(sub, limits, depth + 1)?));\n                }}\n",
                      mf.id,
                      class_name(crate::WireClass::Len),
                  )
@@ -1181,9 +1273,11 @@ r#"                ({id}, {len}) => {{
     /// Emits the borrowed view struct and its decoder.
     fn emit_view(&mut self, scope: &[String], msg: &ir::MessageIr, ctx: &MsgCtx) {
         let flat = format!("{}View", ctx.flat);
+        let needs_lifetime = self.message_needs_lifetime(msg);
+        let lt = if needs_lifetime { "<'a>" } else { "" };
         let mut s = String::new();
         s.push_str(&format!(
-            "\n/// Borrowed view over `{}` bytes (spec \u{a7}11.2): strings/bytes borrow,\n/// numerics copy. Unknown fields are dropped here (use owned decoding to\n/// preserve them).\n#[derive(Debug, Clone, PartialEq)]\npub struct {flat}<'a> {{\n",
+            "\n/// Borrowed view over `{}` bytes (spec \u{a7}11.2): strings/bytes borrow,\n/// numerics copy. Unknown fields are dropped here (use owned decoding to\n/// preserve them).\n#[derive(Debug, Clone, PartialEq)]\npub struct {flat}{lt} {{\n",
             ctx.flat
         ));
         for f in &msg.fields {
@@ -1193,7 +1287,7 @@ r#"                ({id}, {len}) => {{
         }
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
-            let oty = format!("{}{}View<'a>", ctx.flat, naming::pascal(&o.name));
+            let oty = format!("{}{}View{lt}", ctx.flat, naming::pascal(&o.name));
             s.push_str(&format!("    pub {oname}: Option<{oty}>,\n"));
         }
         s.push_str("}\n");
@@ -1202,7 +1296,7 @@ r#"                ({id}, {len}) => {{
         for o in &msg.oneofs {
             let oty = format!("{}{}View", ctx.flat, naming::pascal(&o.name));
             s.push_str(&format!(
-"\n/// Borrowed oneof view for `{}`.\n#[derive(Debug, Clone, PartialEq)]\npub enum {oty}<'a> {{\n",
+"\n/// Borrowed oneof view for `{}`.\n#[derive(Debug, Clone, PartialEq)]\npub enum {oty}{lt} {{\n",
                 o.name
             ));
             for mf in &o.fields {
@@ -1221,12 +1315,13 @@ r#"                ({id}, {len}) => {{
             .map(|i| i.to_string())
             .collect::<Vec<_>>()
             .join(", ");
+        let bytes_lt = if needs_lifetime { "'a" } else { "" };
         s.push_str(&format!(
-r#"impl<'a> {flat}<'a> {{
+            r#"impl{lt} {flat}{lt} {{
     const KNOWN_IDS: &'static [u32] = &[{known}];
 
     fn decode_inner(
-        bytes: &'a [u8],
+        bytes: &{bytes_lt} [u8],
         limits: &__core::DecoderLimits,
         depth: usize,
     ) -> Result<Self, __core::DecodeError> {{
@@ -1253,7 +1348,7 @@ r#"impl<'a> {flat}<'a> {{
 
     /// Decodes a view with explicit resource limits.
     pub fn decode_with_limits(
-        bytes: &'a [u8],
+        bytes: &{bytes_lt} [u8],
         limits: &__core::DecoderLimits,
     ) -> Result<Self, __core::DecodeError> {{
         Self::decode_inner(bytes, limits, 1)
@@ -1330,6 +1425,8 @@ r#"impl<'a> {flat}<'a> {{
                         || f.presence == ir::Presence::Explicit
                     {
                         "None"
+                    } else if let TypeKind::Enum { .. } = self.resolve_ref(scope, &t.path).1 {
+                        format!("{}::default()", self.owned_type(scope, &t.path))
                     } else {
                         scalar_zero(t.path[0].as_str())
                     }
@@ -1597,17 +1694,6 @@ r#"impl<'a> {flat}<'a> {{
         }
         s.push_str("}\n");
 
-        s.push_str(&format!("impl Default for {bty} {{\n    fn default() -> Self {{\n        Self {{\n"));
-        for f in &msg.fields {
-            let fname = naming::field_ident(&f.name);
-            s.push_str(&format!("            {fname}: Default::default(),\n"));
-        }
-        for o in &msg.oneofs {
-            let oname = naming::field_ident(&o.name);
-            s.push_str(&format!("            {oname}: None,\n"));
-        }
-        s.push_str("        }\n    }\n}\n");
-
         s.push_str(&format!("impl {bty} {{\n"));
         for f in &msg.fields {
             let fname = naming::field_ident(&f.name);
@@ -1705,19 +1791,40 @@ r#"impl<'a> {flat}<'a> {{
         let name_lit = format!("{:?}", f.name);
         let mut out = String::new();
         if let Some(max) = anno_int(f, "max_len") {
-            out.push_str(&format!(
+            let check = if f.presence == ir::Presence::Explicit {
+                format!(
+"        if let Some(v) = &self.{fname} {{\n            if v.len() > {max} {{\n                return Err(BuildError::MaxLenExceeded {{ field: {name_lit}, max: {max} }});\n            }}\n        }}\n"
+                )
+            } else {
+                format!(
 "        if self.{fname}.len() > {max} {{\n            return Err(BuildError::MaxLenExceeded {{ field: {name_lit}, max: {max} }});\n        }}\n"
-            ));
+                )
+            };
+            out.push_str(&check);
         }
         if let Some(min) = anno_int(f, "min_len") {
-            out.push_str(&format!(
+            let check = if f.presence == ir::Presence::Explicit {
+                format!(
+"        if let Some(v) = &self.{fname} {{\n            if v.len() < {min} {{\n                return Err(BuildError::MinLenViolation {{ field: {name_lit}, min: {min} }});\n            }}\n        }}\n"
+                )
+            } else {
+                format!(
 "        if self.{fname}.len() < {min} {{\n            return Err(BuildError::MinLenViolation {{ field: {name_lit}, min: {min} }});\n        }}\n"
-            ));
+                )
+            };
+            out.push_str(&check);
         }
         if let Some((lo, hi)) = anno_range(f) {
-            out.push_str(&format!(
+            let check = if f.presence == ir::Presence::Explicit {
+                format!(
+"        if let Some(v) = &self.{fname} {{\n            if !(({lo})..=({hi})).contains(v) {{\n                return Err(BuildError::OutOfRange {{ field: {name_lit} }});\n            }}\n        }}\n"
+                )
+            } else {
+                format!(
 "        if !(({lo})..=({hi})).contains(&self.{fname}) {{\n            return Err(BuildError::OutOfRange {{ field: {name_lit} }});\n        }}\n"
-            ));
+                )
+            };
+            out.push_str(&check);
         }
         out
     }
@@ -1735,12 +1842,12 @@ fn key_to_string(key_scalar: &str, k: &str) -> String {
 /// JSON string -> map key parse expression (`Result<K, JsonError>` on `ks`).
 fn key_from_string(key_scalar: &str) -> String {
     match key_scalar {
-        "string" => "__json::as_str(ks).map(str::to_string)".to_string(),
-        "bool" => "__json::as_bool(ks)".to_string(),
-        "uint64" | "fixed64" => "__json::as_u64(ks)".to_string(),
-        "uint32" | "fixed32" => "__support::as_u32(ks)".to_string(),
-        "int32" | "sint32" => "__json::as_i64(ks)? as i32".to_string(),
-        _ => "__json::as_i64(ks)?".to_string(),
+        "string" => "Ok(ks.clone())".to_string(),
+        "bool" => "ks.parse::<bool>().map_err(|_| __json::JsonError::TypeMismatch { expected: \"bool\" })".to_string(),
+        "uint64" | "fixed64" => "ks.parse::<u64>().map_err(|_| __json::JsonError::TypeMismatch { expected: \"uint64\" })".to_string(),
+        "uint32" | "fixed32" => "ks.parse::<u32>().map_err(|_| __json::JsonError::TypeMismatch { expected: \"uint32\" })".to_string(),
+        "int32" | "sint32" => "ks.parse::<i32>().map_err(|_| __json::JsonError::TypeMismatch { expected: \"int32\" })".to_string(),
+        _ => "ks.parse::<i64>().map_err(|_| __json::JsonError::TypeMismatch { expected: \"int64\" })".to_string(),
     }
 }
 
@@ -1833,6 +1940,18 @@ pub(crate) fn class_name(c: crate::WireClass) -> &'static str {
         crate::WireClass::Fixed32 => "__core::WireClass::Fixed32",
         crate::WireClass::Fixed64 => "__core::WireClass::Fixed64",
         crate::WireClass::Len => "__core::WireClass::Len",
+    }
+}
+
+/// Produces a turbo-path call like `Type::<'a>::method` when `ty` carries a
+/// lifetime parameter, falling back to `Type::method` otherwise.
+pub(crate) fn turbo_call(ty: &str, method: &str) -> String {
+    if let Some(idx) = ty.find('<') {
+        let base = &ty[..idx];
+        let lt = &ty[idx..];
+        format!("{base}::<{lt}>::{method}")
+    } else {
+        format!("{ty}::{method}")
     }
 }
 

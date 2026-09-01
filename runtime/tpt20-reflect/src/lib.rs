@@ -20,14 +20,16 @@
 //! Example (spec §13):
 //!
 //! ```rust
+//! use tpt20_core::{DecoderLimits, UnknownFieldPolicy};
 //! use tpt20_descriptor::Descriptor;
 //! use tpt20_reflect::DynamicMessage;
 //!
-//! let descriptor = Descriptor::from_json(json)?;
+//! let json = r#"{"name":"test.v1","messages":[{"name":"User","fields":[{"id":1,"name":"id","label":{"Singular":{"path":["int64"]}},"presence":"Implicit"},{"id":2,"name":"name","label":{"Singular":{"path":["string"]}},"presence":"Implicit"}],"oneofs":[],"messages":[],"enums":[],"reserved":[],"annotations":[],"span":{"line":1,"column":1}}],"enums":[],"services":[],"reserved":[],"compat":{"policy":"","versions":[],"deprecations":[]},"fingerprint":null}"#;
+//! let descriptor = Descriptor::from_json(json).unwrap();
 //! let msg = descriptor.find_message("User").unwrap();
-//! let message = DynamicMessage::decode(msg, &descriptor, bytes, &DecoderLimits::default(), UnknownFieldPolicy::Preserve)?;
-//! let name = message.get_field("name")?;
-//! let bytes = message.encode()?;
+//! let message = DynamicMessage::decode(msg, &descriptor, &[], &DecoderLimits::default(), UnknownFieldPolicy::Preserve).unwrap();
+//! let _name = message.get_field("name").unwrap();
+//! let _bytes = message.encode().unwrap();
 //! ```
 
 use std::borrow::Cow;
@@ -248,6 +250,7 @@ pub type ReflectMapEntry<'a> = (ReflectValue<'a>, ReflectValue<'a>);
 ///
 /// Holds a decoded [`RawMessage`] together with schema context so fields can
 /// be inspected and mutated by name or id.
+#[derive(Debug, Clone, PartialEq)]
 pub struct DynamicMessage<'a> {
     raw: RawMessage,
     message: &'a ir::MessageIr,
@@ -286,12 +289,13 @@ impl<'a> DynamicMessage<'a> {
     /// emitting the total field order.
     pub fn encode_canonical(&self) -> Result<Vec<u8>, EncodeError> {
         let mut msg = self.raw.clone();
-        let groups: Vec<&[u32]> = self
+        let groups_vec: Vec<Vec<u32>> = self
             .message
             .oneofs
             .iter()
             .map(|o| o.fields.iter().map(|f| f.id).collect::<Vec<_>>())
             .collect();
+        let groups: Vec<&[u32]> = groups_vec.iter().map(|v| v.as_slice()).collect();
         msg.canonical_reduce_oneofs(&groups);
         let map_ids: Vec<u32> = self
             .message
@@ -615,7 +619,7 @@ impl<'a> DynamicMessage<'a> {
         }
     }
 
-    fn get_oneof_value(&self, oneof: &ir::OneofIr) -> Result<Option<ReflectOneof<'a>>, ReflectError> {
+    fn get_oneof_value(&self, oneof: &'a ir::OneofIr) -> Result<Option<ReflectOneof<'a>>, ReflectError> {
         let mut active: Option<(&ir::FieldIr, ReflectValue<'a>)> = None;
         for mf in &oneof.fields {
             if let Some(f) = self.raw.fields.iter().find(|f| f.field_id == mf.id) {
@@ -710,8 +714,8 @@ fn is_scalar_path(path: &[String]) -> bool {
     path.len() == 1 && path.first().map_or(false, |p| SCALAR_NAMES.contains(&p.as_str()))
 }
 
-fn interpret_value(
-    descriptor: &Descriptor,
+fn interpret_value<'a>(
+    descriptor: &'a Descriptor,
     field: &ir::FieldIr,
     value: &Value,
 ) -> Result<ReflectValue<'a>, ReflectError> {
@@ -780,7 +784,7 @@ fn interpret_value(
     }
 }
 
-fn interpret_scalar(path: &[String], value: &Value) -> Result<ReflectValue<'a>, ReflectError> {
+fn interpret_scalar<'a>(path: &[String], value: &Value) -> Result<ReflectValue<'a>, ReflectError> {
     let scalar = path.first().map(|s| s.as_str());
     match scalar {
         Some("bool") => Ok(ReflectValue::Varint(tpt20_core::scalar::decode_uint(value)?)),
@@ -859,7 +863,7 @@ fn reflect_value_to_core(
     }
 }
 
-fn resolve_enum_name(descriptor: &Descriptor, type_path: &[String], number: i32) -> Option<&'a str> {
+fn resolve_enum_name<'a>(descriptor: &'a Descriptor, type_path: &[String], number: i32) -> Option<&'a str> {
     find_enum_by_path(descriptor, type_path)
         .and_then(|ei| ei.values.iter().find(|v| v.number == number))
         .map(|v| v.name.as_str())
@@ -996,12 +1000,12 @@ mod tests {
                 ir::MessageIr {
                     name: "Status".into(),
                     fields: vec![
-                        ir::FieldIr {
-                            id: 1,
-                            name: "code".into(),
-                            label: ir::FieldLabelIr::Singular(ir::TypeRefIr {
-                                path: vec!["int32".into()],
-                            }),
+                    ir::FieldIr {
+                        id: 1,
+                        name: "code".into(),
+                        label: ir::FieldLabelIr::Singular(ir::TypeRefIr {
+                            path: vec!["State".into()],
+                        }),
                             presence: ir::Presence::Implicit,
                             annotations: vec![],
                             span: ir::SourceSpan::default(),
@@ -1035,7 +1039,6 @@ mod tests {
             }],
             services: vec![],
             reserved: vec![],
-            annotations: vec![],
             compat: ir::CompatMetadata::default(),
             fingerprint: None,
         };
@@ -1124,7 +1127,7 @@ mod tests {
         raw.push(Field::new(4, WireClass::Len, Value::Len(b"b".to_vec())));
         let bytes = raw.encode().unwrap();
 
-        let message = DynamicMessage::decode(
+        let mut message = DynamicMessage::decode(
             msg_ir,
             &descriptor,
             &bytes,
@@ -1247,7 +1250,7 @@ mod tests {
     fn nested_message_access() {
         let descriptor = sample_descriptor();
         let mut pkg = descriptor.package.clone();
-        pkg.messages[0].messages.push(ir::MessageIr {
+        pkg.messages.push(ir::MessageIr {
             name: "Address".into(),
             fields: vec![ir::FieldIr {
                 id: 1,

@@ -7,8 +7,12 @@ members = [
     "compiler/tpt20-compiler",
     "compiler/tpt20-codegen-rust",
     "runtime/tpt20-core",
+    "runtime/tpt20-reflect",
     "runtime/tpt20-json",
     "runtime/tpt20-stdlib",
+    "runtime/tpt20-rpc",
+    "runtime/tpt20-transport",
+    "compat/tpt20-compat-protobuf",
     "tools/tpt20-cli",
     "tests/rust-codegen-tests",
 ]

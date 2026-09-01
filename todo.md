@@ -37,7 +37,7 @@ diagram in spec §5 and the repo layout in spec §26.
   - [ ] `runtime/tpt20-stdlib/`
   - [ ] `runtime/tpt20-rpc/`
   - [ ] `runtime/tpt20-transport/`
-  - [ ] `runtime/tpt20-observability/`
+  - [x] `runtime/tpt20-observability/`
   - [ ] `compat/tpt20-compat-protobuf/`
   - [ ] `compat/tpt20-compat-grpc/`
   - [x] `tools/tpt20-cli/`
@@ -424,37 +424,37 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 12 — Observability (`tpt20-observability`, spec §19)
 
-- [ ] Metrics
-  - [ ] Requests started
-  - [ ] Requests completed
-  - [ ] Request duration
-  - [ ] Active streams
-  - [ ] Cancelled requests
-  - [ ] Deadline-exceeded requests
-  - [ ] Bytes sent
-  - [ ] Bytes received
-  - [ ] Messages sent
-  - [ ] Messages received
-  - [ ] Decode failures
-  - [ ] Encode failures
-  - [ ] Connection errors
-  - [ ] Stream resets
-  - [ ] Labels: `service`, `method`, `status`, `streaming_type`, `transport`
-- [ ] Tracing integration
-  - [ ] Span attribute `rpc.system`
-  - [ ] Span attribute `rpc.service`
-  - [ ] Span attribute `rpc.method`
-  - [ ] Span attribute `rpc.status`
-  - [ ] Span attribute `rpc.schema_fingerprint`
-- [ ] Structured logging
-  - [ ] Request ID
-  - [ ] Service
-  - [ ] Method
-  - [ ] Status
-  - [ ] Deadline
-  - [ ] Cancellation reason
-  - [ ] Peer info where allowed
-  - [ ] Schema fingerprint where useful
+- [x] Metrics
+  - [x] Requests started
+  - [x] Requests completed
+  - [x] Request duration
+  - [x] Active streams
+  - [x] Cancelled requests
+  - [x] Deadline-exceeded requests
+  - [x] Bytes sent
+  - [x] Bytes received
+  - [x] Messages sent
+  - [x] Messages received
+  - [x] Decode failures
+  - [x] Encode failures
+  - [x] Connection errors
+  - [x] Stream resets
+  - [x] Labels: `service`, `method`, `status`, `streaming_type`, `transport`
+- [x] Tracing integration
+  - [x] Span attribute `rpc.system`
+  - [x] Span attribute `rpc.service`
+  - [x] Span attribute `rpc.method`
+  - [x] Span attribute `rpc.status`
+  - [x] Span attribute `rpc.schema_fingerprint`
+- [x] Structured logging
+  - [x] Request ID
+  - [x] Service
+  - [x] Method
+  - [x] Status
+  - [x] Deadline
+  - [x] Cancellation reason
+  - [x] Peer info where allowed
+  - [x] Schema fingerprint where useful
 - [ ] CLI schema-aware debugging support (`tpt20 decode --schema ... --message ...`),
       full CLI wiring in Phase 16
 

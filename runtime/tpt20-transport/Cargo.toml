@@ -1,0 +1,30 @@
+[package]
+name = "tpt20-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Transport layer for tpt20 (spec §17, §18.6)"
+
+[dependencies]
+thiserror.workspace = true
+bytes = "1"
+futures = "0.3"
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+h2 = { version = "0.4", optional = true }
+rustls = { version = "0.21", default-features = false, features = ["logging", "tls12"], optional = true }
+
+[target.'cfg(feature = "tls")'.dependencies]
+tokio-rustls = { version = "0.24", optional = true }
+rustls-pemfile = { version = "2.1", optional = true }
+
+[features]
+default = ["in_process"]
+in_process = []
+http2 = ["dep:h2"]
+tls = ["http2", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pemfile"]
+quic = []

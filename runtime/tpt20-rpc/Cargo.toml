@@ -1,0 +1,14 @@
+[package]
+name = "tpt20-rpc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "RPC system for tpt20 (spec §16)"
+
+[dependencies]
+thiserror.workspace = true
+tpt20-core = { path = "../tpt20-core" }
+tpt20-stdlib = { path = "../tpt20-stdlib" }

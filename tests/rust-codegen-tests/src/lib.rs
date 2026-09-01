@@ -36,6 +36,7 @@ fn sample() -> Outer {
         home: Some(Address {
             street: "1 Way".into(),
             city: None,
+            ..Default::default()
         }),
         blob: Some(vec![0xff, 0x00, 0x7f]),
         ratio: -2.5,
@@ -43,7 +44,7 @@ fn sample() -> Outer {
         inner: Some(generated::Outer_Child {
             note: "n".into(),
             depth: 3,
-            leaf: Some(generated::Outer_Child_Leaf { value: true }),
+            leaf: Some(generated::Outer_Child_Leaf { value: true, ..Default::default() }),
             unknown_fields: Default::default(),
         }),
         zigzag: i64::MIN,
