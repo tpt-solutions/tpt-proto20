@@ -30,7 +30,7 @@ orders of magnitude, not guarantees; re-run on your hardware).
 | large (1 MiB bytes) encode / decode | 841 µs / 133 µs | 1.2 / 7.4 GiB/s |
 | packed int64, 1 000 elements encode / decode | 3.6 µs / 4.3 µs | 277 / 235 Melem/s |
 | packed int64, 100 000 elements encode / decode | 467 µs / 557 µs | 214 / 180 Melem/s |
-| canonical encode (small / repeated / maps) | 251 ns / 36.7 µs / 93 µs | |
+| canonical encode (small / repeated / maps) | 183 ns / 11.8 µs / 54 µs | |
 
 ### Borrowed, unknown-field, dynamic, JSON
 
@@ -89,11 +89,12 @@ Ordered by expected payoff. None of these are correctness issues.
    has died. Effect: unary h2c 462 → 280 µs, unary TLS 1.29 ms → 281 µs, 32
    concurrent calls 4.1 → 1.5 ms. (The numbers above were re-measured after
    the change.)
-2. **Canonical encoding.** `encode_canonical` is 6× slower than `encode` on
-   repeated fields (36.7 µs vs 6.3 µs) and 3.4× on maps: it clones and sorts
-   a `RawMessage`. Generated code already emits fields in id order, so the
-   canonical path can skip the sort for messages without oneof/map
-   reductions and sort map entries in place.
+2. ~~Canonical encoding~~ — **done.** Sorting used to allocate a payload
+   key on every comparison and clone every field; it now sorts references
+   with allocation-free keys and moves map entries instead of cloning them.
+   Canonical encode: repeated 36.7 → 11.8 µs (3.1×), maps 93 → 54 µs (1.7×),
+   small 251 → 183 ns. The order is unchanged (`field_id, wire_class,
+   payload`), so canonical bytes are identical to before.
 3. **Unknown-field preservation.** Preserving 100 unknown pairs costs 7×
    the discard path (23.7 µs vs 3.3 µs) because each unknown `Field` clones
    its payload; storing them as borrowed spans of the input (or one

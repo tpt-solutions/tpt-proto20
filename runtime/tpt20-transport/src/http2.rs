@@ -29,7 +29,6 @@ use h2::{client, server, Reason, RecvStream, SendStream};
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response};
 use std::future::{poll_fn, Future};
 use std::pin::Pin;
-#[cfg(feature = "tls")]
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
