@@ -708,14 +708,16 @@ impl Http2Transport {
 }
 
 #[cfg(feature = "tls")]
-type ClientIdentity = (
+pub(crate) type ClientIdentity = (
     Vec<rustls::pki_types::CertificateDer<'static>>,
     rustls::pki_types::PrivateKeyDer<'static>,
 );
 
 /// Loads the client certificate chain and key, if one is configured.
 #[cfg(feature = "tls")]
-fn client_identity(tls: &crate::TlsConfig) -> Result<Option<ClientIdentity>, TransportError> {
+pub(crate) fn client_identity(
+    tls: &crate::TlsConfig,
+) -> Result<Option<ClientIdentity>, TransportError> {
     let configured = tls.client_cert_pem.is_some()
         || tls.client_cert_path.is_some()
         || tls.client_key_pem.is_some()
@@ -749,7 +751,7 @@ fn client_identity(tls: &crate::TlsConfig) -> Result<Option<ClientIdentity>, Tra
 /// Certificate verifier that accepts any server certificate (development only).
 #[cfg(feature = "tls")]
 #[derive(Debug)]
-struct AcceptAnyServerCert(std::sync::Arc<rustls::crypto::CryptoProvider>);
+pub(crate) struct AcceptAnyServerCert(pub(crate) std::sync::Arc<rustls::crypto::CryptoProvider>);
 
 #[cfg(feature = "tls")]
 impl rustls::client::danger::ServerCertVerifier for AcceptAnyServerCert {
@@ -1226,6 +1228,29 @@ pub struct IncomingHttp2Call {
 }
 
 impl IncomingHttp2Call {
+    /// Builds a call from the channel ends a stream-based transport wires up
+    /// (shared with the QUIC transport).
+    #[cfg(feature = "quic")]
+    pub(crate) fn from_channels(
+        method: String,
+        metadata: Metadata,
+        request: Vec<u8>,
+        response_tx: mpsc::Sender<Result<FramedMessage, TransportError>>,
+        trailers_tx: oneshot::Sender<Metadata>,
+        request_rx: mpsc::Receiver<Vec<u8>>,
+        closed: watch::Receiver<bool>,
+    ) -> Self {
+        IncomingHttp2Call {
+            method,
+            metadata,
+            request,
+            response_tx: Some(response_tx),
+            trailers_tx: Some(trailers_tx),
+            request_rx,
+            closed,
+        }
+    }
+
     /// Sends a response message to the client.
     pub async fn send_message(&self, payload: Vec<u8>) -> Result<(), TransportError> {
         let tx = self
@@ -1323,7 +1348,7 @@ impl crate::traits::IncomingCall for IncomingHttp2Call {
 }
 
 #[cfg(feature = "tls")]
-fn pem_bytes(
+pub(crate) fn pem_bytes(
     pem: &Option<Vec<u8>>,
     path: &Option<std::path::PathBuf>,
     what: &str,

@@ -25,8 +25,11 @@ tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 default = []
 # Enables `Server::serve_http2`.
 http2 = ["tpt20-transport/http2"]
+# Enables `Server::serve_quic`.
+quic = ["tpt20-transport/quic"]
 
 [dev-dependencies]
+rcgen = "0.13"
 tpt20-observability = { path = "../tpt20-observability" }
 tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
 tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }

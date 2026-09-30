@@ -400,6 +400,22 @@ impl Server {
         }
     }
 
+    /// Serves calls over QUIC until the socket fails.
+    #[cfg(feature = "quic")]
+    pub async fn serve_quic(
+        self: Arc<Self>,
+        quic: &tpt20_transport::quic::QuicServer,
+    ) -> Result<(), tpt20_transport::TransportError> {
+        quic.serve(move |call| {
+            let server = self.clone();
+            Box::pin(async move {
+                server.handle_call(call).await;
+                Ok(())
+            })
+        })
+        .await
+    }
+
     /// Serves calls over HTTP/2 until the listener fails.
     #[cfg(feature = "http2")]
     pub async fn serve_http2(

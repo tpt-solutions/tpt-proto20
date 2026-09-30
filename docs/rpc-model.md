@@ -254,7 +254,34 @@ resets the stream), cancels the call context **and drops the handler future**
 so abandoned work stops,
 and always terminates a call with a status (handler panics become `INTERNAL`).
 
-QUIC/HTTP3 is an empty feature flag with no implementation yet.
+### QUIC transport
+
+With the `quic` feature (`tpt20-transport`, forwarded by `tpt20-rpc`) there is a
+native QUIC transport on `quinn`: `QuicTransport` (client, one pooled
+connection, transparent reconnect) and `QuicServer`; `Server::serve_quic`
+plugs an RPC `Server` into it. Every call is one bidirectional QUIC stream, so
+calls never block one another on loss, and connections survive network
+changes. The full RPC behavior suite (status, metadata, deadlines,
+cancellation, all four streaming shapes) runs against it.
+
+```rust
+let tls = TlsConfig::http2(); // cert_pem/key_pem on the server; the CA to trust on the client
+let server = QuicServer::new(Endpoint::new("0.0.0.0:4433").with_tls(tls.clone()));
+Arc::new(rpc_server).serve_quic(&server).await?;
+
+let channel = Channel::new(QuicTransport::new(Endpoint::new("host:4433").with_tls(tls)));
+```
+
+It honors the same `Endpoint` settings as HTTP/2 where they apply: TLS and
+mTLS (client certificates), message/metadata size limits, connection and
+concurrent-stream caps, handshake timeout, keepalive. TLS 1.3 is mandatory and
+ALPN is `tpt20/1`.
+
+This is tpt20's own stream mapping (frames of `HEADERS`/`MESSAGE`/`TRAILERS`,
+see the `quic` module docs), **not gRPC over HTTP/3**: it does not interoperate
+with gRPC/HTTP/3 peers — use the HTTP/2 transport and the `GrpcServer` adapter
+for that. Not implemented on QUIC yet: message compression, 0-RTT, the CLI
+(`tpt20 call` speaks HTTP/2 only).
 
 ## Observability
 

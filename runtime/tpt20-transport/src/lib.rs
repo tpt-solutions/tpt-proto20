@@ -14,7 +14,7 @@
 //! - `default` = `["in_process"]` — in-process transport is always available
 //! - `http2` — HTTP/2 production transport (requires `h2`)
 //! - `tls` — TLS with ALPN (requires `tokio-rustls` and `rustls-pemfile`)
-//! - `quic` — QUIC/HTTP3 transport (requires `quinn`)
+//! - `quic` — native QUIC transport (requires `quinn`; see [`quic`])
 
 pub mod compression;
 pub mod endpoint;
@@ -24,6 +24,8 @@ pub mod frame;
 pub mod http2;
 pub mod in_process;
 pub mod metadata;
+#[cfg(feature = "quic")]
+pub mod quic;
 pub mod traits;
 
 pub use compression::Compression;

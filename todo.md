@@ -421,7 +421,7 @@ diagram in spec §5 and the repo layout in spec §26.
   - [ ] Usable in local development
   - [x] Usable in benchmarking (`benches/benches/rpc.rs`)
   - [ ] Usable in fuzzing (no fuzz target exercises the transport directly yet)
-- [ ] Optional QUIC/HTTP3 transport (empty `quic` feature flag only, no implementation)
+- [x] Optional QUIC transport (`quic` feature: native stream mapping on `quinn`, full RPC suite passes over it; not gRPC-over-HTTP/3; no compression/0-RTT/CLI yet)
 - [x] Optional custom stream transport extension point (`Transport` trait)
 
 ---

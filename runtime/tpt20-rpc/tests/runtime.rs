@@ -205,6 +205,38 @@ async fn http2_channel_with(compression: Option<Compression>) -> (Channel, WireE
 
 struct WireEndpoint(String);
 
+#[cfg(feature = "quic")]
+async fn quic_channel() -> Channel {
+    use tpt20_transport::quic::{QuicServer, QuicTransport};
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+    let mut tls = tpt20_transport::TlsConfig::http2();
+    tls.cert_pem = Some(cert.cert.pem().into_bytes());
+    tls.key_pem = Some(cert.key_pair.serialize_pem().into_bytes());
+    let server_ep = Endpoint::new("127.0.0.1:0").with_tls(tls.clone());
+    let quic = QuicServer::new(server_ep);
+    let socket = quic.bind().unwrap();
+    let port = socket.local_addr().unwrap().port();
+    let srv = server();
+    tokio::spawn(async move {
+        let _ = quic
+            .serve_socket(
+                socket,
+                move |call| {
+                    let srv = srv.clone();
+                    Box::pin(async move {
+                        srv.handle_call(call).await;
+                        Ok(())
+                    })
+                },
+                std::future::pending(),
+            )
+            .await;
+    });
+    Channel::new(QuicTransport::new(
+        Endpoint::new(format!("localhost:{port}")).with_tls(tls),
+    ))
+}
+
 fn reqs<T: Send + 'static>(items: Vec<T>) -> BoxStream<'static, T> {
     futures::stream::iter(items).boxed()
 }
@@ -370,16 +402,26 @@ async fn behavior_over_http2_transport() {
     suite(ch).await;
 }
 
+#[cfg(feature = "quic")]
+#[tokio::test]
+async fn behavior_over_quic_transport() {
+    suite(quic_channel().await).await;
+}
+
 /// When the client gives up on a call, the server stops the handler instead
 /// of letting it run to completion for nobody.
 #[tokio::test]
 async fn client_cancellation_stops_the_server_handler() {
     use std::sync::atomic::Ordering;
     let (http2_ch, _addr) = http2_channel().await;
-    for (name, ch) in [
+    #[allow(unused_mut)]
+    let mut channels = vec![
         ("http2", http2_ch),
         ("in-process", in_process_channel().await),
-    ] {
+    ];
+    #[cfg(feature = "quic")]
+    channels.push(("quic", quic_channel().await));
+    for (name, ch) in channels {
         let before = HANDLERS_DROPPED.load(Ordering::SeqCst);
         let ctx = RpcContext::new();
         let token = ctx.cancellation().clone();
