@@ -40,6 +40,18 @@ pub fn dec_owned(scalar: &str, v: &str, l: &str) -> String {
     }
 }
 
+/// Decodes from a *borrowed* wire value into an *owned* Rust value (used for
+/// map entries, which are parsed without copying the entry payload first).
+pub fn dec_owned_from_borrowed(scalar: &str, v: &str, l: &str) -> String {
+    match scalar {
+        "string" => {
+            format!("__scalar::decode_string_limited_borrowed({v}, {l}).map(str::to_string)")
+        }
+        "bytes" => format!("__scalar::decode_bytes_borrowed({v}).map(<[u8]>::to_vec)"),
+        other => dec_view(other, v, l),
+    }
+}
+
 /// Same as [`dec_owned`] but borrows string/bytes payloads (view decoding).
 pub fn dec_view(scalar: &str, v: &str, l: &str) -> String {
     match scalar {

@@ -26,7 +26,7 @@ orders of magnitude, not guarantees; re-run on your hardware).
 | small (3 fields) encode / decode | 141 ns / 118 ns | 122 / 146 MiB/s |
 | nested (3 levels) encode / decode | 373 ns / 311 ns | 72 / 86 MiB/s |
 | repeated (100 strings + 100 int64) encode / decode | 6.3 µs / 12.6 µs | 198 / 98 MiB/s |
-| maps (2 × 100 entries) encode / decode | 27 µs / 58 µs | 93 / 44 MiB/s |
+| maps (2 × 100 entries) encode / decode | 27 µs / 42 µs | 93 / 61 MiB/s |
 | large (1 MiB bytes) encode / decode | 841 µs / 133 µs | 1.2 / 7.4 GiB/s |
 | packed int64, 1 000 elements encode / decode | 3.6 µs / 4.3 µs | 277 / 235 Melem/s |
 | packed int64, 100 000 elements encode / decode | 467 µs / 557 µs | 214 / 180 Melem/s |
@@ -39,7 +39,7 @@ orders of magnitude, not guarantees; re-run on your hardware).
 | small decode: owned vs borrowed | 105 ns vs 74 ns |
 | nested decode: owned vs borrowed | 292 ns vs 156 ns |
 | 1 MiB bytes decode: owned vs borrowed | 133 µs vs 57 ns (zero-copy) |
-| unknown fields ×0 / ×10 / ×100 pairs, preserve | 111 ns / 2.8 µs / 23.7 µs |
+| unknown fields ×0 / ×10 / ×100 pairs, preserve | 107 ns / 2.3 µs / 18.3 µs |
 | same, discard (`RawMessage::decode_filtered`) | 75 ns / 435 ns / 3.3 µs |
 | dynamic (`tpt20-reflect`) decode + `get_field` vs generated decode (nested) | 142 ns vs 302 ns |
 | JSON small `to_json` / `from_json` | 293 ns / 417 ns |
@@ -95,13 +95,14 @@ Ordered by expected payoff. None of these are correctness issues.
    Canonical encode: repeated 36.7 → 11.8 µs (3.1×), maps 93 → 54 µs (1.7×),
    small 251 → 183 ns. The order is unchanged (`field_id, wire_class,
    payload`), so canonical bytes are identical to before.
-3. **Unknown-field preservation.** Preserving 100 unknown pairs costs 7×
-   the discard path (23.7 µs vs 3.3 µs) because each unknown `Field` clones
-   its payload; storing them as borrowed spans of the input (or one
-   contiguous `Bytes` tail) would avoid per-field allocation.
-4. **Map decode.** Each entry is decoded through a temporary `RawMessage`
-   (allocation per entry); decoding key/value directly from the entry bytes
-   would roughly halve map decode time.
+3. **Unknown-field preservation** (partly done). The generated decoder now
+   moves unknown fields out of the decoded `RawMessage` instead of cloning
+   them (100 pairs: 23.7 → 18.3 µs). The remaining gap to the discard path
+   (3.3 µs) is one allocation per length-delimited unknown field; storing
+   unknowns as spans of one shared buffer would remove it but changes the
+   public `unknown_fields` type.
+4. ~~Map decode~~ — **done.** Entries are parsed with the borrowed decoder
+   (no per-entry `RawMessage`/payload copies): maps ×100 decode 58 → 42 µs.
 5. **Per-call timers in the RPC runtime.** Every call arms a `tokio` sleep for
    the deadline in both `Channel` and `Server`; in-process unary is 71 µs
    mostly from task/timer/mutex overhead rather than encoding (~0.3 µs).

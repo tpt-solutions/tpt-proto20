@@ -853,9 +853,9 @@ r#"        for (k, v) in &self.{fname} {{
             "        let raw = __core::RawMessage::decode_filtered(\n            bytes,\n            limits,\n            __core::UnknownFieldPolicy::Preserve,\n            &|id| Self::KNOWN_IDS.contains(&id),\n        )?;\n",
         );
         b.push_str("        let mut out_msg = Self::default();\n");
-        b.push_str("        for field in &raw.fields {\n");
+        b.push_str("        for field in raw.fields {\n");
         b.push_str("            if !Self::KNOWN_IDS.contains(&field.field_id) {\n");
-        b.push_str("                out_msg.unknown_fields.push(field.clone());\n                continue;\n            }\n");
+        b.push_str("                out_msg.unknown_fields.push(field);\n                continue;\n            }\n");
         b.push_str("            match (field.field_id, field.wire_class) {\n");
         b.push_str(&arms);
         b.push_str("                _ => {\n                    return Err(__core::DecodeError::WireClassMismatch {\n                        field_id: field.field_id,\n                    });\n                }\n");
@@ -1050,7 +1050,7 @@ r#"        for (k, v) in &self.{fname} {{
         view: bool,
     ) -> String {
         let kinfo = scalar_info(key_scalar).expect("map keys must be scalar");
-        let kdec = expr::dec_owned(key_scalar, "&ef.value", "limits");
+        let kdec = expr::dec_owned_from_borrowed(key_scalar, "&ef.value", "limits");
         let vkind = self.resolve_ref(scope, &value.path).1;
         let vt = if view {
             if model::is_scalar_path(&value.path)
@@ -1066,15 +1066,15 @@ r#"        for (k, v) in &self.{fname} {{
         let vclass = model::Model::wire_class(vkind);
         let vexpr = match vkind {
             TypeKind::Scalar(_) => {
-                let d = expr::dec_owned(&value.path[0], "&ef.value", "limits");
+                let d = expr::dec_owned_from_borrowed(&value.path[0], "&ef.value", "limits");
                 format!("{d}?")
             }
             TypeKind::Enum { open } => {
                 let ety = self.resolve_ref(scope, &value.path).0;
                 if open {
-                    format!("{ety}::from_i32(__support::wire_i32(&ef.value)?)")
+                    format!("{ety}::from_i32(__support::wire_i32_borrowed(&ef.value)?)")
                 } else {
-                    format!("{ety}::from_i32(__support::wire_i32(&ef.value)?)?")
+                    format!("{ety}::from_i32(__support::wire_i32_borrowed(&ef.value)?)?")
                 }
             }
             TypeKind::Message => {
@@ -1091,7 +1091,7 @@ r#"        for (k, v) in &self.{fname} {{
                 let bytes_dec = if view {
                     "__scalar::decode_bytes_borrowed(&ef.value)"
                 } else {
-                    "__scalar::decode_bytes(&ef.value)"
+                    "__scalar::decode_bytes_borrowed(&ef.value)"
                 };
                 format!(
                     "{method}({bytes_dec}, limits, depth + 1)?",
@@ -1103,10 +1103,10 @@ r#"        for (k, v) in &self.{fname} {{
         format!(
             r#"                ({id}, {len}) => {{
                      let entry_bytes = __scalar::decode_bytes(&field.value)?;
-                     let entry = __core::RawMessage::decode(
+                     let entry = __core::decode_borrowed(
                          entry_bytes,
                          limits,
-                         __core::UnknownFieldPolicy::Preserve,
+                         __core::UnknownFieldPolicy::Discard,
                      )?;
                      let mut k: Option<{kt}> = None;
                      let mut v: Option<{vt}> = None;
