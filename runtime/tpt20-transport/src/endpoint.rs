@@ -98,6 +98,11 @@ pub struct Endpoint {
     pub default_metadata: Metadata,
     /// Maximum message size in bytes (None = crate default).
     pub max_message_bytes: Option<usize>,
+    /// Interval between HTTP/2 keepalive pings (None = disabled).
+    pub keepalive_interval: Option<std::time::Duration>,
+    /// How long to wait for a keepalive ping acknowledgement before the
+    /// connection is considered dead.
+    pub keepalive_timeout: std::time::Duration,
 }
 
 impl Endpoint {
@@ -108,6 +113,8 @@ impl Endpoint {
             tls: None,
             default_metadata: Metadata::new(),
             max_message_bytes: None,
+            keepalive_interval: None,
+            keepalive_timeout: std::time::Duration::from_secs(20),
         }
     }
 
@@ -135,6 +142,18 @@ impl Endpoint {
     /// Sets the maximum message size in bytes.
     pub fn with_max_message_bytes(mut self, max: usize) -> Self {
         self.max_message_bytes = Some(max);
+        self
+    }
+
+    /// Enables HTTP/2 keepalive pings every `interval`; the connection is
+    /// dropped if a ping is not acknowledged within `timeout`.
+    pub fn with_keepalive(
+        mut self,
+        interval: std::time::Duration,
+        timeout: std::time::Duration,
+    ) -> Self {
+        self.keepalive_interval = Some(interval);
+        self.keepalive_timeout = timeout;
         self
     }
 

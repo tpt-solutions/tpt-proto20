@@ -409,18 +409,16 @@ items below as "fully verified by the integration suite" until that crate compil
 
 ## Phase 11 — Transport Layer (`tpt20-transport`, spec §17)
 
-- [ ] HTTP/2 transport (required production transport)
+- [x] HTTP/2 transport (required production transport)
   - [x] Multiplexed streams (via `h2`, one stream per call)
-  - [ ] Trailers — server sends real trailers; client-side currently fabricates an
-        empty `Metadata` instead of reading actual h2 response trailers (bug)
+  - [x] Trailers — server sends real trailers; client reads them from the h2 response
   - [x] Flow control (delegated to `h2` crate defaults)
-  - [ ] Stream reset handling (`TransportError::StreamReset` defined but never
-        constructed/matched)
-  - [ ] GOAWAY handling (`TransportError::GoAway` defined but never constructed)
-  - [ ] Keepalive/ping behavior (not configured on client/server `h2` builders despite
-        doc comments claiming it)
-  - [x] TLS with ALPN — client connector on rustls 0.23 + tokio-rustls 0.26 (ring),
-        ALPN from `TlsConfig`, root certs from PEM bytes/path, opt-in accept-invalid-certs
+  - [x] Stream reset handling (`TransportError::StreamReset`; server `abort()`)
+  - [x] GOAWAY handling (`TransportError::GoAway`; server `serve_with_shutdown` sends GOAWAY)
+  - [x] Keepalive/ping behavior (`Endpoint::with_keepalive`, client and server)
+  - [x] TLS with ALPN — client + server on rustls 0.23 / tokio-rustls 0.26 (ring),
+        ALPN from `TlsConfig`, PEM bytes/path, opt-in accept-invalid-certs, server-side
+        client-CA verification (client-certificate *presentation* is not implemented yet)
   - [x] Cleartext h2c for local development (explicit opt-in only)
 - [x] Message framing: 1-byte flags + 4-byte big-endian length + N-byte payload
   - [x] Compression-enabled flag
