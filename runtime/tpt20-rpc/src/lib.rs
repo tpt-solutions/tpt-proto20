@@ -27,7 +27,10 @@ pub mod status;
 pub mod stream;
 pub mod trace;
 
-pub use auth::{AuthContext, AuthError, Authenticator, Authorizer, AllowAllAuthorizer, DenyAllAuthorizer, AclAuthorizer, RoleBasedAuthorizer, MetadataAuthenticator, TokenAuthenticator, AuthzError};
+pub use auth::{
+    AclAuthorizer, AllowAllAuthorizer, AuthContext, AuthError, Authenticator, Authorizer,
+    AuthzError, DenyAllAuthorizer, MetadataAuthenticator, RoleBasedAuthorizer, TokenAuthenticator,
+};
 pub use cancellation::CancellationToken;
 pub use compression::CompressionAlgorithm;
 pub use context::RpcContext;

@@ -1,4 +1,4 @@
-use tpt20_rpc::{RpcContext, Status, RpcError};
+use tpt20_rpc::{RpcContext, RpcError, Status};
 
 #[test]
 fn status_codes_roundtrip() {
@@ -24,7 +24,11 @@ fn status_from_code_invalid() {
 #[test]
 fn rpc_error_builder() {
     let err = RpcError::invalid_argument("bad field")
-        .with_details(tpt20_stdlib::ErrorDetail::new("validation".into(), "email invalid".into(), Vec::new()))
+        .with_details(tpt20_stdlib::ErrorDetail::new(
+            "validation".into(),
+            "email invalid".into(),
+            Vec::new(),
+        ))
         .finish();
     assert_eq!(err.status(), Status::InvalidArgument);
     assert_eq!(err.message(), "bad field");

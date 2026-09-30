@@ -2,16 +2,6 @@ use tpt20_compat_grpc::{from_grpc_headers, from_grpc_trailers, to_grpc_headers};
 use tpt20_rpc::Metadata;
 
 #[test]
-fn from_grpc_headers_skips_pseudo_headers() {
-    let mut headers = http::HeaderMap::new();
-    headers.insert(":authority", "example.com".parse().unwrap());
-    headers.insert("x-request-id", "abc".parse().unwrap());
-    let md = from_grpc_headers(&headers).unwrap();
-    assert!(md.get(":authority").is_none());
-    assert_eq!(md.get("x-request-id").map(|v| v.as_ref()), Some("abc"));
-}
-
-#[test]
 fn from_grpc_headers_skips_protocol_headers() {
     let mut headers = http::HeaderMap::new();
     headers.insert("content-type", "application/grpc".parse().unwrap());

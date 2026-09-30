@@ -32,9 +32,7 @@ pub const GRPC_RESERVED_MASK: u8 = 0x7F;
 /// length prefix does not match the actual payload size.
 pub fn decode_grpc_frame(bytes: &[u8]) -> Result<(FrameFlags, &[u8]), GrpcError> {
     if bytes.len() < 5 {
-        return Err(GrpcError::InvalidFrame(
-            "frame too short (header)".into(),
-        ));
+        return Err(GrpcError::InvalidFrame("frame too short (header)".into()));
     }
     let flags_byte = bytes[0];
     if (flags_byte & GRPC_RESERVED_MASK) != 0 {
@@ -45,9 +43,7 @@ pub fn decode_grpc_frame(bytes: &[u8]) -> Result<(FrameFlags, &[u8]), GrpcError>
     }
     let length = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
     if bytes.len() < 5 + length {
-        return Err(GrpcError::InvalidFrame(
-            "frame too short (payload)".into(),
-        ));
+        return Err(GrpcError::InvalidFrame("frame too short (payload)".into()));
     }
     let payload = &bytes[5..5 + length];
     let compressed = (flags_byte & GRPC_COMPRESSED_MASK) != 0;

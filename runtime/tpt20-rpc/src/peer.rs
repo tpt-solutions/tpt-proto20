@@ -9,7 +9,11 @@ pub struct PeerInfo {
 
 impl PeerInfo {
     pub fn new(addr: impl Into<String>, port: u16) -> Self {
-        Self { addr: addr.into(), port, identity: None }
+        Self {
+            addr: addr.into(),
+            port,
+            identity: None,
+        }
     }
     pub fn with_identity(mut self, identity: impl Into<String>) -> Self {
         self.identity = Some(identity.into());

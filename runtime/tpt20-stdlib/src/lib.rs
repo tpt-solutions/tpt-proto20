@@ -170,9 +170,7 @@ pub struct ListValue {
 
 impl Default for ListValue {
     fn default() -> Self {
-        ListValue {
-            values: Vec::new(),
-        }
+        ListValue { values: Vec::new() }
     }
 }
 
@@ -189,9 +187,7 @@ pub struct FieldMask {
 
 impl Default for FieldMask {
     fn default() -> Self {
-        FieldMask {
-            paths: Vec::new(),
-        }
+        FieldMask { paths: Vec::new() }
     }
 }
 
@@ -230,9 +226,7 @@ pub struct Decimal {
 
 impl Default for Decimal {
     fn default() -> Self {
-        Decimal {
-            value: Vec::new(),
-        }
+        Decimal { value: Vec::new() }
     }
 }
 
@@ -646,8 +640,16 @@ impl Struct {
                 WireClass::Len,
                 tpt20_core::Value::Len(name.as_bytes().to_vec()),
             ));
-            entry.push(Field::new(2, WireClass::Len, tpt20_core::Value::Len(value.encode()?)));
-            m.push(Field::new(1, WireClass::Len, tpt20_core::Value::Len(entry.encode()?)));
+            entry.push(Field::new(
+                2,
+                WireClass::Len,
+                tpt20_core::Value::Len(value.encode()?),
+            ));
+            m.push(Field::new(
+                1,
+                WireClass::Len,
+                tpt20_core::Value::Len(entry.encode()?),
+            ));
         }
         m.encode()
     }
@@ -725,10 +727,18 @@ impl StdValue {
                 ));
             }
             StdValue::Struct(s) => {
-                m.push(Field::new(5, WireClass::Len, tpt20_core::Value::Len(s.encode()?)));
+                m.push(Field::new(
+                    5,
+                    WireClass::Len,
+                    tpt20_core::Value::Len(s.encode()?),
+                ));
             }
             StdValue::List(l) => {
-                m.push(Field::new(6, WireClass::Len, tpt20_core::Value::Len(l.encode()?)));
+                m.push(Field::new(
+                    6,
+                    WireClass::Len,
+                    tpt20_core::Value::Len(l.encode()?),
+                ));
             }
         }
         m.encode()
@@ -767,12 +777,16 @@ impl StdValue {
                     let n = tpt20_core::scalar::decode_uint(&f.value)?;
                     v = Some(StdValue::Bool(n != 0));
                 }
-                5 => v = Some(StdValue::Struct(Struct::decode(
-                    tpt20_core::scalar::decode_bytes(&f.value)?,
-                )?)),
-                6 => v = Some(StdValue::List(ListValue::decode(
-                    tpt20_core::scalar::decode_bytes(&f.value)?,
-                )?)),
+                5 => {
+                    v = Some(StdValue::Struct(Struct::decode(
+                        tpt20_core::scalar::decode_bytes(&f.value)?,
+                    )?))
+                }
+                6 => {
+                    v = Some(StdValue::List(ListValue::decode(
+                        tpt20_core::scalar::decode_bytes(&f.value)?,
+                    )?))
+                }
                 _ => {}
             }
         }
@@ -790,7 +804,11 @@ impl ListValue {
     pub fn encode(&self) -> Result<Vec<u8>, tpt20_core::EncodeError> {
         let mut m = RawMessage::new();
         for v in &self.values {
-            m.push(Field::new(1, WireClass::Len, tpt20_core::Value::Len(v.encode()?)));
+            m.push(Field::new(
+                1,
+                WireClass::Len,
+                tpt20_core::Value::Len(v.encode()?),
+            ));
         }
         m.encode()
     }
@@ -989,8 +1007,16 @@ impl Interval {
     /// Encodes the interval as a native tpt20 binary message.
     pub fn encode(&self) -> Result<Vec<u8>, tpt20_core::EncodeError> {
         let mut m = RawMessage::new();
-        m.push(Field::new(1, WireClass::Len, tpt20_core::Value::Len(self.start.encode()?)));
-        m.push(Field::new(2, WireClass::Len, tpt20_core::Value::Len(self.end.encode()?)));
+        m.push(Field::new(
+            1,
+            WireClass::Len,
+            tpt20_core::Value::Len(self.start.encode()?),
+        ));
+        m.push(Field::new(
+            2,
+            WireClass::Len,
+            tpt20_core::Value::Len(self.end.encode()?),
+        ));
         m.encode()
     }
 
@@ -1004,9 +1030,7 @@ impl Interval {
         let mut i = Interval::default();
         for f in &raw.fields {
             match f.field_id {
-                1 => {
-                    i.start = Timestamp::decode(tpt20_core::scalar::decode_bytes(&f.value)?)?
-                }
+                1 => i.start = Timestamp::decode(tpt20_core::scalar::decode_bytes(&f.value)?)?,
                 2 => i.end = Timestamp::decode(tpt20_core::scalar::decode_bytes(&f.value)?)?,
                 _ => {}
             }
@@ -1099,7 +1123,11 @@ impl ErrorDetail {
             tpt20_core::Value::Len(self.message.as_bytes().to_vec()),
         ));
         for d in &self.details {
-            m.push(Field::new(3, WireClass::Len, tpt20_core::Value::Len(d.encode()?)));
+            m.push(Field::new(
+                3,
+                WireClass::Len,
+                tpt20_core::Value::Len(d.encode()?),
+            ));
         }
         m.encode()
     }
@@ -1127,9 +1155,8 @@ impl ErrorDetail {
                         .to_string();
                 }
                 3 => {
-                    e.details.push(Any::decode(tpt20_core::scalar::decode_bytes(
-                        &f.value,
-                    )?)?);
+                    e.details
+                        .push(Any::decode(tpt20_core::scalar::decode_bytes(&f.value)?)?);
                 }
                 _ => {}
             }
@@ -1479,7 +1506,7 @@ mod tests {
     fn std_value_roundtrip() {
         let cases: Vec<StdValue> = vec![
             StdValue::Null(NullValue::NullValue),
-            StdValue::Number(3.14),
+            StdValue::Number(2.5),
             StdValue::String("hello".into()),
             StdValue::Bool(true),
             StdValue::Struct(Struct::default()),
@@ -1557,7 +1584,10 @@ mod tests {
         let e = ErrorDetail::new(
             "NOT_FOUND".into(),
             "user missing".into(),
-            vec![Any::new("type.googleapis.com/foo".into(), b"detail".to_vec())],
+            vec![Any::new(
+                "type.googleapis.com/foo".into(),
+                b"detail".to_vec(),
+            )],
         );
         let bytes = e.encode().unwrap();
         let back = ErrorDetail::decode(&bytes).unwrap();

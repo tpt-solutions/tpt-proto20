@@ -427,7 +427,10 @@ mod tests {
         assert_eq!(decode_packed_varints(&packed, &limits).unwrap(), values);
         // Unpacked occurrences decode through the same helper one value at a time.
         let single = encode_uint(300);
-        assert_eq!(decode_packed_varints(&single, &limits), Err(DecodeError::Internal("expected length-delimited")));
+        assert_eq!(
+            decode_packed_varints(&single, &limits),
+            Err(DecodeError::Internal("expected length-delimited"))
+        );
 
         let tight = crate::limits::DecoderLimits {
             max_repeated_entries: 2,
@@ -450,7 +453,13 @@ mod tests {
         assert_eq!(decode_packed_fixed64(&p64, &limits).unwrap(), v64);
         // Trailing partial word is malformed.
         let bad = Value::Len(vec![1, 2, 3]);
-        assert_eq!(decode_packed_fixed32(&bad, &limits), Err(DecodeError::MalformedScalar));
-        assert_eq!(decode_packed_fixed64(&bad, &limits), Err(DecodeError::MalformedScalar));
+        assert_eq!(
+            decode_packed_fixed32(&bad, &limits),
+            Err(DecodeError::MalformedScalar)
+        );
+        assert_eq!(
+            decode_packed_fixed64(&bad, &limits),
+            Err(DecodeError::MalformedScalar)
+        );
     }
 }

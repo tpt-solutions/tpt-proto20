@@ -51,13 +51,28 @@ mod tests {
         assert_eq!(grpc_status_name(Status::Ok), "OK");
         assert_eq!(grpc_status_name(Status::Cancelled), "CANCELLED");
         assert_eq!(grpc_status_name(Status::Unknown), "UNKNOWN");
-        assert_eq!(grpc_status_name(Status::InvalidArgument), "INVALID_ARGUMENT");
-        assert_eq!(grpc_status_name(Status::DeadlineExceeded), "DEADLINE_EXCEEDED");
+        assert_eq!(
+            grpc_status_name(Status::InvalidArgument),
+            "INVALID_ARGUMENT"
+        );
+        assert_eq!(
+            grpc_status_name(Status::DeadlineExceeded),
+            "DEADLINE_EXCEEDED"
+        );
         assert_eq!(grpc_status_name(Status::NotFound), "NOT_FOUND");
         assert_eq!(grpc_status_name(Status::AlreadyExists), "ALREADY_EXISTS");
-        assert_eq!(grpc_status_name(Status::PermissionDenied), "PERMISSION_DENIED");
-        assert_eq!(grpc_status_name(Status::ResourceExhausted), "RESOURCE_EXHAUSTED");
-        assert_eq!(grpc_status_name(Status::FailedPrecondition), "FAILED_PRECONDITION");
+        assert_eq!(
+            grpc_status_name(Status::PermissionDenied),
+            "PERMISSION_DENIED"
+        );
+        assert_eq!(
+            grpc_status_name(Status::ResourceExhausted),
+            "RESOURCE_EXHAUSTED"
+        );
+        assert_eq!(
+            grpc_status_name(Status::FailedPrecondition),
+            "FAILED_PRECONDITION"
+        );
         assert_eq!(grpc_status_name(Status::Aborted), "ABORTED");
         assert_eq!(grpc_status_name(Status::OutOfRange), "OUT_OF_RANGE");
         assert_eq!(grpc_status_name(Status::Unimplemented), "UNIMPLEMENTED");

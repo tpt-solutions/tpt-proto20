@@ -30,13 +30,13 @@ pub mod server;
 pub mod status;
 pub mod streaming;
 
+pub use client::GrpcClient;
+pub use deadline::{format_grpc_timeout, parse_grpc_timeout};
 pub use error::GrpcError;
-pub use status::{from_grpc_status, grpc_status_name, to_grpc_status};
-pub use metadata::{from_grpc_headers, from_grpc_trailers, to_grpc_headers, to_grpc_trailers};
-pub use deadline::{parse_grpc_timeout, format_grpc_timeout};
-pub use streaming::{from_grpc_streaming, to_grpc_streaming, GrpcStreamingType};
 pub use frame::{decode_grpc_frame, encode_grpc_frame, grpc_frame_len};
 pub use health::{HealthHandler, HealthRegistry, ServingStatus};
+pub use metadata::{from_grpc_headers, from_grpc_trailers, to_grpc_headers, to_grpc_trailers};
 pub use reflection::ReflectionService;
 pub use server::GrpcServer;
-pub use client::GrpcClient;
+pub use status::{from_grpc_status, grpc_status_name, to_grpc_status};
+pub use streaming::{from_grpc_streaming, to_grpc_streaming, GrpcStreamingType};

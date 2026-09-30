@@ -24,9 +24,7 @@ pub fn u64_to_value(v: u64) -> Value {
 /// number and string representations.
 pub fn as_i64(value: &Value) -> Result<i64, String> {
     match value {
-        Value::Number(n) => n
-            .as_i64()
-            .ok_or_else(|| format!("invalid i64: {value}")),
+        Value::Number(n) => n.as_i64().ok_or_else(|| format!("invalid i64: {value}")),
         Value::String(s) => s
             .parse::<i64>()
             .map_err(|_| format!("invalid i64 string: {s}")),
@@ -38,9 +36,7 @@ pub fn as_i64(value: &Value) -> Result<i64, String> {
 /// number and string representations.
 pub fn as_u64(value: &Value) -> Result<u64, String> {
     match value {
-        Value::Number(n) => n
-            .as_u64()
-            .ok_or_else(|| format!("invalid u64: {value}")),
+        Value::Number(n) => n.as_u64().ok_or_else(|| format!("invalid u64: {value}")),
         Value::String(s) => s
             .parse::<u64>()
             .map_err(|_| format!("invalid u64 string: {s}")),

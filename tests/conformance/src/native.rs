@@ -1,22 +1,25 @@
 //! Native conformance integration tests.
 
+use tpt20_compiler::pipeline::check as semantic_check;
 use tpt20_core::{
     DecoderLimits, DynamicMessage, Field, FieldDescriptor, FieldKind, MessageDescriptor,
     RawMessage, ScalarKind, UnknownFieldPolicy, Value, WireClass,
 };
-use tpt20_compiler::pipeline::check as semantic_check;
 use tpt20_language::parse;
 
 #[test]
 fn parse_and_semantic_check_valid_schema() {
-    let src = r#"package "test.v1"
+    let src = r#"package test.v1;
 message User {
-  id: int64
-  name: string
+  1: id int64;
+  2: name string;
 }"#;
     let file = parse(src).unwrap();
     let diags = semantic_check(src, None);
-    let errors: Vec<_> = diags.iter().filter(|d| d.severity == tpt20_compiler::diagnostics::Severity::Error).collect();
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.severity == tpt20_compiler::diagnostics::Severity::Error)
+        .collect();
     assert!(errors.is_empty());
     assert_eq!(file.package, Some("test.v1".to_string()));
 }
@@ -27,15 +30,30 @@ fn wire_roundtrip_native() {
     msg.push(Field::new(1, WireClass::Varint, Value::Varint(42)));
     msg.push(Field::new(2, WireClass::Len, Value::Len(b"hello".to_vec())));
     let bytes = msg.encode().unwrap();
-    let back = RawMessage::decode(&bytes, &DecoderLimits::default(), UnknownFieldPolicy::Preserve).unwrap();
+    let back = RawMessage::decode(
+        &bytes,
+        &DecoderLimits::default(),
+        UnknownFieldPolicy::Preserve,
+    )
+    .unwrap();
     assert_eq!(msg.fields, back.fields);
 }
 
 #[test]
 fn dynamic_message_encode_decode() {
     let mut desc = MessageDescriptor::new();
-    desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-    desc.add_field(FieldDescriptor::new(2, "name", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
+    desc.add_field(FieldDescriptor::new(
+        1,
+        "id",
+        WireClass::Varint,
+        FieldKind::Scalar(ScalarKind::Int64),
+    ));
+    desc.add_field(FieldDescriptor::new(
+        2,
+        "name",
+        WireClass::Len,
+        FieldKind::Scalar(ScalarKind::String),
+    ));
 
     let mut msg = DynamicMessage::with_descriptor(desc.clone());
     msg.set_varint_by_name("id", 7).unwrap();
@@ -51,8 +69,18 @@ fn dynamic_message_encode_decode() {
 fn json_roundtrip_dynamic_message() {
     use tpt20_stdlib::json::base64;
     let mut desc = MessageDescriptor::new();
-    desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-    desc.add_field(FieldDescriptor::new(2, "data", WireClass::Len, FieldKind::Scalar(ScalarKind::Bytes)));
+    desc.add_field(FieldDescriptor::new(
+        1,
+        "id",
+        WireClass::Varint,
+        FieldKind::Scalar(ScalarKind::Int64),
+    ));
+    desc.add_field(FieldDescriptor::new(
+        2,
+        "data",
+        WireClass::Len,
+        FieldKind::Scalar(ScalarKind::Bytes),
+    ));
 
     let mut msg = DynamicMessage::with_descriptor(desc.clone());
     msg.set_varint_by_name("id", 42).unwrap();
@@ -78,8 +106,18 @@ fn canonical_encoding_deterministic() {
 #[test]
 fn text_format_output() {
     let mut desc = MessageDescriptor::new();
-    desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-    desc.add_field(FieldDescriptor::new(2, "name", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
+    desc.add_field(FieldDescriptor::new(
+        1,
+        "id",
+        WireClass::Varint,
+        FieldKind::Scalar(ScalarKind::Int64),
+    ));
+    desc.add_field(FieldDescriptor::new(
+        2,
+        "name",
+        WireClass::Len,
+        FieldKind::Scalar(ScalarKind::String),
+    ));
     let mut msg = DynamicMessage::with_descriptor(desc);
     msg.set_varint_by_name("id", 42).unwrap();
     msg.set_string_by_name("name", "Ada").unwrap();

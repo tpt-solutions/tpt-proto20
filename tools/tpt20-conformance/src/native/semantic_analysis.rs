@@ -2,21 +2,24 @@ use tpt20_compiler::pipeline::check as semantic_check;
 
 #[test]
 fn accepts_valid_schema() {
-    let src = r#"package "test.v1"
+    let src = r#"package test.v1;
 message User {
-  id: int64
-  name: string
+  1: id int64;
+  2: name string;
 }"#;
     let diags = semantic_check(src, None);
-    let errors: Vec<_> = diags.iter().filter(|d| d.severity == tpt20_compiler::diagnostics::Severity::Error).collect();
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.severity == tpt20_compiler::diagnostics::Severity::Error)
+        .collect();
     assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
 }
 
 #[test]
 fn detects_duplicate_field_ids() {
     let src = r#"message Foo {
-  a: int64 = 1
-  b: int64 = 1
+  1: a int64;
+  1: b int64;
 }"#;
     let diags = semantic_check(src, None);
     assert!(
@@ -29,8 +32,8 @@ fn detects_duplicate_field_ids() {
 #[test]
 fn detects_duplicate_field_names() {
     let src = r#"message Foo {
-  name: int64
-  name: string
+  1: name int64;
+  2: name string;
 }"#;
     let diags = semantic_check(src, None);
     assert!(
@@ -43,8 +46,8 @@ fn detects_duplicate_field_names() {
 #[test]
 fn detects_reserved_id_reuse() {
     let src = r#"message Foo {
-  reserved 1
-  id: int64 = 1
+  reserved 1;
+  1: id int64;
 }"#;
     let diags = semantic_check(src, None);
     assert!(
@@ -57,12 +60,23 @@ fn detects_reserved_id_reuse() {
 #[test]
 fn accepts_known_scalars() {
     for scalar in tpt20_compiler::semantic::KNOWN_SCALARS.iter() {
-        let src = format!(r#"message Foo {{
-  value: {}
-}}"#, scalar);
+        let src = format!(
+            r#"message Foo {{
+  1: value {};
+}}"#,
+            scalar
+        );
         let diags = semantic_check(&src, None);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == tpt20_compiler::diagnostics::Severity::Error).collect();
-        assert!(errors.is_empty(), "scalar {} should be accepted, got: {:?}", scalar, errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == tpt20_compiler::diagnostics::Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "scalar {} should be accepted, got: {:?}",
+            scalar,
+            errors
+        );
     }
 }
 
@@ -82,7 +96,7 @@ fn annotation_registry() {
 #[test]
 fn detects_unknown_scalar_type() {
     let src = r#"message Foo {
-  value: notatype
+  1: value notatype;
 }"#;
     let diags = semantic_check(src, None);
     assert!(
@@ -95,7 +109,7 @@ fn detects_unknown_scalar_type() {
 #[test]
 fn detects_map_key_bytes_forbidden() {
     let src = r#"message Foo {
-  data: map<bytes, string>
+  1: data map<bytes, string>;
 }"#;
     let diags = semantic_check(src, None);
     assert!(
@@ -108,8 +122,8 @@ fn detects_map_key_bytes_forbidden() {
 #[test]
 fn detects_duplicate_enum_values() {
     let src = r#"enum State {
-  ACTIVE = 0
-  ACTIVE = 0
+  ACTIVE = 0;
+  ACTIVE = 0;
 }"#;
     let diags = semantic_check(src, None);
     assert!(

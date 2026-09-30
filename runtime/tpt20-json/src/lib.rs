@@ -12,8 +12,8 @@
 //! and unknown-field policies are applied by callers; [`get_field`] accepts
 //! either spelling when looking up object members.
 
-pub use serde_json::Value;
 pub use serde_json as json;
+pub use serde_json::Value;
 use thiserror::Error;
 
 /// Errors that can occur while converting between tpt20 messages and JSON.
@@ -47,10 +47,7 @@ impl From<serde_json::Error> for JsonError {
 
 /// Looks up an object member by any of the accepted spellings (e.g. original
 /// schema name and its lowerCamelCase alias). First match wins.
-pub fn get_field<'a>(
-    obj: &'a serde_json::Map<String, Value>,
-    names: &[&str],
-) -> Option<&'a Value> {
+pub fn get_field<'a>(obj: &'a serde_json::Map<String, Value>, names: &[&str]) -> Option<&'a Value> {
     names.iter().find_map(|n| obj.get(*n))
 }
 
@@ -58,12 +55,13 @@ pub fn get_field<'a>(
 /// integers are representable as strings).
 pub fn as_i64(v: &Value) -> Result<i64, JsonError> {
     match v {
-        Value::Number(n) => n
-            .as_i64()
-            .or_else(|| n.as_f64().map(|f| f as i64))
-            .ok_or(JsonError::TypeMismatch {
-                expected: "64-bit integer",
-            }),
+        Value::Number(n) => {
+            n.as_i64()
+                .or_else(|| n.as_f64().map(|f| f as i64))
+                .ok_or(JsonError::TypeMismatch {
+                    expected: "64-bit integer",
+                })
+        }
         Value::String(s) => s.parse::<i64>().map_err(|_| JsonError::TypeMismatch {
             expected: "64-bit integer string",
         }),
@@ -99,8 +97,9 @@ pub fn as_f64(v: &Value) -> Result<f64, JsonError> {
 
 /// Reads a `bool` from a JSON boolean.
 pub fn as_bool(v: &Value) -> Result<bool, JsonError> {
-    v.as_bool()
-        .ok_or(JsonError::TypeMismatch { expected: "boolean" })
+    v.as_bool().ok_or(JsonError::TypeMismatch {
+        expected: "boolean",
+    })
 }
 
 /// Reads a string slice from a JSON string.
@@ -123,8 +122,7 @@ pub fn u64_to_value(v: u64) -> Value {
 pub mod base64 {
     use super::JsonError;
 
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     /// Encodes `data` as standard padded base64.
     pub fn encode(data: &[u8]) -> String {
@@ -251,4 +249,3 @@ mod tests {
         assert!(get_field(map, &["userid"]).is_none());
     }
 }
-

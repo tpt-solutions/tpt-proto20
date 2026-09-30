@@ -14,8 +14,10 @@ pub const CLASS_LEN: &str = "__core::WireClass::Len";
 pub fn enc_value(scalar: &str, v: &str) -> String {
     match scalar {
         "bool" => format!("__core::Value::Varint((*{v}) as u64)"),
-        "int32" | "sint32" => format!("__core::Value::Varint(i64::from(*{v}) as u64)"),
-        "int64" | "sint64" | "uint64" => format!("__core::Value::Varint((*{v}) as u64)"),
+        "int32" => format!("__core::Value::Varint(i64::from(*{v}) as u64)"),
+        "sint32" => format!("__scalar::encode_sint(i64::from(*{v}))"),
+        "sint64" => format!("__scalar::encode_sint(*{v})"),
+        "int64" | "uint64" => format!("__core::Value::Varint((*{v}) as u64)"),
         "uint32" => format!("__core::Value::Varint((*{v}) as u64)"),
         "fixed32" => format!("__core::Value::Fixed32(*{v})"),
         "sfixed32" => format!("__core::Value::Fixed32((*{v}) as u32)"),
@@ -84,8 +86,10 @@ fn dec_numeric(scalar: &str, v: &str, _l: &str) -> String {
 pub fn to_wire_word(scalar: &str, v: &str) -> String {
     match scalar {
         "bool" => format!("{v} as u64"),
-        "int32" | "sint32" => format!("i64::from({v}) as u64"),
-        "int64" | "sint64" => format!("{v} as u64"),
+        "int32" => format!("i64::from({v}) as u64"),
+        "sint32" => format!("__core::varint::encode_zigzag(i64::from({v}))"),
+        "int64" => format!("{v} as u64"),
+        "sint64" => format!("__core::varint::encode_zigzag({v})"),
         "uint32" => format!("{v} as u64"),
         "uint64" => v.to_string(),
         "fixed32" => v.to_string(),
@@ -104,6 +108,8 @@ pub fn from_wire_word(scalar: &str, x: &str) -> String {
         "bool" => format!("({x} != 0)"),
         "int32" => format!("({x} as i32)"),
         "int64" => format!("({x} as i64)"),
+        "sint32" => format!("(__core::varint::decode_zigzag({x}) as i32)"),
+        "sint64" => format!("__core::varint::decode_zigzag({x})"),
         "uint32" => format!("({x} as u32)"),
         "uint64" => x.to_string(),
         "fixed32" => x.to_string(),
@@ -160,4 +166,3 @@ pub fn view_rust_type(scalar: &str) -> &'static str {
             .unwrap_or("()"),
     }
 }
-

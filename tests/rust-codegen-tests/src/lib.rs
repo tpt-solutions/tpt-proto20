@@ -44,7 +44,10 @@ fn sample() -> Outer {
         inner: Some(generated::Outer_Child {
             note: "n".into(),
             depth: 3,
-            leaf: Some(generated::Outer_Child_Leaf { value: true, ..Default::default() }),
+            leaf: Some(generated::Outer_Child_Leaf {
+                value: true,
+                ..Default::default()
+            }),
             unknown_fields: Default::default(),
         }),
         zigzag: i64::MIN,
@@ -79,13 +82,13 @@ fn zigzag_and_fixed_scalars_roundtrip() {
     let m = Outer {
         zigzag: -1234567890123456789,
         flags: vec![0xdead_beef, 7],
-        ratio: 3.14159,
+        ratio: 2.5,
         ..Default::default()
     };
     let back = Outer::decode(&m.encode()).unwrap();
     assert_eq!(back.zigzag, -1234567890123456789);
     assert_eq!(back.flags, vec![0xdead_beef, 7]);
-    assert!((back.ratio - 3.14159).abs() < f64::EPSILON);
+    assert!((back.ratio - 2.5).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -197,12 +200,12 @@ fn open_enum_captures_unknown_closed_enum_rejects() {
     let mk = |feature: i64, status: i64| -> Vec<u8> {
         let mut raw = RawMessage::new();
         raw.push(Field::new(
-            13,
+            14,
             WireClass::Varint,
             Value::Varint(feature as u64),
         ));
         raw.push(Field::new(
-            12,
+            13,
             WireClass::Varint,
             Value::Varint(status as u64),
         ));
@@ -211,7 +214,7 @@ fn open_enum_captures_unknown_closed_enum_rejects() {
 
     let open = Outer::decode(&mk(99, 1)).unwrap();
     assert_eq!(open.feature, Outer_Feature::Unknown(99));
-    assert_eq!(open.status, Outer_Status::ACTIVE);
+    assert_eq!(open.status, Outer_Status::INACTIVE);
 
     assert!(matches!(
         Outer::decode(&mk(1, 55)),
@@ -252,7 +255,7 @@ fn json_roundtrip_with_spec_rules() {
 
     // Spec §14.2: 64-bit ints as strings, bytes as base64, enum names.
     assert!(json.contains(r#""id":"-5""#));
-    assert!(json.contains(r#""blob":"fwA/""#)); // base64(0xff 0x00 0x7f)
+    assert!(json.contains(r#""blob":"/wB/""#)); // base64(0xff 0x00 0x7f)
     assert!(json.contains(r#""status":"SUSPENDED""#));
 
     let back = Outer::from_json(&json).unwrap();
@@ -264,13 +267,15 @@ fn json_accepts_camelcase_and_number_enums() {
     // lowerCamelCase alias + numbers for enums + string-form i64.
     let json = r#"{
         "id": "12",
-        "userName": "bob",
+        "username": "bob",
+        "emailAddr": "e@x.y",
         "status": 2,
         "feature": 9
     }"#;
     let m = Outer::from_json(json).unwrap();
     assert_eq!(m.id, 12);
     assert_eq!(m.username, "bob");
+    assert_eq!(m.contact, Some(OuterContact::EmailAddr("e@x.y".into())));
     assert_eq!(m.status, Outer_Status::SUSPENDED);
     assert_eq!(m.feature, Outer_Feature::Unknown(9));
 }
@@ -300,11 +305,7 @@ fn builders_validate_annotations() {
     use generated::BuildError;
 
     // @max_len(8) on username.
-    let ok = Outer::builder()
-        .username("short")
-        .age(30)
-        .build()
-        .unwrap();
+    let ok = Outer::builder().username("short").age(30).build().unwrap();
     assert_eq!(ok.username, "short");
 
     let err = Outer::builder()
@@ -321,12 +322,7 @@ fn builders_validate_annotations() {
 
     // @range(0, 150) on age.
     let err = Outer::builder().age(-1).build().unwrap_err();
-    assert_eq!(
-        err,
-        BuildError::OutOfRange {
-            field: "age"
-        }
-    );
+    assert_eq!(err, BuildError::OutOfRange { field: "age" });
 
     // Full builder path roundtrips like the struct literal path.
     let built = Outer::builder()

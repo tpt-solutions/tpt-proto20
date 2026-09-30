@@ -24,8 +24,12 @@
 //! use tpt20_descriptor::Descriptor;
 //! use tpt20_reflect::DynamicMessage;
 //!
-//! let json = r#"{"name":"test.v1","messages":[{"name":"User","fields":[{"id":1,"name":"id","label":{"Singular":{"path":["int64"]}},"presence":"Implicit"},{"id":2,"name":"name","label":{"Singular":{"path":["string"]}},"presence":"Implicit"}],"oneofs":[],"messages":[],"enums":[],"reserved":[],"annotations":[],"span":{"line":1,"column":1}}],"enums":[],"services":[],"reserved":[],"compat":{"policy":"","versions":[],"deprecations":[]},"fingerprint":null}"#;
-//! let descriptor = Descriptor::from_json(json).unwrap();
+//! let compiled = tpt20_compiler::compile(
+//!     "package test.v1; message User { 1: id int64; 2: name string; }",
+//!     None,
+//! )
+//! .unwrap();
+//! let descriptor = Descriptor::new(compiled.ir);
 //! let msg = descriptor.find_message("User").unwrap();
 //! let message = DynamicMessage::decode(msg, &descriptor, &[], &DecoderLimits::default(), UnknownFieldPolicy::Preserve).unwrap();
 //! let _name = message.get_field("name").unwrap();
@@ -34,13 +38,13 @@
 
 use std::borrow::Cow;
 
+use thiserror::Error;
 use tpt20_core::{
     self, DecodeError, DecoderLimits, EncodeError, Field, RawMessage, UnknownFieldPolicy, Value,
     WireClass,
 };
 use tpt20_descriptor::Descriptor;
 use tpt20_ir as ir;
-use thiserror::Error;
 
 // ---------------------------------------------------------------------------
 // Scalar name constants (mirrors tpt20-codegen-rust; kept local to avoid
@@ -48,21 +52,8 @@ use thiserror::Error;
 // ---------------------------------------------------------------------------
 
 const _SCALAR_NAMES: &[&str] = &[
-    "bool",
-    "int32",
-    "int64",
-    "uint32",
-    "uint64",
-    "sint32",
-    "sint64",
-    "fixed32",
-    "sfixed32",
-    "fixed64",
-    "sfixed64",
-    "float32",
-    "float64",
-    "string",
-    "bytes",
+    "bool", "int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32", "sfixed32",
+    "fixed64", "sfixed64", "float32", "float64", "string", "bytes",
 ];
 
 // ---------------------------------------------------------------------------
@@ -359,19 +350,13 @@ impl<'a> DynamicMessage<'a> {
     // -----------------------------------------------------------------------
 
     /// Returns all values of repeated field `name`.
-    pub fn get_repeated(
-        &self,
-        name: &str,
-    ) -> Result<Option<Vec<ReflectValue<'a>>>, ReflectError> {
+    pub fn get_repeated(&self, name: &str) -> Result<Option<Vec<ReflectValue<'a>>>, ReflectError> {
         let field = self.resolve_field(name)?;
         self.get_repeated_values(field)
     }
 
     /// Returns all values of repeated field `id`.
-    pub fn get_repeated_id(
-        &self,
-        id: u32,
-    ) -> Result<Option<Vec<ReflectValue<'a>>>, ReflectError> {
+    pub fn get_repeated_id(&self, id: u32) -> Result<Option<Vec<ReflectValue<'a>>>, ReflectError> {
         let field = self.resolve_field_id(id)?;
         self.get_repeated_values(field)
     }
@@ -383,11 +368,7 @@ impl<'a> DynamicMessage<'a> {
     }
 
     /// Appends a value to repeated field `id`.
-    pub fn add_repeated_id(
-        &mut self,
-        id: u32,
-        value: ReflectValue,
-    ) -> Result<(), ReflectError> {
+    pub fn add_repeated_id(&mut self, id: u32, value: ReflectValue) -> Result<(), ReflectError> {
         let field = self.resolve_field_id(id)?;
         self.add_repeated_value(field, value)
     }
@@ -406,19 +387,13 @@ impl<'a> DynamicMessage<'a> {
     ///
     /// Each entry is a `(key, value)` pair decoded from the synthetic
     /// map-entry message on the wire.
-    pub fn get_map(
-        &self,
-        name: &str,
-    ) -> Result<Option<Vec<ReflectMapEntry<'a>>>, ReflectError> {
+    pub fn get_map(&self, name: &str) -> Result<Option<Vec<ReflectMapEntry<'a>>>, ReflectError> {
         let field = self.resolve_field(name)?;
         self.get_map_entries(field)
     }
 
     /// Returns all entries of map field `id`.
-    pub fn get_map_id(
-        &self,
-        id: u32,
-    ) -> Result<Option<Vec<ReflectMapEntry<'a>>>, ReflectError> {
+    pub fn get_map_id(&self, id: u32) -> Result<Option<Vec<ReflectMapEntry<'a>>>, ReflectError> {
         let field = self.resolve_field_id(id)?;
         self.get_map_entries(field)
     }
@@ -454,19 +429,13 @@ impl<'a> DynamicMessage<'a> {
     // -----------------------------------------------------------------------
 
     /// Returns the nested message value of field `name`.
-    pub fn get_message(
-        &self,
-        name: &str,
-    ) -> Result<Option<DynamicMessage<'a>>, ReflectError> {
+    pub fn get_message(&self, name: &str) -> Result<Option<DynamicMessage<'a>>, ReflectError> {
         let field = self.resolve_field(name)?;
         self.get_nested_message(field)
     }
 
     /// Returns the nested message value of field `id`.
-    pub fn get_message_id(
-        &self,
-        id: u32,
-    ) -> Result<Option<DynamicMessage<'a>>, ReflectError> {
+    pub fn get_message_id(&self, id: u32) -> Result<Option<DynamicMessage<'a>>, ReflectError> {
         let field = self.resolve_field_id(id)?;
         self.get_nested_message(field)
     }
@@ -545,7 +514,12 @@ impl<'a> DynamicMessage<'a> {
     }
 
     fn get_value(&self, field: &ir::FieldIr) -> Result<Option<ReflectValue<'a>>, ReflectError> {
-        let raw = self.raw.fields.iter().find(|f| f.field_id == field.id).map(|f| &f.value);
+        let raw = self
+            .raw
+            .fields
+            .iter()
+            .find(|f| f.field_id == field.id)
+            .map(|f| &f.value);
         match raw {
             None => Ok(None),
             Some(value) => Ok(Some(interpret_value(self.descriptor, field, value)?)),
@@ -563,7 +537,11 @@ impl<'a> DynamicMessage<'a> {
             .filter(|f| f.field_id == field.id)
             .map(|f| interpret_value(self.descriptor, field, &f.value))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(if values.is_empty() { None } else { Some(values) })
+        Ok(if values.is_empty() {
+            None
+        } else {
+            Some(values)
+        })
     }
 
     fn get_map_entries(
@@ -593,14 +571,18 @@ impl<'a> DynamicMessage<'a> {
                         k = Some(interpret_scalar(&key.path, &ef.value)?);
                     }
                     2 => {
-                        v = Some(interpret_value(self.descriptor, &ir::FieldIr {
-                            id: 0,
-                            name: String::new(),
-                            label: ir::FieldLabelIr::Singular(value.clone()),
-                            presence: ir::Presence::Implicit,
-                            annotations: vec![],
-                            span: ir::SourceSpan::default(),
-                        }, &ef.value)?);
+                        v = Some(interpret_value(
+                            self.descriptor,
+                            &ir::FieldIr {
+                                id: 0,
+                                name: String::new(),
+                                label: ir::FieldLabelIr::Singular(value.clone()),
+                                presence: ir::Presence::Implicit,
+                                annotations: vec![],
+                                span: ir::SourceSpan::default(),
+                            },
+                            &ef.value,
+                        )?);
                     }
                     _ => {}
                 }
@@ -609,22 +591,35 @@ impl<'a> DynamicMessage<'a> {
                 entries.push((k, v));
             }
         }
-        Ok(if entries.is_empty() { None } else { Some(entries) })
+        Ok(if entries.is_empty() {
+            None
+        } else {
+            Some(entries)
+        })
     }
 
     fn get_enum_value(&self, field: &ir::FieldIr) -> Result<Option<ReflectEnum<'a>>, ReflectError> {
-        let raw = self.raw.fields.iter().find(|f| f.field_id == field.id).map(|f| &f.value);
+        let raw = self
+            .raw
+            .fields
+            .iter()
+            .find(|f| f.field_id == field.id)
+            .map(|f| &f.value);
         match raw {
             None => Ok(None),
             Some(value) => {
                 let n = tpt20_core::scalar::decode_signed(value)? as i32;
-                let name = resolve_enum_name(self.descriptor, &field_label_type_path(&field.label), n);
+                let name =
+                    resolve_enum_name(self.descriptor, &field_label_type_path(&field.label), n);
                 Ok(Some(ReflectEnum { number: n, name }))
             }
         }
     }
 
-    fn get_oneof_value(&self, oneof: &'a ir::OneofIr) -> Result<Option<ReflectOneof<'a>>, ReflectError> {
+    fn get_oneof_value(
+        &self,
+        oneof: &'a ir::OneofIr,
+    ) -> Result<Option<ReflectOneof<'a>>, ReflectError> {
         let mut active: Option<(&ir::FieldIr, ReflectValue<'a>)> = None;
         for mf in &oneof.fields {
             if let Some(f) = self.raw.fields.iter().find(|f| f.field_id == mf.id) {
@@ -649,7 +644,12 @@ impl<'a> DynamicMessage<'a> {
         &self,
         field: &ir::FieldIr,
     ) -> Result<Option<DynamicMessage<'a>>, ReflectError> {
-        let raw = self.raw.fields.iter().find(|f| f.field_id == field.id).map(|f| &f.value);
+        let raw = self
+            .raw
+            .fields
+            .iter()
+            .find(|f| f.field_id == field.id)
+            .map(|f| &f.value);
         match raw {
             None => Ok(None),
             Some(value) => {
@@ -657,7 +657,13 @@ impl<'a> DynamicMessage<'a> {
                 let type_path = field_label_type_path(&field.label);
                 let nested = find_message_by_path(self.descriptor, &type_path)
                     .ok_or_else(|| ReflectError::NotMessage(field.name.clone()))?;
-                let sub = DynamicMessage::decode(nested, self.descriptor, bytes, &DecoderLimits::default(), UnknownFieldPolicy::Preserve)?;
+                let sub = DynamicMessage::decode(
+                    nested,
+                    self.descriptor,
+                    bytes,
+                    &DecoderLimits::default(),
+                    UnknownFieldPolicy::Preserve,
+                )?;
                 Ok(Some(sub))
             }
         }
@@ -670,9 +676,12 @@ impl<'a> DynamicMessage<'a> {
         if matches!(field.label, ir::FieldLabelIr::Map { .. }) {
             return Err(ReflectError::NotMap(field.name.clone()));
         }
-        let (wire_class, core_value) = reflect_value_to_core(value, &field_label_type_path(&field.label))?;
+        let (wire_class, core_value) =
+            reflect_value_to_core(value, &field_label_type_path(&field.label))?;
         self.raw.fields.retain(|f| f.field_id != field.id);
-        self.raw.fields.push(Field::new(field.id, wire_class, core_value));
+        self.raw
+            .fields
+            .push(Field::new(field.id, wire_class, core_value));
         Ok(())
     }
 
@@ -685,7 +694,9 @@ impl<'a> DynamicMessage<'a> {
             return Err(ReflectError::NotRepeated(field.name.clone()));
         };
         let (wire_class, core_value) = reflect_value_to_core(value, &type_ref.path)?;
-        self.raw.fields.push(Field::new(field.id, wire_class, core_value));
+        self.raw
+            .fields
+            .push(Field::new(field.id, wire_class, core_value));
         Ok(())
     }
 
@@ -716,7 +727,10 @@ fn field_label_type_path(label: &ir::FieldLabelIr) -> Cow<'_, [String]> {
 }
 
 fn _is_scalar_path(path: &[String]) -> bool {
-    path.len() == 1 && path.first().map_or(false, |p| _SCALAR_NAMES.contains(&p.as_str()))
+    path.len() == 1
+        && path
+            .first()
+            .map_or(false, |p| _SCALAR_NAMES.contains(&p.as_str()))
 }
 
 fn interpret_value<'a>(
@@ -727,7 +741,9 @@ fn interpret_value<'a>(
     let type_path = field_label_type_path(&field.label);
     let scalar = type_path.first().map(|s| s.as_str());
     match scalar {
-        Some("bool") => Ok(ReflectValue::Varint(tpt20_core::scalar::decode_uint(value)?)),
+        Some("bool") => Ok(ReflectValue::Varint(tpt20_core::scalar::decode_uint(
+            value,
+        )?)),
         Some("int32") | Some("int64") => {
             let v = tpt20_core::scalar::decode_signed(value)?;
             Ok(ReflectValue::Varint(v as u64))
@@ -767,7 +783,11 @@ fn interpret_value<'a>(
         _ => {
             if let Some(ei) = find_enum_by_path(descriptor, &type_path) {
                 let n = tpt20_core::scalar::decode_signed(value)? as i32;
-                let name = ei.values.iter().find(|v| v.number == n).map(|v| v.name.as_str());
+                let name = ei
+                    .values
+                    .iter()
+                    .find(|v| v.number == n)
+                    .map(|v| v.name.as_str());
                 return Ok(ReflectValue::Enum(n, name));
             }
             if let Some(msg) = find_message_by_path(descriptor, &type_path) {
@@ -792,7 +812,9 @@ fn interpret_value<'a>(
 fn interpret_scalar<'a>(path: &[String], value: &Value) -> Result<ReflectValue<'a>, ReflectError> {
     let scalar = path.first().map(|s| s.as_str());
     match scalar {
-        Some("bool") => Ok(ReflectValue::Varint(tpt20_core::scalar::decode_uint(value)?)),
+        Some("bool") => Ok(ReflectValue::Varint(tpt20_core::scalar::decode_uint(
+            value,
+        )?)),
         Some("int32") | Some("int64") => {
             let v = tpt20_core::scalar::decode_signed(value)?;
             Ok(ReflectValue::Varint(v as u64))
@@ -843,9 +865,10 @@ fn reflect_value_to_core(
     let scalar = type_path.first().map(|s| s.as_str());
     match (scalar, value) {
         (Some("bool"), ReflectValue::Varint(v)) => Ok((WireClass::Varint, Value::Varint(v))),
-        (Some("int32" | "int64" | "uint32" | "uint64" | "sint32" | "sint64"), ReflectValue::Varint(v)) => {
-            Ok((WireClass::Varint, Value::Varint(v)))
-        }
+        (
+            Some("int32" | "int64" | "uint32" | "uint64" | "sint32" | "sint64"),
+            ReflectValue::Varint(v),
+        ) => Ok((WireClass::Varint, Value::Varint(v))),
         (Some("fixed32" | "sfixed32" | "float32"), ReflectValue::Fixed32(v)) => {
             Ok((WireClass::Fixed32, Value::Fixed32(v)))
         }
@@ -868,7 +891,11 @@ fn reflect_value_to_core(
     }
 }
 
-fn resolve_enum_name<'a>(descriptor: &'a Descriptor, type_path: &[String], number: i32) -> Option<&'a str> {
+fn resolve_enum_name<'a>(
+    descriptor: &'a Descriptor,
+    type_path: &[String],
+    number: i32,
+) -> Option<&'a str> {
     find_enum_by_path(descriptor, type_path)
         .and_then(|ei| ei.values.iter().find(|v| v.number == number))
         .map(|v| v.name.as_str())
@@ -878,17 +905,18 @@ fn resolve_enum_name<'a>(descriptor: &'a Descriptor, type_path: &[String], numbe
 // Descriptor search helpers
 // ---------------------------------------------------------------------------
 
-fn find_enum_by_path<'a>(
-    descriptor: &'a Descriptor,
-    path: &[String],
-) -> Option<&'a ir::EnumIr> {
+fn find_enum_by_path<'a>(descriptor: &'a Descriptor, path: &[String]) -> Option<&'a ir::EnumIr> {
     if path.is_empty() {
         return None;
     }
     if path.len() == 1 {
         return descriptor.package.enums.iter().find(|e| e.name == path[0]);
     }
-    let parent = descriptor.package.messages.iter().find(|m| m.name == path[0])?;
+    let parent = descriptor
+        .package
+        .messages
+        .iter()
+        .find(|m| m.name == path[0])?;
     find_nested_enum(parent, &path[1..])
 }
 
@@ -910,14 +938,15 @@ fn find_message_by_path<'a>(
     if path.is_empty() {
         return None;
     }
-    let top = descriptor.package.messages.iter().find(|m| m.name == path[0])?;
+    let top = descriptor
+        .package
+        .messages
+        .iter()
+        .find(|m| m.name == path[0])?;
     find_nested_message(top, &path[1..])
 }
 
-fn find_nested_message<'a>(
-    msg: &'a ir::MessageIr,
-    path: &[String],
-) -> Option<&'a ir::MessageIr> {
+fn find_nested_message<'a>(msg: &'a ir::MessageIr, path: &[String]) -> Option<&'a ir::MessageIr> {
     if path.is_empty() {
         return Some(msg);
     }
@@ -987,8 +1016,12 @@ mod tests {
                             id: 5,
                             name: "meta".into(),
                             label: ir::FieldLabelIr::Map {
-                                key: ir::TypeRefIr { path: vec!["string".into()] },
-                                value: ir::TypeRefIr { path: vec!["string".into()] },
+                                key: ir::TypeRefIr {
+                                    path: vec!["string".into()],
+                                },
+                                value: ir::TypeRefIr {
+                                    path: vec!["string".into()],
+                                },
                             },
                             presence: ir::Presence::Implicit,
                             annotations: vec![],
@@ -1004,18 +1037,16 @@ mod tests {
                 },
                 ir::MessageIr {
                     name: "Status".into(),
-                    fields: vec![
-                    ir::FieldIr {
+                    fields: vec![ir::FieldIr {
                         id: 1,
                         name: "code".into(),
                         label: ir::FieldLabelIr::Singular(ir::TypeRefIr {
                             path: vec!["State".into()],
                         }),
-                            presence: ir::Presence::Implicit,
-                            annotations: vec![],
-                            span: ir::SourceSpan::default(),
-                        },
-                    ],
+                        presence: ir::Presence::Implicit,
+                        annotations: vec![],
+                        span: ir::SourceSpan::default(),
+                    }],
                     oneofs: vec![],
                     messages: vec![],
                     enums: vec![],
@@ -1109,14 +1140,19 @@ mod tests {
         )
         .unwrap();
 
-        message.set_field("name", ReflectValue::String("Bob".into())).unwrap();
+        message
+            .set_field("name", ReflectValue::String("Bob".into()))
+            .unwrap();
         assert_eq!(
             message.get_field("name").unwrap(),
             Some(ReflectValue::String("Bob".to_string()))
         );
 
         message.set_field_id(1, ReflectValue::Varint(99)).unwrap();
-        assert_eq!(message.get_field_id(1).unwrap(), Some(ReflectValue::Varint(99)));
+        assert_eq!(
+            message.get_field_id(1).unwrap(),
+            Some(ReflectValue::Varint(99))
+        );
 
         message.clear_field("name").unwrap();
         assert_eq!(message.get_field("name").unwrap(), None);
@@ -1146,7 +1182,9 @@ mod tests {
         assert_eq!(tags[0], ReflectValue::String("a".to_string()));
         assert_eq!(tags[1], ReflectValue::String("b".to_string()));
 
-        message.add_repeated("tags", ReflectValue::String("c".into())).unwrap();
+        message
+            .add_repeated("tags", ReflectValue::String("c".into()))
+            .unwrap();
         let updated = message.get_repeated("tags").unwrap().unwrap();
         assert_eq!(updated.len(), 3);
     }
@@ -1161,7 +1199,11 @@ mod tests {
         entry.push(Field::new(2, WireClass::Len, Value::Len(b"v1".to_vec())));
 
         let mut raw = RawMessage::new();
-        raw.push(Field::new(5, WireClass::Len, Value::Len(entry.encode().unwrap())));
+        raw.push(Field::new(
+            5,
+            WireClass::Len,
+            Value::Len(entry.encode().unwrap()),
+        ));
         let bytes = raw.encode().unwrap();
 
         let message = DynamicMessage::decode(
@@ -1175,14 +1217,8 @@ mod tests {
 
         let map_entries = message.get_map("meta").unwrap().unwrap();
         assert_eq!(map_entries.len(), 1);
-        assert_eq!(
-            map_entries[0].0,
-            ReflectValue::String("k1".to_string())
-        );
-        assert_eq!(
-            map_entries[0].1,
-            ReflectValue::String("v1".to_string())
-        );
+        assert_eq!(map_entries[0].0, ReflectValue::String("k1".to_string()));
+        assert_eq!(map_entries[0].1, ReflectValue::String("v1".to_string()));
     }
 
     #[test]
@@ -1214,18 +1250,16 @@ mod tests {
         let mut pkg = descriptor.package.clone();
         pkg.messages[0].oneofs.push(ir::OneofIr {
             name: "contact".into(),
-            fields: vec![
-                ir::FieldIr {
-                    id: 10,
-                    name: "email".into(),
-                    label: ir::FieldLabelIr::Singular(ir::TypeRefIr {
-                        path: vec!["string".into()],
-                    }),
-                    presence: ir::Presence::Implicit,
-                    annotations: vec![],
-                    span: ir::SourceSpan::default(),
-                },
-            ],
+            fields: vec![ir::FieldIr {
+                id: 10,
+                name: "email".into(),
+                label: ir::FieldLabelIr::Singular(ir::TypeRefIr {
+                    path: vec!["string".into()],
+                }),
+                presence: ir::Presence::Implicit,
+                annotations: vec![],
+                span: ir::SourceSpan::default(),
+            }],
             annotations: vec![],
             span: ir::SourceSpan::default(),
         });
@@ -1233,7 +1267,11 @@ mod tests {
         let msg_ir = desc.find_message("User").unwrap();
 
         let mut raw = RawMessage::new();
-        raw.push(Field::new(10, WireClass::Len, Value::Len(b"a@b.com".to_vec())));
+        raw.push(Field::new(
+            10,
+            WireClass::Len,
+            Value::Len(b"a@b.com".to_vec()),
+        ));
         let bytes = raw.encode().unwrap();
 
         let message = DynamicMessage::decode(
@@ -1288,9 +1326,17 @@ mod tests {
         let msg_ir = desc.find_message("User").unwrap();
 
         let mut inner = RawMessage::new();
-        inner.push(Field::new(1, WireClass::Len, Value::Len(b"Main St".to_vec())));
+        inner.push(Field::new(
+            1,
+            WireClass::Len,
+            Value::Len(b"Main St".to_vec()),
+        ));
         let mut raw = RawMessage::new();
-        raw.push(Field::new(20, WireClass::Len, Value::Len(inner.encode().unwrap())));
+        raw.push(Field::new(
+            20,
+            WireClass::Len,
+            Value::Len(inner.encode().unwrap()),
+        ));
         let bytes = raw.encode().unwrap();
 
         let message = DynamicMessage::decode(

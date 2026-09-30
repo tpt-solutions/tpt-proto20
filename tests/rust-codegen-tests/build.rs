@@ -22,6 +22,5 @@ fn main() {
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     fs::write(out_dir.join("generated.rs"), module).expect("write generated.rs");
-    fs::write(out_dir.join("fingerprint.txt"), &compiled.fingerprint)
-        .expect("write fingerprint");
+    fs::write(out_dir.join("fingerprint.txt"), &compiled.fingerprint).expect("write fingerprint");
 }

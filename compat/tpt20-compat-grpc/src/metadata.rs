@@ -8,13 +8,7 @@ use base64::Engine;
 use tpt20_rpc::{Metadata, MetadataValue};
 
 /// gRPC pseudo-headers that are never treated as metadata.
-const GRPC_PSEUDO_HEADERS: &[&str] = &[
-    ":authority",
-    ":path",
-    ":method",
-    ":scheme",
-    ":status",
-];
+const GRPC_PSEUDO_HEADERS: &[&str] = &[":authority", ":path", ":method", ":scheme", ":status"];
 
 /// gRPC protocol headers that are not application metadata.
 const GRPC_PROTOCOL_HEADERS: &[&str] = &[
@@ -78,10 +72,13 @@ pub fn to_grpc_headers(metadata: &Metadata) -> Result<http::HeaderMap, GrpcError
         let key_str = key.as_str();
         match value {
             MetadataValue::Text(v) => {
-                let header_name: http::HeaderName = key_str.parse().map_err(|_| GrpcError::Metadata("invalid header name".into()))?;
-                let header_value: http::HeaderValue = v.as_str().parse().map_err(|_| {
-                    GrpcError::Metadata("invalid text metadata value".into())
-                })?;
+                let header_name: http::HeaderName = key_str
+                    .parse()
+                    .map_err(|_| GrpcError::Metadata("invalid header name".into()))?;
+                let header_value: http::HeaderValue = v
+                    .as_str()
+                    .parse()
+                    .map_err(|_| GrpcError::Metadata("invalid text metadata value".into()))?;
                 headers.insert(header_name, header_value);
             }
             MetadataValue::Binary(v) => {
@@ -91,8 +88,12 @@ pub fn to_grpc_headers(metadata: &Metadata) -> Result<http::HeaderMap, GrpcError
                 } else {
                     format!("{}-bin", key_str)
                 };
-                let header_name: http::HeaderName = bin_key.parse().map_err(|_| GrpcError::Metadata("invalid header name".into()))?;
-                let header_value: http::HeaderValue = encoded.parse().map_err(|_| GrpcError::Metadata("invalid base64 value".into()))?;
+                let header_name: http::HeaderName = bin_key
+                    .parse()
+                    .map_err(|_| GrpcError::Metadata("invalid header name".into()))?;
+                let header_value: http::HeaderValue = encoded
+                    .parse()
+                    .map_err(|_| GrpcError::Metadata("invalid base64 value".into()))?;
                 headers.insert(header_name, header_value);
             }
         }

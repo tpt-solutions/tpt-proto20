@@ -1,4 +1,6 @@
-use tpt20_core::{DecoderLimits, DecodeError, Field, RawMessage, UnknownFieldPolicy, Value, WireClass};
+use tpt20_core::{
+    DecodeError, DecoderLimits, Field, RawMessage, UnknownFieldPolicy, Value, WireClass,
+};
 
 #[test]
 fn message_size_limit_enforced() {
@@ -54,12 +56,10 @@ fn known_fields_not_charged_to_unknown_budget() {
         max_unknown_field_bytes: 8,
         ..DecoderLimits::default()
     };
-    assert!(RawMessage::decode_filtered(
-        &bytes,
-        &limits,
-        UnknownFieldPolicy::Preserve,
-        &|id| id == 1
-    ).is_ok());
+    assert!(
+        RawMessage::decode_filtered(&bytes, &limits, UnknownFieldPolicy::Preserve, &|id| id == 1)
+            .is_ok()
+    );
 }
 
 #[test]

@@ -158,13 +158,7 @@ impl Frame {
         }
 
         let payload = bytes[5..5 + length].to_vec();
-        Ok((
-            Frame {
-                flags,
-                payload,
-            },
-            5 + length,
-        ))
+        Ok((Frame { flags, payload }, 5 + length))
     }
 
     /// Returns the encoded frame length without the payload.

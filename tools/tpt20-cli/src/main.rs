@@ -359,9 +359,12 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Init { name } => cmd_init(name),
         Commands::Check { file, descriptor } => cmd_check(file, descriptor),
         Commands::Fmt { file, check } => cmd_fmt(file, check),
-        Commands::Lint { files, config, format, deny_warnings } => {
-            cmd_lint(files, config, format, deny_warnings)
-        }
+        Commands::Lint {
+            files,
+            config,
+            format,
+            deny_warnings,
+        } => cmd_lint(files, config, format, deny_warnings),
         Commands::Diff { old, new } => cmd_diff(old, new),
         Commands::Gen { backend } => cmd_gen(backend),
         Commands::Descriptors { file, format, out } => cmd_descriptors(file, format, out),
@@ -383,10 +386,20 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             deadline_ms,
             tls_cert,
             compression,
-        } => cmd_call(
-            endpoint, method, input, binary_input, streaming,
-            metadata, deadline_ms, tls_cert, compression,
-        ).await,
+        } => {
+            cmd_call(
+                endpoint,
+                method,
+                input,
+                binary_input,
+                streaming,
+                metadata,
+                deadline_ms,
+                tls_cert,
+                compression,
+            )
+            .await
+        }
         Commands::Health { endpoint, tls_cert } => cmd_health(endpoint, tls_cert).await,
         Commands::Reflect { file, message } => cmd_reflect(file, message),
         Commands::Registry { command } => cmd_registry(command),
@@ -407,7 +420,10 @@ fn cmd_init(name: Option<String>) -> Result<(), CliError> {
 
     let dir = Path::new(&project);
     if dir.exists() {
-        return Err(CliError::Usage(format!("directory '{}' already exists", project)));
+        return Err(CliError::Usage(format!(
+            "directory '{}' already exists",
+            project
+        )));
     }
 
     fs::create_dir_all(dir)?;
@@ -416,7 +432,7 @@ fn cmd_init(name: Option<String>) -> Result<(), CliError> {
     fs::create_dir_all(&src)?;
 
     let schema = format!(
-r#"package {name};
+        r#"package {name};
 
 message Example {{
     1: id int64;
@@ -428,7 +444,7 @@ message Example {{
     fs::write(src.join(format!("{}.tpt", project)), schema)?;
 
     let cargo = format!(
-r#"[package]
+        r#"[package]
 name = "{name}"
 version = "0.1.0"
 edition = "2021"
@@ -460,15 +476,17 @@ fn cmd_check(file: PathBuf, show_descriptor: bool) -> Result<(), CliError> {
     let diags = tpt20_compiler::check(&src, file.to_str());
     if !diags.is_empty() {
         eprintln!("{}", tpt20_compiler::render_all(&diags));
-        if diags.iter().any(|d| d.severity == tpt20_compiler::Severity::Error) {
+        if diags
+            .iter()
+            .any(|d| d.severity == tpt20_compiler::Severity::Error)
+        {
             return Err(CliError::Diagnostics("check failed".into()));
         }
     }
 
     if show_descriptor {
-        let out = tpt20_compiler::compile(&src, file.to_str()).map_err(|diags| {
-            CliError::Diagnostics(tpt20_compiler::render_all(&diags))
-        })?;
+        let out = tpt20_compiler::compile(&src, file.to_str())
+            .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
         println!("{}", out.descriptor.to_json()?);
     }
 
@@ -664,12 +682,15 @@ fn cmd_lint(
 
     match format {
         OutputFormat::Json => {
-            let serializable: Vec<LintDiag> = all_diags.iter().map(|d| LintDiag {
-                code: d.code.to_string(),
-                message: d.message.clone(),
-                severity: format!("{:?}", d.severity),
-                file: d.file.clone(),
-            }).collect();
+            let serializable: Vec<LintDiag> = all_diags
+                .iter()
+                .map(|d| LintDiag {
+                    code: d.code.to_string(),
+                    message: d.message.clone(),
+                    severity: format!("{:?}", d.severity),
+                    file: d.file.clone(),
+                })
+                .collect();
             let json = serde_json::to_string_pretty(&serializable)?;
             println!("{}", json);
         }
@@ -678,8 +699,13 @@ fn cmd_lint(
         }
     }
 
-    if all_diags.iter().any(|d| d.severity == tpt20_compiler::Severity::Error)
-        || (deny_warnings && all_diags.iter().any(|d| d.severity == tpt20_compiler::Severity::Warning))
+    if all_diags
+        .iter()
+        .any(|d| d.severity == tpt20_compiler::Severity::Error)
+        || (deny_warnings
+            && all_diags
+                .iter()
+                .any(|d| d.severity == tpt20_compiler::Severity::Warning))
     {
         return Err(CliError::Diagnostics("lint failed".into()));
     }
@@ -745,8 +771,11 @@ impl LintRule {
             LintRule::NoRequired => {
                 if src.contains("required") {
                     diags.push(
-                        Diagnostic::warning("LINT001", "required keyword is deprecated; use explicit presence (`?`) instead")
-                            .in_file(file)
+                        Diagnostic::warning(
+                            "LINT001",
+                            "required keyword is deprecated; use explicit presence (`?`) instead",
+                        )
+                        .in_file(file),
                     );
                 }
             }
@@ -754,7 +783,7 @@ impl LintRule {
                 if !src.contains("package ") {
                     diags.push(
                         Diagnostic::warning("LINT002", "schema is missing a package declaration")
-                            .in_file(file)
+                            .in_file(file),
                     );
                 }
             }
@@ -769,8 +798,11 @@ impl LintRule {
                         .collect();
                     if nums.len() == 2 && nums[0] >= nums[1] {
                         diags.push(
-                            Diagnostic::error("LINT003", format!("invalid reserved range: {}", range))
-                                .in_file(file)
+                            Diagnostic::error(
+                                "LINT003",
+                                format!("invalid reserved range: {}", range),
+                            )
+                            .in_file(file),
                         );
                     }
                 }
@@ -778,8 +810,7 @@ impl LintRule {
             LintRule::DeprecatedUsage => {
                 if src.contains("@deprecated") {
                     diags.push(
-                        Diagnostic::warning("LINT004", "deprecated annotation found")
-                            .in_file(file)
+                        Diagnostic::warning("LINT004", "deprecated annotation found").in_file(file),
                     );
                 }
             }
@@ -814,11 +845,14 @@ fn cmd_diff(old: PathBuf, new: PathBuf) -> Result<(), CliError> {
 
 fn cmd_gen(backend: GenBackend) -> Result<(), CliError> {
     match backend {
-        GenBackend::Rust { input, output, builders } => {
+        GenBackend::Rust {
+            input,
+            output,
+            builders,
+        } => {
             let src = fs::read_to_string(&input)?;
-            let compiled = tpt20_compiler::compile(&src, input.to_str()).map_err(|diags| {
-                CliError::Diagnostics(tpt20_compiler::render_all(&diags))
-            })?;
+            let compiled = tpt20_compiler::compile(&src, input.to_str())
+                .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
 
             let mut opts = tpt20_codegen_rust::CodegenOptions::default();
             opts.builders = builders;
@@ -838,11 +872,14 @@ fn cmd_gen(backend: GenBackend) -> Result<(), CliError> {
 // descriptors
 // ---------------------------------------------------------------------------
 
-fn cmd_descriptors(file: PathBuf, format: DescriptorFormat, out: Option<PathBuf>) -> Result<(), CliError> {
+fn cmd_descriptors(
+    file: PathBuf,
+    format: DescriptorFormat,
+    out: Option<PathBuf>,
+) -> Result<(), CliError> {
     let src = fs::read_to_string(&file)?;
-    let compiled = tpt20_compiler::compile(&src, file.to_str()).map_err(|diags| {
-        CliError::Diagnostics(tpt20_compiler::render_all(&diags))
-    })?;
+    let compiled = tpt20_compiler::compile(&src, file.to_str())
+        .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
 
     match format {
         DescriptorFormat::Json => {
@@ -930,11 +967,15 @@ fn cmd_encode(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), Cli
     let json_str = read_input_string(input)?;
     let value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| CliError::Parse(format!("invalid json: {e}")))?;
-    let obj = value.as_object().ok_or_else(|| CliError::Parse("expected json object".into()))?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| CliError::Parse("expected json object".into()))?;
 
     let mut raw = tpt20_core::RawMessage::new();
     for (key, val) in obj {
-        let id: u32 = key.parse().map_err(|_| CliError::Parse(format!("invalid field id: {key}")))?;
+        let id: u32 = key
+            .parse()
+            .map_err(|_| CliError::Parse(format!("invalid field id: {key}")))?;
         let (wire, value) = json_value_to_core(val)?;
         raw.push(tpt20_core::Field::new(id, wire, value));
     }
@@ -980,7 +1021,11 @@ fn cmd_binary_to_text(input: Option<PathBuf>, output: Option<PathBuf>) -> Result
 
     let mut out = String::new();
     for field in &raw.fields {
-        out.push_str(&format!("{}: {}\n", field.field_id, core_value_to_text(&field.value)));
+        out.push_str(&format!(
+            "{}: {}\n",
+            field.field_id,
+            core_value_to_text(&field.value)
+        ));
     }
     write_output_str(&out, output)
 }
@@ -989,11 +1034,15 @@ fn cmd_json_to_binary(input: Option<PathBuf>, output: Option<PathBuf>) -> Result
     let json_str = read_input_string(input)?;
     let value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| CliError::Parse(format!("invalid json: {e}")))?;
-    let obj = value.as_object().ok_or_else(|| CliError::Parse("expected json object".into()))?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| CliError::Parse("expected json object".into()))?;
 
     let mut raw = tpt20_core::RawMessage::new();
     for (key, val) in obj {
-        let id: u32 = key.parse().map_err(|_| CliError::Parse(format!("invalid field id: {key}")))?;
+        let id: u32 = key
+            .parse()
+            .map_err(|_| CliError::Parse(format!("invalid field id: {key}")))?;
         let (wire, value) = json_value_to_core(val)?;
         raw.push(tpt20_core::Field::new(id, wire, value));
     }
@@ -1016,17 +1065,31 @@ fn read_input_string(input: Option<PathBuf>) -> Result<String, CliError> {
     }
 }
 
-fn json_value_to_core(value: &serde_json::Value) -> Result<(tpt20_core::WireClass, tpt20_core::Value), CliError> {
+fn json_value_to_core(
+    value: &serde_json::Value,
+) -> Result<(tpt20_core::WireClass, tpt20_core::Value), CliError> {
     match value {
-        serde_json::Value::Null => Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(Vec::new()))),
-        serde_json::Value::Bool(b) => Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(if *b { 1 } else { 0 }))),
+        serde_json::Value::Null => Ok((
+            tpt20_core::WireClass::Len,
+            tpt20_core::Value::Len(Vec::new()),
+        )),
+        serde_json::Value::Bool(b) => Ok((
+            tpt20_core::WireClass::Varint,
+            tpt20_core::Value::Varint(if *b { 1 } else { 0 }),
+        )),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(i as u64)))
+                Ok((
+                    tpt20_core::WireClass::Varint,
+                    tpt20_core::Value::Varint(i as u64),
+                ))
             } else if let Some(u) = n.as_u64() {
                 Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(u)))
             } else if let Some(f) = n.as_f64() {
-                Ok((tpt20_core::WireClass::Fixed64, tpt20_core::Value::Fixed64(f.to_bits())))
+                Ok((
+                    tpt20_core::WireClass::Fixed64,
+                    tpt20_core::Value::Fixed64(f.to_bits()),
+                ))
             } else {
                 Err(CliError::Parse("unsupported number".into()))
             }
@@ -1035,7 +1098,10 @@ fn json_value_to_core(value: &serde_json::Value) -> Result<(tpt20_core::WireClas
             if let Ok(bytes) = STANDARD.decode(s) {
                 Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(bytes)))
             } else {
-                Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(s.as_bytes().to_vec())))
+                Ok((
+                    tpt20_core::WireClass::Len,
+                    tpt20_core::Value::Len(s.as_bytes().to_vec()),
+                ))
             }
         }
         serde_json::Value::Array(_) => {
@@ -1052,22 +1118,37 @@ fn json_value_to_core(value: &serde_json::Value) -> Result<(tpt20_core::WireClas
 fn parse_text_value(s: &str) -> Result<(tpt20_core::WireClass, tpt20_core::Value), CliError> {
     let s = s.trim();
     if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        let inner = &s[1..s.len()-1];
-        return Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(inner.as_bytes().to_vec())));
+        let inner = &s[1..s.len() - 1];
+        return Ok((
+            tpt20_core::WireClass::Len,
+            tpt20_core::Value::Len(inner.as_bytes().to_vec()),
+        ));
     }
     if let Ok(b) = s.parse::<bool>() {
-        return Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(if b { 1 } else { 0 })));
+        return Ok((
+            tpt20_core::WireClass::Varint,
+            tpt20_core::Value::Varint(if b { 1 } else { 0 }),
+        ));
     }
     if let Ok(i) = s.parse::<i64>() {
-        return Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(i as u64)));
+        return Ok((
+            tpt20_core::WireClass::Varint,
+            tpt20_core::Value::Varint(i as u64),
+        ));
     }
     if let Ok(u) = s.parse::<u64>() {
         return Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(u)));
     }
     if let Ok(f) = s.parse::<f64>() {
-        return Ok((tpt20_core::WireClass::Fixed64, tpt20_core::Value::Fixed64(f.to_bits())));
+        return Ok((
+            tpt20_core::WireClass::Fixed64,
+            tpt20_core::Value::Fixed64(f.to_bits()),
+        ));
     }
-    Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(s.as_bytes().to_vec())))
+    Ok((
+        tpt20_core::WireClass::Len,
+        tpt20_core::Value::Len(s.as_bytes().to_vec()),
+    ))
 }
 
 fn core_value_to_text(value: &tpt20_core::Value) -> String {
@@ -1195,18 +1276,25 @@ async fn cmd_call(
         fs::read(p)?
     } else if let Some(p) = input {
         let json = fs::read_to_string(p)?;
-        serde_json::to_vec(&serde_json::from_str::<serde_json::Value>(&json).map_err(|e| CliError::Parse(e.to_string()))?)?
+        serde_json::to_vec(
+            &serde_json::from_str::<serde_json::Value>(&json)
+                .map_err(|e| CliError::Parse(e.to_string()))?,
+        )?
     } else {
         let mut buf = String::new();
         io::stdin().read_to_string(&mut buf)?;
-        serde_json::to_vec(&serde_json::from_str::<serde_json::Value>(&buf).map_err(|e| CliError::Parse(e.to_string()))?)?
+        serde_json::to_vec(
+            &serde_json::from_str::<serde_json::Value>(&buf)
+                .map_err(|e| CliError::Parse(e.to_string()))?,
+        )?
     };
 
     let mut md = tpt20_rpc::Metadata::with_default_limit();
     for kv in &metadata {
         let parts: Vec<&str> = kv.splitn(2, '=').collect();
         if parts.len() == 2 {
-            md.insert_text(parts[0], parts[1]).map_err(|e| CliError::Transport(e.to_string()))?;
+            md.insert_text(parts[0], parts[1])
+                .map_err(|e| CliError::Transport(e.to_string()))?;
         }
     }
 
@@ -1247,9 +1335,8 @@ async fn cmd_health(endpoint: String, _tls_cert: Option<PathBuf>) -> Result<(), 
 
 fn cmd_reflect(file: PathBuf, message: Option<String>) -> Result<(), CliError> {
     let src = fs::read_to_string(&file)?;
-    let compiled = tpt20_compiler::compile(&src, file.to_str()).map_err(|diags| {
-        CliError::Diagnostics(tpt20_compiler::render_all(&diags))
-    })?;
+    let compiled = tpt20_compiler::compile(&src, file.to_str())
+        .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
 
     let desc = compiled.descriptor;
 
@@ -1278,7 +1365,11 @@ fn cmd_reflect(file: PathBuf, message: Option<String>) -> Result<(), CliError> {
                 }
             }
             for e in &msg.enums {
-                println!("  enum {}: {}", e.name, if e.open { "open" } else { "closed" });
+                println!(
+                    "  enum {}: {}",
+                    e.name,
+                    if e.open { "open" } else { "closed" }
+                );
                 for v in &e.values {
                     println!("    {} = {}", v.name, v.number);
                 }
@@ -1311,7 +1402,11 @@ fn cmd_reflect(file: PathBuf, message: Option<String>) -> Result<(), CliError> {
 
 fn cmd_registry(command: RegistryCommands) -> Result<(), CliError> {
     match command {
-        RegistryCommands::Publish { file, registry, version } => {
+        RegistryCommands::Publish {
+            file,
+            registry,
+            version,
+        } => {
             let registry = registry.unwrap_or_else(|| {
                 home::home_dir()
                     .unwrap_or_else(|| PathBuf::from("."))
@@ -1322,12 +1417,15 @@ fn cmd_registry(command: RegistryCommands) -> Result<(), CliError> {
             fs::create_dir_all(&registry)?;
 
             let src = fs::read_to_string(&file)?;
-            let compiled = tpt20_compiler::compile(&src, file.to_str()).map_err(|diags| {
-                CliError::Diagnostics(tpt20_compiler::render_all(&diags))
-            })?;
+            let compiled = tpt20_compiler::compile(&src, file.to_str())
+                .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
 
             let version = version.unwrap_or_else(|| {
-                compiled.ir.name.clone().unwrap_or_else(|| "default".to_string())
+                compiled
+                    .ir
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "default".to_string())
             });
 
             let descriptor_json = compiled.descriptor.to_json()?;
@@ -1366,7 +1464,9 @@ struct VersionRecord {
 
 impl Default for LocalManifest {
     fn default() -> Self {
-        LocalManifest { versions: Vec::new() }
+        LocalManifest {
+            versions: Vec::new(),
+        }
     }
 }
 
@@ -1385,7 +1485,8 @@ impl LocalManifest {
 
     fn save(&self, root: &Path) -> Result<(), CliError> {
         let path = root.join("manifest.json");
-        let json = serde_json::to_string_pretty(self).map_err(|e| CliError::Registry(e.to_string()))?;
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| CliError::Registry(e.to_string()))?;
         fs::write(path, json)?;
         Ok(())
     }

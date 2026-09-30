@@ -28,7 +28,10 @@ impl Metadata {
     ///
     /// Values are stored in insertion order per key.
     pub fn insert(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        self.inner.entry(key.into().to_ascii_lowercase()).or_default().push(value.into());
+        self.inner
+            .entry(key.into().to_ascii_lowercase())
+            .or_default()
+            .push(value.into());
     }
 
     /// Returns all values for a key.
@@ -101,6 +104,9 @@ mod tests {
         let mut m = Metadata::new();
         m.insert("key", "v1");
         m.insert("key", "v2");
-        assert_eq!(m.get("key"), Some(&["v1".to_string(), "v2".to_string()][..]));
+        assert_eq!(
+            m.get("key"),
+            Some(&["v1".to_string(), "v2".to_string()][..])
+        );
     }
 }

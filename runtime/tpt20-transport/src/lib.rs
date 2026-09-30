@@ -32,4 +32,4 @@ pub use frame::{decode_frame, encode_frame, Frame, FrameFlags, FramedMessage};
 pub use http2::{Http2Server, Http2Transport};
 pub use in_process::{InProcessServer, InProcessTransport};
 pub use metadata::Metadata;
-pub use traits::{Call, StreamingType, StreamItem, Transport};
+pub use traits::{Call, StreamItem, StreamingType, Transport};

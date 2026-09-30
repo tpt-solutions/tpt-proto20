@@ -73,7 +73,10 @@ impl HealthRegistry {
         if service.is_empty() {
             guard.get("").copied().unwrap_or(ServingStatus::Serving)
         } else {
-            guard.get(service).copied().unwrap_or(ServingStatus::ServiceUnknown)
+            guard
+                .get(service)
+                .copied()
+                .unwrap_or(ServingStatus::ServiceUnknown)
         }
     }
 

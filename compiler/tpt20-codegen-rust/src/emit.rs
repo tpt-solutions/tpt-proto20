@@ -143,7 +143,11 @@ impl<'a> Emitter<'a> {
         None
     }
 
-    fn find_by_flat_name(&self, messages: &'a [ir::MessageIr], flat: &str) -> Option<&'a ir::MessageIr> {
+    fn find_by_flat_name(
+        &self,
+        messages: &'a [ir::MessageIr],
+        flat: &str,
+    ) -> Option<&'a ir::MessageIr> {
         for m in messages {
             let self_flat = naming::flat_type_name(&[], &m.name);
             if self_flat == flat {
@@ -290,11 +294,25 @@ impl std::error::Error for BuildError {}
         }
     }
 
-    fn emit_oneof_enum(&mut self, scope: &[String], msg: &ir::MessageIr, o: &ir::OneofIr, view: bool) {
+    fn emit_oneof_enum(
+        &mut self,
+        scope: &[String],
+        msg: &ir::MessageIr,
+        o: &ir::OneofIr,
+        view: bool,
+    ) {
         let oty = if view {
-            format!("{}{}<'a>", naming::flat_type_name(scope, &msg.name), naming::pascal(&o.name))
+            format!(
+                "{}{}<'a>",
+                naming::flat_type_name(scope, &msg.name),
+                naming::pascal(&o.name)
+            )
         } else {
-            format!("{}{}", naming::flat_type_name(scope, &msg.name), naming::pascal(&o.name))
+            format!(
+                "{}{}",
+                naming::flat_type_name(scope, &msg.name),
+                naming::pascal(&o.name)
+            )
         };
         let mut s = String::new();
         if view {
@@ -316,7 +334,10 @@ impl std::error::Error for BuildError {}
             } else {
                 self.owned_type(scope, &t.path)
             };
-            s.push_str(&format!("    /// Field id {}.\n    {variant}({vty}),\n", mf.id));
+            s.push_str(&format!(
+                "    /// Field id {}.\n    {variant}({vty}),\n",
+                mf.id
+            ));
         }
         s.push_str("}\n");
         self.out.push_str(&s);
@@ -344,8 +365,10 @@ impl std::error::Error for BuildError {}
             }
             let variant = naming::sanitize_ident(&naming::pascal(&v.name));
             if e.open {
-                self.out
-                    .push_str(&format!("    /// Value `{}` ({}).\n    {variant},\n", v.name, v.number));
+                self.out.push_str(&format!(
+                    "    /// Value `{}` ({}).\n    {variant},\n",
+                    v.name, v.number
+                ));
             } else {
                 self.out.push_str(&format!(
                     "    /// Value `{}` ({}).\n    {variant} = {},\n",
@@ -449,12 +472,9 @@ impl Default for {flat} {{
                 .or_else(|| e.values.iter().find(|v| !v.alias))
                 .map(|v| naming::sanitize_ident(&naming::pascal(&v.name)))
                 .unwrap_or_else(|| "_".to_string());
-            let needle = format!(
-                "Self::from_i32({default_number}).unwrap_or_default_or_first()"
-            );
-            let replacement = format!(
-                "Self::from_i32({default_number}).unwrap_or(Self::{first_variant})"
-            );
+            let needle = format!("Self::from_i32({default_number}).unwrap_or_default_or_first()");
+            let replacement =
+                format!("Self::from_i32({default_number}).unwrap_or(Self::{first_variant})");
             self.out = self.out.replacen(&needle, &replacement, 1);
         }
 
@@ -467,7 +487,7 @@ impl Default for {flat} {{
             .filter(|v| !v.alias)
             .map(|v| {
                 format!(
-"            {flat}::{} => __json::Value::String({:?}.to_string()),\n",
+                    "            {flat}::{} => __json::Value::String({:?}.to_string()),\n",
                     naming::sanitize_ident(&naming::pascal(&v.name)),
                     v.name
                 )
@@ -488,7 +508,7 @@ impl Default for {flat} {{
             .filter(|v| !v.alias)
             .map(|v| {
                 format!(
-"                {:?} => Ok({flat}::{}),\n",
+                    "                {:?} => Ok({flat}::{}),\n",
                     v.name,
                     naming::sanitize_ident(&naming::pascal(&v.name))
                 )
@@ -625,7 +645,10 @@ impl Default for {flat} {{
             .map(|g| {
                 format!(
                     "&[{}]",
-                    g.iter().map(|i| format!("{i}u32")).collect::<Vec<_>>().join(", ")
+                    g.iter()
+                        .map(|i| format!("{i}u32"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             })
             .collect::<Vec<_>>()
@@ -637,7 +660,7 @@ impl Default for {flat} {{
             .collect::<Vec<_>>()
             .join(", ");
         b.push_str(&format!(
-r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
+            r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
     pub fn encode(&self) -> Vec<u8> {{
         self.to_raw().encode().unwrap_or_default()
     }}
@@ -685,8 +708,7 @@ r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
                                     ));
                                 }
                                 Implicit => {
-                                    let cond =
-                                        Self::skip_cond(&t.path[0], "v");
+                                    let cond = Self::skip_cond(&t.path[0], "v");
                                     b.push_str(&format!(
 "        let v = &self.{fname};\n        if {cond} {{\n            raw.push(__core::Field::new({id}, {class}, {enc}));\n        }}\n",
                                         id = f.id
@@ -735,7 +757,9 @@ r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
         b: &mut String,
     ) {
         let id = f.id;
-        let kind = self.resolve_ref(scope, f.label.unwrap_type().path.as_slice()).1;
+        let kind = self
+            .resolve_ref(scope, f.label.unwrap_type().path.as_slice())
+            .1;
         match kind {
             TypeKind::Scalar(info) => match info.pack {
                 PackKind::NotPackable => {
@@ -779,7 +803,9 @@ r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
         let kenc = expr::enc_value(key_scalar, "k");
         let vkind = self.resolve_ref(scope, &value.path).1;
         let (vclass, venc) = match vkind {
-            TypeKind::Scalar(info) => (class_name(info.class), expr::enc_value(&value.path[0], "v")),
+            TypeKind::Scalar(info) => {
+                (class_name(info.class), expr::enc_value(&value.path[0], "v"))
+            }
             TypeKind::Enum { .. } => (
                 class_name(crate::WireClass::Varint),
                 "__core::Value::Varint((v.to_i32() as u64))".to_string(),
@@ -897,7 +923,9 @@ r#"        for (k, v) in &self.{fname} {{
         b.push_str(
             "    /// Decodes with the default conservative limits.\n    pub fn decode(bytes: &[u8]) -> Result<Self, __core::DecodeError> {\n        Self::decode_inner(bytes, &__core::DecoderLimits::default(), 1)\n    }\n\n",
         );
-        b.push_str("    /// Borrows over `bytes`: zero-copy strings/bytes, nested views recursive.\n");
+        b.push_str(
+            "    /// Borrows over `bytes`: zero-copy strings/bytes, nested views recursive.\n",
+        );
         b.push_str("    pub fn decode_borrowed(bytes: &[u8]) -> Result<");
         b.push_str(&view);
         b.push_str("<'_>, __core::DecodeError> {\n        ");
@@ -948,34 +976,34 @@ r#"        for (k, v) in &self.{fname} {{
                             assign
                         )
                     }
-                     TypeKind::Enum { open } => {
-                         let ety = self.resolve_ref(scope, &t.path).0;
-                         let val = if open {
-                             format!("{ety}::from_i32(n)")
-                         } else {
-                             format!("{ety}::from_i32(n)?")
-                         };
-                         let assign = if f.presence == ir::Presence::Explicit {
-                             format!("{target}.{fname} = Some({val});")
-                         } else {
-                             format!("{target}.{fname} = {val};")
-                         };
-                         format!(
+                    TypeKind::Enum { open } => {
+                        let ety = self.resolve_ref(scope, &t.path).0;
+                        let val = if open {
+                            format!("{ety}::from_i32(n)")
+                        } else {
+                            format!("{ety}::from_i32(n)?")
+                        };
+                        let assign = if f.presence == ir::Presence::Explicit {
+                            format!("{target}.{fname} = Some({val});")
+                        } else {
+                            format!("{target}.{fname} = {val};")
+                        };
+                        format!(
  "                ({}, {}) => {{\n                    let n = __support::wire_i32(&field.value)?;\n                    {}\n                }}\n",
                              f.id,
                              class_name(crate::WireClass::Varint),
                              assign
                          )
-                     }
-                       TypeKind::Message => {
-                           let ty = self.owned_type(scope, &t.path);
-                           let method = format!("{ty}::decode_inner");
-                           format!(
+                    }
+                    TypeKind::Message => {
+                        let ty = self.owned_type(scope, &t.path);
+                        let method = format!("{ty}::decode_inner");
+                        format!(
    "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    {target}.{fname} = Some({method}(sub, limits, depth + 1)?);\n                }}\n",
                                f.id,
                                class_name(crate::WireClass::Len),
                            )
-                       }
+                    }
                 }
             }
             FieldLabelIr::Repeated(t) => {
@@ -989,11 +1017,7 @@ r#"        for (k, v) in &self.{fname} {{
 
     /// Conversion snippet from wire i32 `n` into an enum assignment.
     #[allow(dead_code)]
-    fn enum_conv(
-        _explicit: bool,
-        _open: bool,
-        _ty: &str,
-    ) -> String {
+    fn enum_conv(_explicit: bool, _open: bool, _ty: &str) -> String {
         String::new()
     }
 
@@ -1007,7 +1031,9 @@ r#"        for (k, v) in &self.{fname} {{
         _view: bool,
     ) -> String {
         let id = f.id;
-        let kind = self.resolve_ref(scope, f.label.unwrap_type().path.as_slice()).1;
+        let kind = self
+            .resolve_ref(scope, f.label.unwrap_type().path.as_slice())
+            .1;
         match kind {
             TypeKind::Scalar(info) => {
                 let (single_reader, packed_reader) = match info.pack {
@@ -1041,7 +1067,9 @@ r#"        for (k, v) in &self.{fname} {{
                 )
             }
             TypeKind::Enum { open } => {
-                let ety = self.resolve_ref(scope, f.label.unwrap_type().path.as_slice()).0;
+                let ety = self
+                    .resolve_ref(scope, f.label.unwrap_type().path.as_slice())
+                    .0;
                 if open {
                     format!(
  "                ({id}, {varint}) => {{\n                    let n = __support::wire_i32(&field.value)?;\n                    out_msg.{fname}.push({ety}::from_i32(n));\n                }}\n                ({id}, {len}) => {{\n                    let words = __scalar::decode_packed_varints(&field.value, limits)?;\n                    out_msg.{fname}.extend(words.into_iter().map(|x| {ety}::from_i32(x as i32)));\n                    limits.check_repeated_entries(out_msg.{fname}.len())?;\n                }}\n",
@@ -1056,14 +1084,14 @@ r#"        for (k, v) in &self.{fname} {{
                     )
                 }
             }
-               TypeKind::Message => {
-                   let ty = self.owned_type(scope, f.label.unwrap_type().path.as_slice());
-                   let method = format!("{ty}::decode_inner");
-                   format!(
+            TypeKind::Message => {
+                let ty = self.owned_type(scope, f.label.unwrap_type().path.as_slice());
+                let method = format!("{ty}::decode_inner");
+                format!(
    "                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{fname}.push({method}(sub, limits, depth + 1)?);\n                }}\n",
                        len = class_name(crate::WireClass::Len),
                    )
-               }
+            }
         }
     }
 
@@ -1106,27 +1134,27 @@ r#"        for (k, v) in &self.{fname} {{
                     format!("{ety}::from_i32(__support::wire_i32(&ef.value)?)?")
                 }
             }
-              TypeKind::Message => {
-                  let ty = if view {
-                      self.view_type(scope, &value.path)
-                  } else {
-                      self.owned_type(scope, &value.path)
-                  };
-                  let method = if view {
-                      turbo_call(&ty, "decode_inner")
-                  } else {
-                      format!("{ty}::decode_inner")
-                  };
-                  let bytes_dec = if view {
-                      "__scalar::decode_bytes_borrowed(&ef.value)"
-                  } else {
-                      "__scalar::decode_bytes(&ef.value)"
-                  };
-                  format!(
-                      "{method}({bytes_dec}, limits, depth + 1)?",
-                      bytes_dec = bytes_dec,
-                  )
-              }
+            TypeKind::Message => {
+                let ty = if view {
+                    self.view_type(scope, &value.path)
+                } else {
+                    self.owned_type(scope, &value.path)
+                };
+                let method = if view {
+                    turbo_call(&ty, "decode_inner")
+                } else {
+                    format!("{ty}::decode_inner")
+                };
+                let bytes_dec = if view {
+                    "__scalar::decode_bytes_borrowed(&ef.value)"
+                } else {
+                    "__scalar::decode_bytes(&ef.value)"
+                };
+                format!(
+                    "{method}({bytes_dec}, limits, depth + 1)?",
+                    bytes_dec = bytes_dec,
+                )
+            }
         };
         let kt = if view {
             self.owned_type(&[], &[key_scalar.to_string()])
@@ -1215,48 +1243,48 @@ r#"        for (k, v) in &self.{fname} {{
                     class_name(info.class),
                 )
             }
-             TypeKind::Enum { open } => {
-                 let ety = self.resolve_ref(scope, &t.path).0;
-                 let conv = if open {
-                     format!("{ety}::from_i32(n)")
-                 } else {
-                     format!("{ety}::from_i32(n)?")
-                 };
-                 let wire_fn = if view {
-                     "__support::wire_i32_borrowed(&field.value)"
-                 } else {
-                     "__support::wire_i32(&field.value)"
-                 };
-                 format!(
+            TypeKind::Enum { open } => {
+                let ety = self.resolve_ref(scope, &t.path).0;
+                let conv = if open {
+                    format!("{ety}::from_i32(n)")
+                } else {
+                    format!("{ety}::from_i32(n)?")
+                };
+                let wire_fn = if view {
+                    "__support::wire_i32_borrowed(&field.value)"
+                } else {
+                    "__support::wire_i32(&field.value)"
+                };
+                format!(
  "                ({}, {}) => {{\n                    let n = {wire_fn}?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({conv}));\n                }}\n",
                      mf.id,
                      class_name(crate::WireClass::Varint),
                      wire_fn = wire_fn,
                  )
-             }
-             TypeKind::Message => {
-                 let mty = if view {
-                     self.view_type(scope, &t.path)
-                 } else {
-                     self.owned_type(scope, &t.path)
-                 };
-                 let method = if view {
-                     turbo_call(&mty, "decode_inner")
-                 } else {
-                     format!("{mty}::decode_inner")
-                 };
-                 let bytes_dec = if view {
-                     "__scalar::decode_bytes_borrowed(&field.value)"
-                 } else {
-                     "__scalar::decode_bytes(&field.value)"
-                 };
-                 format!(
+            }
+            TypeKind::Message => {
+                let mty = if view {
+                    self.view_type(scope, &t.path)
+                } else {
+                    self.owned_type(scope, &t.path)
+                };
+                let method = if view {
+                    turbo_call(&mty, "decode_inner")
+                } else {
+                    format!("{mty}::decode_inner")
+                };
+                let bytes_dec = if view {
+                    "__scalar::decode_bytes_borrowed(&field.value)"
+                } else {
+                    "__scalar::decode_bytes(&field.value)"
+                };
+                format!(
    "                ({}, {}) => {{\n                    let sub = {bytes_dec}?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({method}(sub, limits, depth + 1)?));\n                }}\n",
                      mf.id,
                      class_name(crate::WireClass::Len),
                      bytes_dec = bytes_dec,
                  )
-             }
+            }
         }
     }
 
@@ -1293,7 +1321,10 @@ r#"        for (k, v) in &self.{fname} {{
                 let t = mf.label.unwrap_type();
                 let vty = self.view_value_type(scope, &t.path);
                 has_lt |= vty.contains("'a");
-                variants.push_str(&format!("    /// Field id {}.\n    {variant}({vty}),\n", mf.id));
+                variants.push_str(&format!(
+                    "    /// Field id {}.\n    {variant}({vty}),\n",
+                    mf.id
+                ));
             }
             let generics = if has_lt { lt } else { "" };
             oneof_defs.push_str(&format!(
@@ -1315,7 +1346,9 @@ r#"        for (k, v) in &self.{fname} {{
             body.push_str(&format!("    pub {oname}: Option<{oty}>,\n"));
         }
         if !borrows {
-            body.push_str("    #[doc(hidden)]\n    pub _marker: std::marker::PhantomData<&'a ()>,\n");
+            body.push_str(
+                "    #[doc(hidden)]\n    pub _marker: std::marker::PhantomData<&'a ()>,\n",
+            );
         }
         s.push_str(&format!(
             "\n/// Borrowed view over `{}` bytes (spec §11.2): strings/bytes reference the\n/// source buffer without copying. Unknown fields are dropped here (use owned\n/// decoding to preserve them).\n#[derive(Debug, Clone, PartialEq)]\npub struct {flat}{lt} {{\n{body}}}\n",
@@ -1582,7 +1615,9 @@ r#"        for (k, v) in &self.{fname} {{
                         scalar_zero(t.path[0].as_str()).to_string()
                     }
                 }
-                ir::FieldLabelIr::Repeated(_) | ir::FieldLabelIr::Map { .. } => String::from("Vec::new()"),
+                ir::FieldLabelIr::Repeated(_) | ir::FieldLabelIr::Map { .. } => {
+                    String::from("Vec::new()")
+                }
             };
             out.push_str(&format!("                {}: {},\n", fname, init));
         }
@@ -1678,7 +1713,9 @@ r#"        for (k, v) in &self.{fname} {{
     fn json_mapper(&self, scope: &[String], scalar: &str, t: &ir::TypeRefIr) -> String {
         match self.resolve_ref(scope, &t.path).1 {
             TypeKind::Scalar(_) => expr::json_to(scalar, "v"),
-            TypeKind::Enum { .. } => format!("{}::json_name(v)", self.resolve_ref(scope, &t.path).0),
+            TypeKind::Enum { .. } => {
+                format!("{}::json_name(v)", self.resolve_ref(scope, &t.path).0)
+            }
             TypeKind::Message => "v.to_json_value()?".to_string(),
         }
     }
@@ -1771,12 +1808,7 @@ r#"        for (k, v) in &self.{fname} {{
     }
 
     /// Oneof JSON pulls (flattened member names; later members win).
-    fn json_oneof_pulls(
-        &self,
-        scope: &[String],
-        msg: &ir::MessageIr,
-        ctx: &MsgCtx,
-    ) -> String {
+    fn json_oneof_pulls(&self, scope: &[String], msg: &ir::MessageIr, ctx: &MsgCtx) -> String {
         let mut b = String::new();
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
@@ -1790,10 +1822,9 @@ r#"        for (k, v) in &self.{fname} {{
                     TypeKind::Scalar(_) => {
                         format!("{}?", expr::json_from(t.path[0].as_str(), "jv"))
                     }
-                    TypeKind::Enum { .. } => format!(
-                        "{}::from_json(jv)?",
-                        self.resolve_ref(scope, &t.path).0
-                    ),
+                    TypeKind::Enum { .. } => {
+                        format!("{}::from_json(jv)?", self.resolve_ref(scope, &t.path).0)
+                    }
                     TypeKind::Message => format!(
                         "{}::from_json_value(jv)?",
                         self.resolve_ref(scope, &t.path).0
@@ -1811,7 +1842,9 @@ r#"        for (k, v) in &self.{fname} {{
     fn json_from_expr(&self, scope: &[String], t: &ir::TypeRefIr) -> String {
         match self.resolve_ref(scope, &t.path).1 {
             TypeKind::Scalar(_) => expr::json_from(t.path[0].as_str(), "item"),
-            TypeKind::Enum { .. } => format!("{}::from_json(item)", self.resolve_ref(scope, &t.path).0),
+            TypeKind::Enum { .. } => {
+                format!("{}::from_json(item)", self.resolve_ref(scope, &t.path).0)
+            }
             TypeKind::Message => format!(
                 "{}::from_json_value(item)",
                 self.resolve_ref(scope, &t.path).0
@@ -1834,14 +1867,15 @@ r#"        for (k, v) in &self.{fname} {{
         ));
         for f in &msg.fields {
             let fname = naming::field_ident(&f.name);
-            s.push_str(&format!("    {fname}: {},\n", self.struct_field_type(scope, f)));
+            s.push_str(&format!(
+                "    {fname}: {},\n",
+                self.struct_field_type(scope, f)
+            ));
         }
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
             let oty = format!("{}{}", ctx.flat, naming::pascal(&o.name));
-            s.push_str(&format!(
-"    {oname}: Option<{oty}>,\n"
-            ));
+            s.push_str(&format!("    {oname}: Option<{oty}>,\n"));
         }
         s.push_str("}\n");
 
@@ -1869,7 +1903,9 @@ r#"        for (k, v) in &self.{fname} {{
                         }
                     }
                     TypeKind::Scalar(info) => {
-                        if matches!(t.path[0].as_str(), "string" | "bytes") && f.presence == ir::Presence::Explicit {
+                        if matches!(t.path[0].as_str(), "string" | "bytes")
+                            && f.presence == ir::Presence::Explicit
+                        {
                             s.push_str(&format!(
 "    pub fn {fname}(mut self, v: impl Into<{}>) -> Self {{\n        self.{fname} = Some(v.into());\n        self\n    }}\n",
                                 info.rust
@@ -1931,7 +1967,7 @@ r#"        for (k, v) in &self.{fname} {{
             s.push_str(&format!("            {oname}: self.{oname},\n"));
         }
         s.push_str(
-"            unknown_fields: __core::RawMessage::new(),\n        })\n    }\n}\n",
+            "            unknown_fields: __core::RawMessage::new(),\n        })\n    }\n}\n",
         );
         self.out.push_str(&s);
     }
@@ -1979,7 +2015,6 @@ r#"        for (k, v) in &self.{fname} {{
         }
         out
     }
-
 }
 
 /// JSON object-key stringifier expression for map keys.
@@ -2015,13 +2050,12 @@ fn scalar_zero(scalar: &str) -> &'static str {
 
 /// First integer argument of annotation `@name`, if present.
 fn anno_int(f: &ir::FieldIr, name: &str) -> Option<i64> {
-    f.annotations
-        .iter()
-        .find(|a| a.name == name)
-        .and_then(|a| a.args.iter().find_map(|arg| match arg {
+    f.annotations.iter().find(|a| a.name == name).and_then(|a| {
+        a.args.iter().find_map(|arg| match arg {
             ir::AnnotationArgIr::Int(n) => Some(*n),
             _ => None,
-        }))
+        })
+    })
 }
 
 /// `(min, max)` from `@range(min, max)` positional integers.
@@ -2075,14 +2109,10 @@ mod tests {
         assert!(text.contains("pub struct Address"));
     }
 
-    fn generate_module_pub(
-        pkg: &tpt20_ir::PackageIr,
-        opts: &CodegenOptions,
-    ) -> String {
+    fn generate_module_pub(pkg: &tpt20_ir::PackageIr, opts: &CodegenOptions) -> String {
         Emitter::new(pkg, opts).generate()
     }
 }
-
 
 /// Wire-class expression as referenced from generated code.
 pub(crate) fn class_name(c: crate::WireClass) -> &'static str {
@@ -2116,5 +2146,3 @@ pub(crate) fn packed_encode_fn(pack: PackKind) -> &'static str {
         PackKind::NotPackable => unreachable!(),
     }
 }
-
-

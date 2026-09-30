@@ -419,9 +419,8 @@ items below as "fully verified by the integration suite" until that crate compil
   - [ ] GOAWAY handling (`TransportError::GoAway` defined but never constructed)
   - [ ] Keepalive/ping behavior (not configured on client/server `h2` builders despite
         doc comments claiming it)
-  - [ ] TLS with ALPN — **currently does not compile**: `tls`/`rustls` features call
-        rustls 0.22+ APIs against a pinned `rustls = "0.21"` dependency; needs a real fix,
-        not just a checkbox
+  - [x] TLS with ALPN — client connector on rustls 0.23 + tokio-rustls 0.26 (ring),
+        ALPN from `TlsConfig`, root certs from PEM bytes/path, opt-in accept-invalid-certs
   - [x] Cleartext h2c for local development (explicit opt-in only)
 - [x] Message framing: 1-byte flags + 4-byte big-endian length + N-byte payload
   - [x] Compression-enabled flag
@@ -593,13 +592,10 @@ that the underlying features are missing — see per-item notes below.
   - [x] Wire encoding conformance
   - [x] Wire decoding conformance
   - [x] Canonical encoding conformance
-  - [ ] JSON mapping conformance (source exists but doesn't compile: unresolved import
-        `tpt20_stdlib::json`, which doesn't exist)
+  - [x] JSON mapping conformance
   - [x] Text mapping conformance
-  - [ ] Reflection conformance (source exists but doesn't compile: accesses private field
-        `DynamicMessage.raw` instead of the public API)
-  - [ ] Dynamic message conformance (source exists but doesn't compile: `get_bytes_by_name`
-        slice/array type mismatch)
+  - [x] Reflection conformance
+  - [x] Dynamic message conformance
   - [x] RPC behavior conformance
   - [x] Streaming behavior conformance
   - [x] Deadline behavior conformance
@@ -611,10 +607,8 @@ that the underlying features are missing — see per-item notes below.
   - [x] Protobuf binary encoding conformance
   - [x] gRPC-compatible RPC behavior conformance
   - [x] Status mapping conformance
-  - [ ] Metadata mapping conformance (source exists but doesn't compile: missing `http`
-        dependency)
-  - [ ] Streaming semantics conformance (source exists but doesn't compile: references a
-        `StreamingSemantics` type that doesn't exist in `tpt20-compat-grpc`)
+  - [x] Metadata mapping conformance
+  - [x] Streaming semantics conformance
 - [x] Fuzz targets
   - [x] Binary decoder fuzz target
   - [ ] JSON decoder fuzz target (mislabeled: compiles, but actually fuzzes wire/binary

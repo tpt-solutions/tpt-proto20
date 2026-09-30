@@ -25,8 +25,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
-use tpt20_transport::{Call, StreamingType, Transport};
 use tpt20_transport::traits::StreamItem;
+use tpt20_transport::{Call, StreamingType, Transport};
 
 use crate::GrpcError;
 
@@ -110,12 +110,15 @@ impl futures::Stream for GrpcCall {
 
 /// A sink adapter that converts [`TransportError`] to [`GrpcError`].
 struct GrpcSink {
-    inner: Pin<Box<dyn Sink<Vec<u8>, Error = tpt20_transport::TransportError> + Send + Sync + Unpin>>,
+    inner:
+        Pin<Box<dyn Sink<Vec<u8>, Error = tpt20_transport::TransportError> + Send + Sync + Unpin>>,
 }
 
 impl GrpcSink {
     fn new(
-        inner: Pin<Box<dyn Sink<Vec<u8>, Error = tpt20_transport::TransportError> + Send + Sync + Unpin>>,
+        inner: Pin<
+            Box<dyn Sink<Vec<u8>, Error = tpt20_transport::TransportError> + Send + Sync + Unpin>,
+        >,
     ) -> Self {
         GrpcSink { inner }
     }
@@ -124,10 +127,7 @@ impl GrpcSink {
 impl Sink<Vec<u8>> for GrpcSink {
     type Error = GrpcError;
 
-    fn poll_ready(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut self.inner)
             .poll_ready(cx)
             .map_err(GrpcError::from)
@@ -139,19 +139,13 @@ impl Sink<Vec<u8>> for GrpcSink {
             .map_err(GrpcError::from)
     }
 
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut self.inner)
             .poll_flush(cx)
             .map_err(GrpcError::from)
     }
 
-    fn poll_close(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut self.inner)
             .poll_close(cx)
             .map_err(GrpcError::from)
@@ -160,12 +154,26 @@ impl Sink<Vec<u8>> for GrpcSink {
 
 /// A stream adapter that converts [`TransportError`] to [`GrpcError`].
 struct GrpcStream {
-    inner: Pin<Box<dyn Stream<Item = Result<StreamItem, tpt20_transport::TransportError>> + Send + Sync + Unpin>>,
+    inner: Pin<
+        Box<
+            dyn Stream<Item = Result<StreamItem, tpt20_transport::TransportError>>
+                + Send
+                + Sync
+                + Unpin,
+        >,
+    >,
 }
 
 impl GrpcStream {
     fn new(
-        inner: Pin<Box<dyn Stream<Item = Result<StreamItem, tpt20_transport::TransportError>> + Send + Sync + Unpin>>,
+        inner: Pin<
+            Box<
+                dyn Stream<Item = Result<StreamItem, tpt20_transport::TransportError>>
+                    + Send
+                    + Sync
+                    + Unpin,
+            >,
+        >,
     ) -> Self {
         GrpcStream { inner }
     }
@@ -180,13 +188,11 @@ impl Stream for GrpcStream {
                 StreamItem::Message(payload) => {
                     Poll::Ready(Some(Ok(GrpcResponse::Message(payload))))
                 }
-                StreamItem::Trailer(trailers) => {
-                    Poll::Ready(Some(Ok(GrpcResponse::Trailers {
-                        status: tpt20_rpc::Status::Ok,
-                        message: String::new(),
-                        metadata: trailers,
-                    })))
-                }
+                StreamItem::Trailer(trailers) => Poll::Ready(Some(Ok(GrpcResponse::Trailers {
+                    status: tpt20_rpc::Status::Ok,
+                    message: String::new(),
+                    metadata: trailers,
+                }))),
             },
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(GrpcError::from(e)))),
             Poll::Ready(None) => Poll::Ready(None),

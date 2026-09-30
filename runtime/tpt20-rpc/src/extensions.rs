@@ -10,7 +10,9 @@ pub struct Extensions {
 }
 
 impl Extensions {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn insert<T: Any + Send + Sync>(&mut self, key: impl Into<String>, value: T) {
         self.inner.insert(key.into(), Arc::new(value));
     }
@@ -20,9 +22,15 @@ impl Extensions {
     pub fn remove<T: Any + Send + Sync>(&mut self, key: &str) -> Option<Arc<T>> {
         self.inner.remove(key).and_then(|v| Arc::downcast(v).ok())
     }
-    pub fn contains_key(&self, key: &str) -> bool { self.inner.contains_key(key) }
-    pub fn len(&self) -> usize { self.inner.len() }
-    pub fn is_empty(&self) -> bool { self.inner.is_empty() }
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.inner.contains_key(key)
+    }
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 }
 
 #[cfg(test)]

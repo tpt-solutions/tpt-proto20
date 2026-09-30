@@ -1,10 +1,10 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use tpt20_core::{DecoderLimits, RawMessage, UnknownFieldPolicy, Value, WireClass};
 use tpt20_core::Field;
-use tpt20_ir as ir;
+use tpt20_core::{DecoderLimits, RawMessage, UnknownFieldPolicy, Value, WireClass};
 use tpt20_descriptor::Descriptor;
+use tpt20_ir as ir;
 
 fuzz_target!(|data: &[u8]| {
     if data.len() < 4 {
@@ -13,7 +13,13 @@ fuzz_target!(|data: &[u8]| {
     let desc = make_descriptor(data[0]);
     let msg_ir = desc.find_message("FuzzMsg").unwrap();
     let payload = &data[1..];
-    let _ = tpt20_reflect::DynamicMessage::decode(msg_ir, &desc, payload, &DecoderLimits::default(), UnknownFieldPolicy::Preserve);
+    let _ = tpt20_reflect::DynamicMessage::decode(
+        msg_ir,
+        &desc,
+        payload,
+        &DecoderLimits::default(),
+        UnknownFieldPolicy::Preserve,
+    );
 });
 
 fn make_descriptor(seed: u8) -> Descriptor {
@@ -26,7 +32,9 @@ fn make_descriptor(seed: u8) -> Descriptor {
                 ir::FieldIr {
                     id: 1,
                     name: "id".into(),
-                    label: ir::FieldLabelIr::Singular(ir::TypeRefIr { path: vec!["int64".into()] }),
+                    label: ir::FieldLabelIr::Singular(ir::TypeRefIr {
+                        path: vec!["int64".into()],
+                    }),
                     presence: ir::Presence::Implicit,
                     annotations: vec![],
                     span: ir::SourceSpan::default(),
@@ -34,7 +42,9 @@ fn make_descriptor(seed: u8) -> Descriptor {
                 ir::FieldIr {
                     id: 2,
                     name: "name".into(),
-                    label: ir::FieldLabelIr::Singular(ir::TypeRefIr { path: vec!["string".into()] }),
+                    label: ir::FieldLabelIr::Singular(ir::TypeRefIr {
+                        path: vec!["string".into()],
+                    }),
                     presence: ir::Presence::Implicit,
                     annotations: vec![],
                     span: ir::SourceSpan::default(),
@@ -42,7 +52,9 @@ fn make_descriptor(seed: u8) -> Descriptor {
                 ir::FieldIr {
                     id: 3 + (seed % 3) as u32,
                     name: "tag".into(),
-                    label: ir::FieldLabelIr::Repeated(ir::TypeRefIr { path: vec!["int64".into()] }),
+                    label: ir::FieldLabelIr::Repeated(ir::TypeRefIr {
+                        path: vec!["int64".into()],
+                    }),
                     presence: ir::Presence::Implicit,
                     annotations: vec![],
                     span: ir::SourceSpan::default(),

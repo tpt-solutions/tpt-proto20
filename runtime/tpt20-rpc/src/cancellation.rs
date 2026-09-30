@@ -10,10 +10,14 @@ pub struct CancellationToken {
 
 impl CancellationToken {
     pub fn new() -> Self {
-        Self { inner: Arc::new(AtomicBool::new(false)) }
+        Self {
+            inner: Arc::new(AtomicBool::new(false)),
+        }
     }
     pub fn cancelled() -> Self {
-        Self { inner: Arc::new(AtomicBool::new(true)) }
+        Self {
+            inner: Arc::new(AtomicBool::new(true)),
+        }
     }
     pub fn is_cancelled(&self) -> bool {
         self.inner.load(Ordering::SeqCst)

@@ -9,7 +9,12 @@ fn native_roundtrip_protobuf_compat() {
     native.push(Field::new(1, WireClass::Varint, Value::Varint(42)));
     native.push(Field::new(2, WireClass::Len, Value::Len(b"hello".to_vec())));
     let native_bytes = native.encode().unwrap();
-    let native_back = RawMessage::decode(&native_bytes, &tpt20_core::DecoderLimits::default(), UnknownFieldPolicy::Preserve).unwrap();
+    let native_back = RawMessage::decode(
+        &native_bytes,
+        &tpt20_core::DecoderLimits::default(),
+        UnknownFieldPolicy::Preserve,
+    )
+    .unwrap();
 
     let proto_bytes = encode_protobuf(&native).unwrap();
     let proto_back = decode_protobuf(&proto_bytes).unwrap();
@@ -25,6 +30,11 @@ fn protobuf_decoded_matches_native_structure() {
     assert_eq!(decoded.fields[0].field_id, 1);
     assert_eq!(decoded.fields[0].value, Value::Varint(150));
 
-    let native = RawMessage::decode(&proto_bytes, &tpt20_core::DecoderLimits::default(), UnknownFieldPolicy::Preserve).unwrap();
+    let native = RawMessage::decode(
+        &proto_bytes,
+        &tpt20_core::DecoderLimits::default(),
+        UnknownFieldPolicy::Preserve,
+    )
+    .unwrap();
     assert_eq!(decoded.fields, native.fields);
 }

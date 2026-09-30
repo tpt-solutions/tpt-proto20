@@ -1293,6 +1293,7 @@ name = "tpt20-reflect"
 version = "0.1.0"
 dependencies = [
  "thiserror",
+ "tpt20-compiler",
  "tpt20-core",
  "tpt20-descriptor",
  "tpt20-ir",

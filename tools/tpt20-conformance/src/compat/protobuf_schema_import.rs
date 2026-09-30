@@ -1,4 +1,4 @@
-use tpt20_compat_protobuf::{lex_proto, parse_proto, lower};
+use tpt20_compat_protobuf::{lex_proto, lower, parse_proto};
 
 #[test]
 fn lex_proto_simple() {

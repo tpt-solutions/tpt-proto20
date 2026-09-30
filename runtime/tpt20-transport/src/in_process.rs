@@ -7,7 +7,7 @@
 use crate::error::TransportError;
 use crate::frame::FrameFlags;
 use crate::metadata::Metadata;
-use crate::traits::{Call, StreamingType, StreamItem, Transport};
+use crate::traits::{Call, StreamItem, StreamingType, Transport};
 use async_trait::async_trait;
 use futures::{Sink, Stream};
 use std::pin::Pin;
@@ -74,10 +74,7 @@ impl Stream for InProcessResponseStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match Pin::new(&mut self.response_rx).poll_recv(cx) {
-            Poll::Ready(Some(Ok(FramedMessage {
-                flags,
-                payload,
-            }))) => {
+            Poll::Ready(Some(Ok(FramedMessage { flags, payload }))) => {
                 if flags.is_compressed() {
                     return Poll::Ready(Some(Err(TransportError::Compression(
                         "compressed frames not yet supported in in-process transport".into(),
@@ -86,14 +83,12 @@ impl Stream for InProcessResponseStream {
                 Poll::Ready(Some(Ok(StreamItem::Message(payload))))
             }
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
-            Poll::Ready(None) => {
-                match self.trailers_rx.try_recv() {
-                    Ok(Ok(trailers)) => Poll::Ready(Some(Ok(StreamItem::Trailer(trailers)))),
-                    Ok(Err(e)) => Poll::Ready(Some(Err(e))),
-                    Err(oneshot::error::TryRecvError::Empty) => Poll::Ready(None),
-                    Err(oneshot::error::TryRecvError::Closed) => Poll::Ready(None),
-                }
-            }
+            Poll::Ready(None) => match self.trailers_rx.try_recv() {
+                Ok(Ok(trailers)) => Poll::Ready(Some(Ok(StreamItem::Trailer(trailers)))),
+                Ok(Err(e)) => Poll::Ready(Some(Err(e))),
+                Err(oneshot::error::TryRecvError::Empty) => Poll::Ready(None),
+                Err(oneshot::error::TryRecvError::Closed) => Poll::Ready(None),
+            },
             Poll::Pending => Poll::Pending,
         }
     }
@@ -107,28 +102,21 @@ struct InProcessSink {
 impl Sink<Vec<u8>> for InProcessSink {
     type Error = TransportError;
 
-    fn poll_ready(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn start_send(self: Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
-        self.tx.send(item).map_err(|_| TransportError::ConnectionClosed)
+        self.tx
+            .send(item)
+            .map_err(|_| TransportError::ConnectionClosed)
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -210,10 +198,12 @@ impl Transport for InProcessTransport {
         };
 
         Ok(Call {
-            sink: Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(Box::new(InProcessSink {
-                tx: request_msg_tx,
-            })),
-            stream: Pin::<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>::new(Box::new(stream)),
+            sink: Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(
+                Box::new(InProcessSink { tx: request_msg_tx }),
+            ),
+            stream: Pin::<
+                Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>,
+            >::new(Box::new(stream)),
         })
     }
 }
@@ -236,7 +226,12 @@ mod tests {
         });
 
         let call = transport
-            .start_call("test.Method", b"request".to_vec(), &Metadata::new(), StreamingType::Unary)
+            .start_call(
+                "test.Method",
+                b"request".to_vec(),
+                &Metadata::new(),
+                StreamingType::Unary,
+            )
             .await
             .unwrap();
 
@@ -265,7 +260,12 @@ mod tests {
         });
 
         let call = transport
-            .start_call("test.Stream", b"req".to_vec(), &Metadata::new(), StreamingType::ServerStream)
+            .start_call(
+                "test.Stream",
+                b"req".to_vec(),
+                &Metadata::new(),
+                StreamingType::ServerStream,
+            )
             .await
             .unwrap();
 

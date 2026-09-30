@@ -69,7 +69,8 @@ pub struct GrpcCall {
     /// Channel to send response frames.
     pub response_tx: tokio::sync::mpsc::Sender<Result<tpt20_transport::FramedMessage, GrpcError>>,
     /// Channel to send trailing metadata.
-    pub trailers_tx: Option<tokio::sync::oneshot::Sender<Result<tpt20_transport::Metadata, GrpcError>>>,
+    pub trailers_tx:
+        Option<tokio::sync::oneshot::Sender<Result<tpt20_transport::Metadata, GrpcError>>>,
 }
 
 impl GrpcCall {
@@ -85,7 +86,11 @@ impl GrpcCall {
     }
 
     /// Sends a response with the given tpt20 status.
-    pub async fn send_status(&mut self, status: tpt20_rpc::Status, message: impl Into<String>) -> Result<(), GrpcError> {
+    pub async fn send_status(
+        &mut self,
+        status: tpt20_rpc::Status,
+        message: impl Into<String>,
+    ) -> Result<(), GrpcError> {
         let trailers = self.build_status_trailers(status, message.into());
         if let Some(tx) = self.trailers_tx.take() {
             let _ = tx.send(Ok(trailers));

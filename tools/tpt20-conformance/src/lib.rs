@@ -16,7 +16,7 @@
 //! - **Rust ↔ Rust interoperability baseline** — validates that two independent
 //!   Rust implementations can exchange messages.
 
-pub mod native;
 pub mod compat;
-pub mod roundtrip;
 pub mod interop;
+pub mod native;
+pub mod roundtrip;

@@ -12,8 +12,8 @@ const EXAMPLE: &str = r#"
         1: id int64;
         2: name string;
         3: email string?;
-        4: repeated tags string;
-        5: map<string, string> attributes;
+        4: tags repeated string;
+        5: attributes map<string, string>;
         oneof contact {
             10: email_addr string;
             11: phone string;
@@ -71,7 +71,7 @@ fn detects_duplicate_field_id() {
 fn rejects_bytes_map_key() {
     let src = r#"
         message M {
-            1: map<bytes, string> bad;
+            1: bad map<bytes, string>;
         }
     "#;
     let diags = check(src, Some("m.tpt"));
@@ -94,7 +94,7 @@ fn oneof_member_must_be_singular() {
     let src = r#"
         message M {
             oneof o {
-                1: repeated a string;
+                1: a repeated string;
             }
         }
     "#;

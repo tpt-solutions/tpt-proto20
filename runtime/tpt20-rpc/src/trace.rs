@@ -10,9 +10,16 @@ pub struct TraceContext {
 
 impl TraceContext {
     pub fn new(trace_id: impl Into<String>, span_id: impl Into<String>, trace_flags: u8) -> Self {
-        Self { trace_id: trace_id.into(), span_id: span_id.into(), trace_flags, trace_state: String::new() }
+        Self {
+            trace_id: trace_id.into(),
+            span_id: span_id.into(),
+            trace_flags,
+            trace_state: String::new(),
+        }
     }
-    pub fn is_sampled(&self) -> bool { self.trace_flags & 0x01 != 0 }
+    pub fn is_sampled(&self) -> bool {
+        self.trace_flags & 0x01 != 0
+    }
 }
 
 #[cfg(test)]

@@ -50,7 +50,11 @@ impl TlsConfig {
     }
 
     /// Sets the certificate and key paths.
-    pub fn with_pem_paths(mut self, cert: impl Into<std::path::PathBuf>, key: impl Into<std::path::PathBuf>) -> Self {
+    pub fn with_pem_paths(
+        mut self,
+        cert: impl Into<std::path::PathBuf>,
+        key: impl Into<std::path::PathBuf>,
+    ) -> Self {
         self.cert_path = Some(cert.into());
         self.key_path = Some(key.into());
         self
@@ -114,7 +118,11 @@ impl Endpoint {
     }
 
     /// Enables TLS with the given certificate and key paths.
-    pub fn with_tls_pem(self, cert: impl Into<std::path::PathBuf>, key: impl Into<std::path::PathBuf>) -> Self {
+    pub fn with_tls_pem(
+        self,
+        cert: impl Into<std::path::PathBuf>,
+        key: impl Into<std::path::PathBuf>,
+    ) -> Self {
         self.with_tls(TlsConfig::default().with_pem_paths(cert, key))
     }
 

@@ -1,8 +1,10 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use tpt20_core::{DecoderLimits, Field, MessageDescriptor, RawMessage, UnknownFieldPolicy, Value, WireClass};
 use tpt20_core::ScalarKind;
+use tpt20_core::{
+    DecoderLimits, Field, MessageDescriptor, RawMessage, UnknownFieldPolicy, Value, WireClass,
+};
 
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {

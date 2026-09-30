@@ -42,7 +42,9 @@ impl Call {
     /// Creates a new call from a sink and stream.
     pub fn new(
         sink: Pin<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>,
-        stream: Pin<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>,
+        stream: Pin<
+            Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>,
+        >,
     ) -> Self {
         Call { sink, stream }
     }

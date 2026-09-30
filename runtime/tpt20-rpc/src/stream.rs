@@ -1,13 +1,16 @@
 //! Streaming types for RPC (spec §16.2).
 
+use crate::error::{ReceiveError, SendError};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use crate::error::{ReceiveError, SendError};
 
 pub trait TryStream {
     type Item;
     type Error;
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Self::Item, Self::Error>>>;
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Self::Item, Self::Error>>>;
 }
 
 pub trait TrySink {

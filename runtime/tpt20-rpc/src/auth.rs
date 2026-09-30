@@ -10,7 +10,9 @@ pub struct AuthError {
 
 impl AuthError {
     pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
+        Self {
+            message: message.into(),
+        }
     }
 }
 
@@ -36,7 +38,10 @@ impl AuthContext {
 
 impl Default for AuthContext {
     fn default() -> Self {
-        Self { identity: None, metadata: Metadata::with_default_limit() }
+        Self {
+            identity: None,
+            metadata: Metadata::with_default_limit(),
+        }
     }
 }
 
@@ -66,7 +71,9 @@ impl TokenAuthenticator {
 
 impl Authenticator for TokenAuthenticator {
     fn authenticate(&self, ctx: &RpcContext) -> Result<AuthContext, AuthError> {
-        let token = ctx.metadata().get("authorization")
+        let token = ctx
+            .metadata()
+            .get("authorization")
             .or_else(|| ctx.metadata().get("token"))
             .and_then(|v| match v {
                 crate::MetadataValue::Text(t) => Some(t.as_str()),
@@ -75,7 +82,10 @@ impl Authenticator for TokenAuthenticator {
             .and_then(|s| s.strip_prefix("Bearer "))
             .ok_or_else(|| AuthError::new("missing or invalid authorization token"))?;
         if (self.validator)(token) {
-            Ok(AuthContext::new(Some(token.to_string()), Metadata::with_default_limit()))
+            Ok(AuthContext::new(
+                Some(token.to_string()),
+                Metadata::with_default_limit(),
+            ))
         } else {
             Err(AuthError::new("invalid authorization token"))
         }
@@ -90,7 +100,10 @@ pub struct MetadataAuthenticator {
 
 impl MetadataAuthenticator {
     pub fn new(required_keys: Vec<String>) -> Self {
-        Self { required_keys, validators: std::collections::BTreeMap::new() }
+        Self {
+            required_keys,
+            validators: std::collections::BTreeMap::new(),
+        }
     }
     pub fn with_validator(mut self, key: impl Into<String>, validator: fn(&[u8]) -> bool) -> Self {
         self.validators.insert(key.into(), validator);
@@ -102,12 +115,18 @@ impl Authenticator for MetadataAuthenticator {
     fn authenticate(&self, ctx: &RpcContext) -> Result<AuthContext, AuthError> {
         for key in &self.required_keys {
             if ctx.metadata().get(key).is_none() {
-                return Err(AuthError::new(format!("missing required metadata key: {}", key)));
+                return Err(AuthError::new(format!(
+                    "missing required metadata key: {}",
+                    key
+                )));
             }
             if let Some(validator) = self.validators.get(key) {
                 if let Some(crate::MetadataValue::Binary(b)) = ctx.metadata().get(key) {
                     if !validator(b) {
-                        return Err(AuthError::new(format!("invalid metadata value for key: {}", key)));
+                        return Err(AuthError::new(format!(
+                            "invalid metadata value for key: {}",
+                            key
+                        )));
                     }
                 }
             }
@@ -129,7 +148,9 @@ pub struct AuthzError {
 
 impl AuthzError {
     pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
+        Self {
+            message: message.into(),
+        }
     }
 }
 
@@ -187,7 +208,9 @@ impl Authorizer for AclAuthorizer {
     fn authorize(&self, _ctx: &RpcContext, auth: &AuthContext) -> Result<bool, AuthzError> {
         let identity = auth.identity.as_deref().unwrap_or("");
         for role in &self.required_roles {
-            if identity == role.as_str() { return Ok(true); }
+            if identity == role.as_str() {
+                return Ok(true);
+            }
         }
         Ok(false)
     }
@@ -201,13 +224,18 @@ pub struct RoleBasedAuthorizer {
 
 impl RoleBasedAuthorizer {
     pub fn new(allowed_roles: Vec<String>, metadata_key: impl Into<String>) -> Self {
-        Self { allowed_roles, metadata_key: metadata_key.into() }
+        Self {
+            allowed_roles,
+            metadata_key: metadata_key.into(),
+        }
     }
 }
 
 impl Authorizer for RoleBasedAuthorizer {
     fn authorize(&self, ctx: &RpcContext, _auth: &AuthContext) -> Result<bool, AuthzError> {
-        let roles = ctx.metadata().get(&self.metadata_key)
+        let roles = ctx
+            .metadata()
+            .get(&self.metadata_key)
             .and_then(|v| match v {
                 crate::MetadataValue::Text(t) => Some(t.as_str()),
                 crate::MetadataValue::Binary(_) => None,
@@ -215,7 +243,9 @@ impl Authorizer for RoleBasedAuthorizer {
             .map(|s| s.split(',').map(|s| s.trim()).collect::<Vec<_>>())
             .unwrap_or_default();
         for role in &self.allowed_roles {
-            if roles.contains(&role.as_str()) { return Ok(true); }
+            if roles.contains(&role.as_str()) {
+                return Ok(true);
+            }
         }
         Ok(false)
     }
@@ -228,7 +258,9 @@ mod tests {
     fn token_authenticator_valid() {
         let auth = TokenAuthenticator::new(|t| t == "secret");
         let mut ctx = RpcContext::new();
-        ctx.metadata_mut().insert_text("authorization", "Bearer secret").unwrap();
+        ctx.metadata_mut()
+            .insert_text("authorization", "Bearer secret")
+            .unwrap();
         let result = auth.authenticate(&ctx);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().identity, Some("secret".to_string()));

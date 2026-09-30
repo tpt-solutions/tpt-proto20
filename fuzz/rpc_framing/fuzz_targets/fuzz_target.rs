@@ -1,8 +1,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use tpt20_transport::{decode_frame, encode_frame, FrameFlags};
 use tpt20_compat_grpc::{decode_grpc_frame, encode_grpc_frame};
+use tpt20_transport::{decode_frame, encode_frame, FrameFlags};
 
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {

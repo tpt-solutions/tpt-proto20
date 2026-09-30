@@ -19,8 +19,8 @@ message Outer {
   1: id int64;
   2: name string;
   3: email string?;
-  4: age int64?;
-  5: username string @max_len(128);
+  4: age int64? @range(0, 150);
+  5: username string @max_len(8);
   6: tags repeated string;
   7: scores repeated int64;
   8: attrs map<string, string>;

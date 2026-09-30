@@ -194,7 +194,10 @@ impl RawMessage {
     /// `groups` lists oneofs as slices of their member field ids.
     pub fn canonical_reduce_oneofs(&mut self, groups: &[&[u32]]) {
         for group in groups {
-            let Some(keep_idx) = self.fields.iter().rposition(|f| group.contains(&f.field_id))
+            let Some(keep_idx) = self
+                .fields
+                .iter()
+                .rposition(|f| group.contains(&f.field_id))
             else {
                 continue;
             };
@@ -228,7 +231,9 @@ impl RawMessage {
             .fields
             .iter()
             .enumerate()
-            .filter(|(_, f)| map_field_ids.contains(&f.field_id) && matches!(f.value, Value::Len(_)))
+            .filter(|(_, f)| {
+                map_field_ids.contains(&f.field_id) && matches!(f.value, Value::Len(_))
+            })
             .map(|(i, _)| i)
             .collect();
         if positions.len() < 2 {
@@ -270,7 +275,11 @@ fn map_entry_sort_key(entry: &[u8]) -> Vec<u8> {
     match tag.wire_class {
         WireClass::Varint => entry[cursor..].to_vec(),
         WireClass::Fixed32 | WireClass::Fixed64 => {
-            let n = if tag.wire_class == WireClass::Fixed32 { 4 } else { 8 };
+            let n = if tag.wire_class == WireClass::Fixed32 {
+                4
+            } else {
+                8
+            };
             if cursor + n <= entry.len() {
                 entry[cursor..cursor + n].to_vec()
             } else {
@@ -282,7 +291,10 @@ fn map_entry_sort_key(entry: &[u8]) -> Vec<u8> {
                 return entry.to_vec();
             };
             let len = len as usize;
-            if cursor.checked_add(len).is_some_and(|end| end <= entry.len()) {
+            if cursor
+                .checked_add(len)
+                .is_some_and(|end| end <= entry.len())
+            {
                 entry[cursor..cursor + len].to_vec()
             } else {
                 entry.to_vec()
@@ -403,7 +415,11 @@ pub struct BorrowedField<'a> {
 
 impl<'a> BorrowedField<'a> {
     /// Constructs a borrowed field from its parts.
-    pub fn new(field_id: u32, wire_class: WireClass, value: BorrowedValue<'a>) -> BorrowedField<'a> {
+    pub fn new(
+        field_id: u32,
+        wire_class: WireClass,
+        value: BorrowedValue<'a>,
+    ) -> BorrowedField<'a> {
         BorrowedField {
             field_id,
             wire_class,
@@ -448,7 +464,10 @@ impl<'a> BorrowedMessage<'a> {
 
     /// Returns the first value for `field_id`, if present.
     pub fn get_first(&self, field_id: u32) -> Option<&BorrowedValue<'a>> {
-        self.fields.iter().find(|f| f.field_id == field_id).map(|f| &f.value)
+        self.fields
+            .iter()
+            .find(|f| f.field_id == field_id)
+            .map(|f| &f.value)
     }
 
     /// Reads a bytes field by id.
@@ -649,7 +668,11 @@ mod tests {
     }
 
     fn field_bytes(field: &Field) -> Vec<u8> {
-        RawMessage { fields: vec![field.clone()] }.encode().unwrap()
+        RawMessage {
+            fields: vec![field.clone()],
+        }
+        .encode()
+        .unwrap()
     }
 
     #[test]
@@ -744,7 +767,11 @@ mod tests {
         // Map field 5 with string keys: entries out of order on the wire.
         let entry = |k: &str, v: u64| -> Field {
             let mut e = RawMessage::new();
-            e.push(Field::new(1, WireClass::Len, Value::Len(k.as_bytes().to_vec())));
+            e.push(Field::new(
+                1,
+                WireClass::Len,
+                Value::Len(k.as_bytes().to_vec()),
+            ));
             e.push(Field::new(2, WireClass::Varint, Value::Varint(v)));
             Field::new(5, WireClass::Len, Value::Len(e.encode().unwrap()))
         };

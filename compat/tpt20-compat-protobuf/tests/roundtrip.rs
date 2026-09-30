@@ -5,7 +5,7 @@
 //! - Protobuf wire adapter round-trip
 //! - Golden-vector / differential tests
 
-use tpt20_compat_protobuf::{lex_proto, parse_proto, lower, wire};
+use tpt20_compat_protobuf::{lex_proto, lower, parse_proto, wire};
 
 // ===========================================================================
 // Golden-vector tests (differential against reference protobuf encoding)
@@ -17,7 +17,10 @@ fn golden_varint_field1_150() {
     let msg = wire::decode_protobuf(&bytes).expect("decode");
     assert_eq!(msg.fields.len(), 1);
     assert_eq!(msg.fields[0].field_id, 1);
-    assert_eq!(msg.fields[0].wire_class, tpt20_core::wire::WireClass::Varint);
+    assert_eq!(
+        msg.fields[0].wire_class,
+        tpt20_core::wire::WireClass::Varint
+    );
     assert_eq!(msg.fields[0].value, tpt20_core::message::Value::Varint(150));
     let re = wire::encode_protobuf(&msg).expect("encode");
     assert_eq!(&re[..], &bytes[..]);
@@ -28,8 +31,14 @@ fn golden_fixed32_field5() {
     let bytes = [0x2d, 0x04, 0x03, 0x02, 0x01];
     let msg = wire::decode_protobuf(&bytes).expect("decode");
     assert_eq!(msg.fields[0].field_id, 5);
-    assert_eq!(msg.fields[0].wire_class, tpt20_core::wire::WireClass::Fixed32);
-    assert_eq!(msg.fields[0].value, tpt20_core::message::Value::Fixed32(0x01020304));
+    assert_eq!(
+        msg.fields[0].wire_class,
+        tpt20_core::wire::WireClass::Fixed32
+    );
+    assert_eq!(
+        msg.fields[0].value,
+        tpt20_core::message::Value::Fixed32(0x01020304)
+    );
     let re = wire::encode_protobuf(&msg).expect("encode");
     assert_eq!(&re[..], &bytes[..]);
 }
@@ -39,8 +48,14 @@ fn golden_fixed64_field1() {
     let bytes = [0x09, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11];
     let msg = wire::decode_protobuf(&bytes).expect("decode");
     assert_eq!(msg.fields[0].field_id, 1);
-    assert_eq!(msg.fields[0].wire_class, tpt20_core::wire::WireClass::Fixed64);
-    assert_eq!(msg.fields[0].value, tpt20_core::message::Value::Fixed64(0x1122334455667788));
+    assert_eq!(
+        msg.fields[0].wire_class,
+        tpt20_core::wire::WireClass::Fixed64
+    );
+    assert_eq!(
+        msg.fields[0].value,
+        tpt20_core::message::Value::Fixed64(0x1122334455667788)
+    );
     let re = wire::encode_protobuf(&msg).expect("encode");
     assert_eq!(&re[..], &bytes[..]);
 }
@@ -51,7 +66,10 @@ fn golden_len_field2() {
     let msg = wire::decode_protobuf(&bytes).expect("decode");
     assert_eq!(msg.fields[0].field_id, 2);
     assert_eq!(msg.fields[0].wire_class, tpt20_core::wire::WireClass::Len);
-    assert_eq!(msg.fields[0].value, tpt20_core::message::Value::Len(b"testing".to_vec()));
+    assert_eq!(
+        msg.fields[0].value,
+        tpt20_core::message::Value::Len(b"testing".to_vec())
+    );
     let re = wire::encode_protobuf(&msg).expect("encode");
     assert_eq!(&re[..], &bytes[..]);
 }
@@ -175,12 +193,18 @@ message User {
     // id
     assert_eq!(msg.fields[0].id, 1);
     assert_eq!(msg.fields[0].name, "id");
-    assert!(matches!(msg.fields[0].presence, tpt20_ir::Presence::Explicit));
+    assert!(matches!(
+        msg.fields[0].presence,
+        tpt20_ir::Presence::Explicit
+    ));
 
     // name
     assert_eq!(msg.fields[1].id, 2);
     assert_eq!(msg.fields[1].name, "name");
-    assert!(matches!(msg.fields[1].presence, tpt20_ir::Presence::Explicit));
+    assert!(matches!(
+        msg.fields[1].presence,
+        tpt20_ir::Presence::Explicit
+    ));
 
     // tags
     assert_eq!(msg.fields[2].id, 3);

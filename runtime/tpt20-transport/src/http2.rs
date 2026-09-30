@@ -15,7 +15,7 @@
 use crate::error::TransportError;
 use crate::frame::{Frame, FrameFlags, FramedMessage};
 use crate::metadata::Metadata;
-use crate::traits::{Call, StreamingType, StreamItem, Transport};
+use crate::traits::{Call, StreamItem, StreamingType, Transport};
 use async_trait::async_trait;
 use futures::{Sink, Stream};
 use std::pin::Pin;
@@ -24,11 +24,11 @@ use std::task::{Context, Poll};
 #[cfg(feature = "http2")]
 use bytes::Bytes;
 #[cfg(feature = "http2")]
-use http::{Request, Response};
-#[cfg(feature = "http2")]
 use h2::client;
 #[cfg(feature = "http2")]
 use h2::RecvStream;
+#[cfg(feature = "http2")]
+use http::{Request, Response};
 
 /// HTTP/2 client transport.
 ///
@@ -68,9 +68,10 @@ impl Transport for Http2Transport {
         if self.endpoint.uses_tls() {
             #[cfg(feature = "tls")]
             {
-                let tls_config = self.endpoint.tls.as_ref().ok_or_else(|| {
-                    TransportError::Tls("TLS endpoint missing TlsConfig".into())
-                })?;
+                let tls_config =
+                    self.endpoint.tls.as_ref().ok_or_else(|| {
+                        TransportError::Tls("TLS endpoint missing TlsConfig".into())
+                    })?;
                 let connector = self.make_tls_connector(tls_config)?;
                 let host = self
                     .endpoint
@@ -87,7 +88,7 @@ impl Transport for Http2Transport {
                     .await
                     .map_err(|e| TransportError::Tls(e.to_string()))?;
 
-            let (client, connection) = client::Builder::new()
+                let (client, connection) = client::Builder::new()
                     .handshake::<_, Bytes>(tls_stream)
                     .await
                     .map_err(|e| TransportError::Internal(e.to_string()))?;
@@ -96,7 +97,10 @@ impl Transport for Http2Transport {
                     let _ = connection.await;
                 });
 
-                let mut client = client.ready().await.map_err(|e| TransportError::Internal(e.to_string()))?;
+                let mut client = client
+                    .ready()
+                    .await
+                    .map_err(|e| TransportError::Internal(e.to_string()))?;
 
                 let request_body = Bytes::from(request);
                 let http_request = Request::builder()
@@ -117,16 +121,25 @@ impl Transport for Http2Transport {
                     .await
                     .map_err(|e| TransportError::Internal(e.to_string()))?;
 
-                let response_stream = Http2ClientResponseStream {
-                    response,
-                };
+                let response_stream = Http2ClientResponseStream { response };
 
-                Ok(Call {
-                    sink: Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(Box::new(Http2ClientSink {
-                        send_stream,
-                    })),
-                    stream: Pin::<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>::new(Box::new(response_stream)),
-                })
+                Ok(
+                    Call {
+                        sink: Pin::<
+                            Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>,
+                        >::new(Box::new(Http2ClientSink {
+                            send_stream,
+                        })),
+                        stream: Pin::<
+                            Box<
+                                dyn Stream<Item = Result<StreamItem, TransportError>>
+                                    + Send
+                                    + Sync
+                                    + Unpin,
+                            >,
+                        >::new(Box::new(response_stream)),
+                    },
+                )
             }
             #[cfg(not(feature = "tls"))]
             {
@@ -144,7 +157,10 @@ impl Transport for Http2Transport {
                 let _ = connection.await;
             });
 
-            let mut client = client.ready().await.map_err(|e| TransportError::Internal(e.to_string()))?;
+            let mut client = client
+                .ready()
+                .await
+                .map_err(|e| TransportError::Internal(e.to_string()))?;
 
             let request_body = Bytes::from(request);
             let http_request = Request::builder()
@@ -165,15 +181,18 @@ impl Transport for Http2Transport {
                 .await
                 .map_err(|e| TransportError::Internal(e.to_string()))?;
 
-            let response_stream = Http2ClientResponseStream {
-                response,
-            };
+            let response_stream = Http2ClientResponseStream { response };
 
             Ok(Call {
-                sink: Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(Box::new(Http2ClientSink {
-                    send_stream,
-                })),
-                stream: Pin::<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>::new(Box::new(response_stream)),
+                sink:
+                    Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(
+                        Box::new(Http2ClientSink { send_stream }),
+                    ),
+                stream: Pin::<
+                    Box<
+                        dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin,
+                    >,
+                >::new(Box::new(response_stream)),
             })
         }
     }
@@ -203,9 +222,8 @@ impl Http2Transport {
             let mut pem: Option<Vec<u8>> = tls_config.cert_pem.clone();
             if pem.is_none() {
                 if let Some(path) = &tls_config.cert_path {
-                    pem = Some(
-                        std::fs::read(path).map_err(|e| TransportError::Tls(e.to_string()))?,
-                    );
+                    pem =
+                        Some(std::fs::read(path).map_err(|e| TransportError::Tls(e.to_string()))?);
                 }
             }
             if let Some(pem) = pem {
@@ -287,10 +305,7 @@ struct Http2ClientSink {
 impl Sink<Vec<u8>> for Http2ClientSink {
     type Error = TransportError;
 
-    fn poll_ready(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
@@ -301,17 +316,11 @@ impl Sink<Vec<u8>> for Http2ClientSink {
             .map_err(|e| TransportError::Internal(e.to_string()))
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -423,13 +432,14 @@ impl Http2Server {
             match request_result {
                 Ok((request, _respond)) => {
                     let method = request.uri().path().trim_start_matches('/').to_string();
-                    let metadata = request
-                        .headers()
-                        .iter()
-                        .fold(Metadata::new(), |mut m, (k, v)| {
-                            m.insert(k.as_str(), v.to_str().unwrap_or(""));
-                            m
-                        });
+                    let metadata =
+                        request
+                            .headers()
+                            .iter()
+                            .fold(Metadata::new(), |mut m, (k, v)| {
+                                m.insert(k.as_str(), v.to_str().unwrap_or(""));
+                                m
+                            });
 
                     let body = request.into_body();
                     let request_bytes = collect_body(body).await;

@@ -1,5 +1,5 @@
-use tpt20_compat_protobuf::wire::encode_protobuf;
 use tpt20_compat_protobuf::wire::decode_protobuf;
+use tpt20_compat_protobuf::wire::encode_protobuf;
 use tpt20_core::{Field, RawMessage, Value, WireClass};
 
 #[test]
@@ -24,7 +24,11 @@ fn encode_protobuf_varint() {
 #[test]
 fn encode_protobuf_fixed64() {
     let mut msg = RawMessage::new();
-    msg.push(Field::new(1, WireClass::Fixed64, Value::Fixed64(0xABCD1234567890)));
+    msg.push(Field::new(
+        1,
+        WireClass::Fixed64,
+        Value::Fixed64(0xABCD1234567890),
+    ));
     let bytes = encode_protobuf(&msg).unwrap();
     let back = decode_protobuf(&bytes).unwrap();
     assert_eq!(back.fields[0].value, Value::Fixed64(0xABCD1234567890));
@@ -33,7 +37,11 @@ fn encode_protobuf_fixed64() {
 #[test]
 fn encode_protobuf_fixed32() {
     let mut msg = RawMessage::new();
-    msg.push(Field::new(1, WireClass::Fixed32, Value::Fixed32(0xDEADBEEF)));
+    msg.push(Field::new(
+        1,
+        WireClass::Fixed32,
+        Value::Fixed32(0xDEADBEEF),
+    ));
     let bytes = encode_protobuf(&msg).unwrap();
     let back = decode_protobuf(&bytes).unwrap();
     assert_eq!(back.fields[0].value, Value::Fixed32(0xDEADBEEF));

@@ -1,11 +1,24 @@
-use tpt20_core::{Field, FieldDescriptor, FieldKind, MessageDescriptor, RawMessage, UnknownFieldPolicy, Value, WireClass};
 use tpt20_core::ScalarKind;
+use tpt20_core::{
+    Field, FieldDescriptor, FieldKind, MessageDescriptor, RawMessage, UnknownFieldPolicy, Value,
+    WireClass,
+};
 
 #[test]
 fn json_roundtrip_simple() {
     let mut desc = MessageDescriptor::new();
-    desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-    desc.add_field(FieldDescriptor::new(2, "name", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
+    desc.add_field(FieldDescriptor::new(
+        1,
+        "id",
+        WireClass::Varint,
+        FieldKind::Scalar(ScalarKind::Int64),
+    ));
+    desc.add_field(FieldDescriptor::new(
+        2,
+        "name",
+        WireClass::Len,
+        FieldKind::Scalar(ScalarKind::String),
+    ));
 
     let mut msg = tpt20_core::DynamicMessage::with_descriptor(desc.clone());
     msg.set_varint_by_name("id", 42).unwrap();
@@ -43,7 +56,10 @@ fn json_as_i64_accepts_number_and_string() {
 fn json_as_u64_accepts_number_and_string() {
     use tpt20_stdlib::json::as_u64;
     assert_eq!(as_u64(&serde_json::json!(42)).unwrap(), 42);
-    assert_eq!(as_u64(&serde_json::json!(u64::MAX.to_string())).unwrap(), u64::MAX);
+    assert_eq!(
+        as_u64(&serde_json::json!(u64::MAX.to_string())).unwrap(),
+        u64::MAX
+    );
 }
 
 #[test]
@@ -65,7 +81,10 @@ fn json_base64_rejects_bad_input() {
 #[test]
 fn json_get_field_accepts_aliases() {
     use tpt20_stdlib::json::get_field;
-    let obj = serde_json::json!({"userId": 1}).as_object().unwrap().clone();
+    let obj = serde_json::json!({"userId": 1})
+        .as_object()
+        .unwrap()
+        .clone();
     assert!(get_field(&obj, &["user_id", "userId"]).is_some());
     assert!(get_field(&obj, &["userid"]).is_none());
 }

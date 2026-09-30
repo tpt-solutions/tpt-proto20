@@ -110,12 +110,8 @@ impl DynamicMessage {
         limits: &DecoderLimits,
     ) -> Result<DynamicMessage, DecodeError> {
         let is_known = |id: u32| descriptor.is_known(id);
-        let raw = RawMessage::decode_filtered(
-            bytes,
-            limits,
-            UnknownFieldPolicy::Preserve,
-            &is_known,
-        )?;
+        let raw =
+            RawMessage::decode_filtered(bytes, limits, UnknownFieldPolicy::Preserve, &is_known)?;
         Ok(DynamicMessage {
             raw,
             descriptor: Some(descriptor),
@@ -158,7 +154,10 @@ impl DynamicMessage {
 
     /// Iterates over fields with the given id.
     pub fn get(&self, field_id: u32) -> impl Iterator<Item = &Field> {
-        self.raw.fields.iter().filter(move |f| f.field_id == field_id)
+        self.raw
+            .fields
+            .iter()
+            .filter(move |f| f.field_id == field_id)
     }
 
     /// Returns the first value for `field_id`, if present.
@@ -182,15 +181,24 @@ impl DynamicMessage {
     /// Returns an empty iterator if no descriptor is attached or the field is
     /// not found.
     pub fn get_by_name(&self, name: &str) -> impl Iterator<Item = &Field> {
-        let field_id = self.descriptor.as_ref().and_then(|d| d.field_by_name(name)).map(|f| f.id);
-        self.raw.fields.iter().filter(move |f| {
-            field_id.map_or(false, |id| f.field_id == id)
-        })
+        let field_id = self
+            .descriptor
+            .as_ref()
+            .and_then(|d| d.field_by_name(name))
+            .map(|f| f.id);
+        self.raw
+            .fields
+            .iter()
+            .filter(move |f| field_id.map_or(false, |id| f.field_id == id))
     }
 
     /// Returns the first value for a field by name, if present.
     pub fn get_first_by_name(&self, name: &str) -> Option<&Value> {
-        let field_id = self.descriptor.as_ref()?.field_by_name(name).map(|f| f.id)?;
+        let field_id = self
+            .descriptor
+            .as_ref()?
+            .field_by_name(name)
+            .map(|f| f.id)?;
         self.get_first(field_id)
     }
 
@@ -414,7 +422,11 @@ impl DynamicMessage {
     ///
     /// Returns true if any fields were removed.
     pub fn remove_by_name(&mut self, name: &str) -> bool {
-        let Some(field) = self.descriptor.as_ref().and_then(|d| d.field_by_name(name).cloned()) else {
+        let Some(field) = self
+            .descriptor
+            .as_ref()
+            .and_then(|d| d.field_by_name(name).cloned())
+        else {
             return false;
         };
         let original_len = self.raw.fields.len();
@@ -435,12 +447,18 @@ impl DynamicMessage {
     pub fn to_json_value(&self) -> Result<serde_json::Value, DynamicJsonError> {
         let mut map = serde_json::Map::new();
         for field in &self.raw.fields {
-            let key = if let Some(desc) = self.descriptor.as_ref().and_then(|d| d.field_by_id(field.field_id)) {
-                desc.name.clone()
-            } else {
-                field.field_id.to_string()
+            let desc = self
+                .descriptor
+                .as_ref()
+                .and_then(|d| d.field_by_id(field.field_id));
+            let key = match desc {
+                Some(desc) => desc.name.clone(),
+                None => field.field_id.to_string(),
             };
-            let value = field_value_to_json(&field.value)?;
+            let value = match desc {
+                Some(desc) => typed_field_to_json(desc, &field.value)?,
+                None => field_value_to_json(&field.value)?,
+            };
             map.insert(key, value);
         }
         Ok(serde_json::Value::Object(map))
@@ -461,12 +479,15 @@ impl DynamicMessage {
         value: serde_json::Value,
     ) -> Result<DynamicMessage, DynamicJsonError> {
         let mut msg = DynamicMessage::with_descriptor(descriptor);
-        let obj = value.as_object().ok_or_else(|| DynamicJsonError::TypeMismatch {
-            field: "root",
-            expected: "object",
-        })?;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| DynamicJsonError::TypeMismatch {
+                field: "root",
+                expected: "object",
+            })?;
         for (key, val) in obj {
-            let Some(field_desc) = msg.descriptor.as_ref().and_then(|d| d.field_by_name(key)) else {
+            let Some(field_desc) = msg.descriptor.as_ref().and_then(|d| d.field_by_name(key))
+            else {
                 continue;
             };
             let field = json_value_to_field(field_desc, val)?;
@@ -479,7 +500,11 @@ impl DynamicMessage {
     pub fn to_text(&self) -> String {
         let mut out = String::new();
         for field in &self.raw.fields {
-            let field_name = if let Some(desc) = self.descriptor.as_ref().and_then(|d| d.field_by_id(field.field_id)) {
+            let field_name = if let Some(desc) = self
+                .descriptor
+                .as_ref()
+                .and_then(|d| d.field_by_id(field.field_id))
+            {
                 desc.name.clone()
             } else {
                 field.field_id.to_string()
@@ -541,6 +566,44 @@ impl DynamicMessage {
     }
 }
 
+/// Descriptor-driven JSON conversion (spec §14.2): 64-bit integers as strings,
+/// bytes as base64, other scalars as native JSON types. Values whose shape
+/// does not match the descriptor fall back to the untyped conversion.
+fn typed_field_to_json(
+    field: &FieldDescriptor,
+    value: &Value,
+) -> Result<serde_json::Value, DynamicJsonError> {
+    use serde_json::Value as J;
+    let FieldKind::Scalar(scalar) = &field.kind else {
+        return field_value_to_json(value);
+    };
+    Ok(match (scalar, value) {
+        (ScalarKind::Bool, Value::Varint(v)) => J::Bool(*v != 0),
+        (ScalarKind::Int32, Value::Varint(v)) => J::from(*v as i64 as i32),
+        (ScalarKind::Int64, Value::Varint(v)) => J::String((*v as i64).to_string()),
+        (ScalarKind::Sint32, Value::Varint(v)) => J::from(crate::varint::decode_zigzag(*v) as i32),
+        (ScalarKind::Sint64, Value::Varint(v)) => {
+            J::String(crate::varint::decode_zigzag(*v).to_string())
+        }
+        (ScalarKind::UInt32, Value::Varint(v)) => J::from(*v as u32),
+        (ScalarKind::UInt64, Value::Varint(v)) => J::String(v.to_string()),
+        (ScalarKind::Fixed32, Value::Fixed32(v)) => J::from(*v),
+        (ScalarKind::SFixed32, Value::Fixed32(v)) => J::from(*v as i32),
+        (ScalarKind::Fixed64, Value::Fixed64(v)) => J::String(v.to_string()),
+        (ScalarKind::SFixed64, Value::Fixed64(v)) => J::String((*v as i64).to_string()),
+        (ScalarKind::Float, Value::Fixed32(v)) => {
+            serde_json::Number::from_f64(f32::from_bits(*v) as f64)
+                .map(J::Number)
+                .unwrap_or(J::Null)
+        }
+        (ScalarKind::Double, Value::Fixed64(v)) => serde_json::Number::from_f64(f64::from_bits(*v))
+            .map(J::Number)
+            .unwrap_or(J::Null),
+        (ScalarKind::Bytes, Value::Len(bytes)) => J::String(base64_encode(bytes)),
+        _ => field_value_to_json(value)?,
+    })
+}
+
 fn field_value_to_json(value: &Value) -> Result<serde_json::Value, DynamicJsonError> {
     match value {
         Value::Varint(v) => Ok(serde_json::Value::String(v.to_string())),
@@ -564,10 +627,12 @@ fn json_value_to_field(
     let field_value = match &field.kind {
         FieldKind::Scalar(scalar) => match scalar {
             ScalarKind::Bool => {
-                let b = value.as_bool().ok_or_else(|| DynamicJsonError::TypeMismatch {
-                    field: "bool",
-                    expected: "boolean",
-                })?;
+                let b = value
+                    .as_bool()
+                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
+                        field: "bool",
+                        expected: "boolean",
+                    })?;
                 Value::Varint(if b { 1 } else { 0 })
             }
             ScalarKind::Int32 | ScalarKind::Int64 | ScalarKind::Sint32 | ScalarKind::Sint64 => {
@@ -575,7 +640,12 @@ fn json_value_to_field(
                     field: "int",
                     expected: "integer",
                 })?;
-                Value::Varint(i as u64)
+                match scalar {
+                    ScalarKind::Sint32 | ScalarKind::Sint64 => {
+                        Value::Varint(crate::varint::encode_zigzag(i))
+                    }
+                    _ => Value::Varint(i as u64),
+                }
             }
             ScalarKind::UInt32 | ScalarKind::UInt64 => {
                 let u = as_u64(value).map_err(|_| DynamicJsonError::TypeMismatch {
@@ -585,24 +655,30 @@ fn json_value_to_field(
                 Value::Varint(u)
             }
             ScalarKind::Fixed32 | ScalarKind::SFixed32 => {
-                let n = value.as_u64().ok_or_else(|| DynamicJsonError::TypeMismatch {
-                    field: "fixed32",
-                    expected: "unsigned integer",
-                })?;
+                let n = value
+                    .as_u64()
+                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
+                        field: "fixed32",
+                        expected: "unsigned integer",
+                    })?;
                 Value::Fixed32(n as u32)
             }
             ScalarKind::Fixed64 | ScalarKind::SFixed64 => {
-                let n = value.as_u64().ok_or_else(|| DynamicJsonError::TypeMismatch {
-                    field: "fixed64",
-                    expected: "unsigned integer",
-                })?;
+                let n = value
+                    .as_u64()
+                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
+                        field: "fixed64",
+                        expected: "unsigned integer",
+                    })?;
                 Value::Fixed64(n)
             }
             ScalarKind::Float | ScalarKind::Double => {
-                let f = value.as_f64().ok_or_else(|| DynamicJsonError::TypeMismatch {
-                    field: "float",
-                    expected: "number",
-                })?;
+                let f = value
+                    .as_f64()
+                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
+                        field: "float",
+                        expected: "number",
+                    })?;
                 match wire_class {
                     WireClass::Fixed32 => Value::Fixed32(f32::to_bits(f as f32)),
                     WireClass::Fixed64 => Value::Fixed64(f64::to_bits(f)),
@@ -610,26 +686,32 @@ fn json_value_to_field(
                 }
             }
             ScalarKind::String => {
-                let s = value.as_str().ok_or_else(|| DynamicJsonError::TypeMismatch {
-                    field: "string",
-                    expected: "string",
-                })?;
+                let s = value
+                    .as_str()
+                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
+                        field: "string",
+                        expected: "string",
+                    })?;
                 Value::Len(s.as_bytes().to_vec())
             }
             ScalarKind::Bytes => {
-                let s = value.as_str().ok_or_else(|| DynamicJsonError::TypeMismatch {
-                    field: "bytes",
-                    expected: "base64 string",
-                })?;
-                let bytes = base64_decode(s).map_err(|e| DynamicJsonError::InvalidBase64(e.to_string()))?;
+                let s = value
+                    .as_str()
+                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
+                        field: "bytes",
+                        expected: "base64 string",
+                    })?;
+                let bytes =
+                    base64_decode(s).map_err(|e| DynamicJsonError::InvalidBase64(e.to_string()))?;
                 Value::Len(bytes)
             }
             ScalarKind::Enum { .. } => {
                 let v = if let Some(s) = value.as_str() {
-                    s.parse::<i64>().map_err(|_| DynamicJsonError::TypeMismatch {
-                        field: "enum",
-                        expected: "enum name or number",
-                    })?
+                    s.parse::<i64>()
+                        .map_err(|_| DynamicJsonError::TypeMismatch {
+                            field: "enum",
+                            expected: "enum name or number",
+                        })?
                 } else if let Some(n) = value.as_i64() {
                     n
                 } else {
@@ -642,7 +724,8 @@ fn json_value_to_field(
             }
         },
         FieldKind::Repeated { .. } | FieldKind::Map | FieldKind::Message => {
-            let json = serde_json::to_vec(value).map_err(|e| DynamicJsonError::Json(e.to_string()))?;
+            let json =
+                serde_json::to_vec(value).map_err(|e| DynamicJsonError::Json(e.to_string()))?;
             Value::Len(json)
         }
     };
@@ -650,8 +733,7 @@ fn json_value_to_field(
 }
 
 fn base64_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
@@ -719,17 +801,19 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
 
 fn as_i64(v: &serde_json::Value) -> Result<i64, DynamicJsonError> {
     match v {
-        serde_json::Value::Number(n) => n
-            .as_i64()
-            .or_else(|| n.as_f64().map(|f| f as i64))
-            .ok_or(DynamicJsonError::TypeMismatch {
+        serde_json::Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)).ok_or(
+            DynamicJsonError::TypeMismatch {
                 field: "int",
                 expected: "64-bit integer",
-            }),
-        serde_json::Value::String(s) => s.parse::<i64>().map_err(|_| DynamicJsonError::TypeMismatch {
-            field: "int",
-            expected: "64-bit integer string",
-        }),
+            },
+        ),
+        serde_json::Value::String(s) => {
+            s.parse::<i64>()
+                .map_err(|_| DynamicJsonError::TypeMismatch {
+                    field: "int",
+                    expected: "64-bit integer string",
+                })
+        }
         _ => Err(DynamicJsonError::TypeMismatch {
             field: "int",
             expected: "64-bit integer",
@@ -746,10 +830,13 @@ fn as_u64(v: &serde_json::Value) -> Result<u64, DynamicJsonError> {
                 field: "uint",
                 expected: "unsigned 64-bit integer",
             }),
-        serde_json::Value::String(s) => s.parse::<u64>().map_err(|_| DynamicJsonError::TypeMismatch {
-            field: "uint",
-            expected: "unsigned 64-bit integer string",
-        }),
+        serde_json::Value::String(s) => {
+            s.parse::<u64>()
+                .map_err(|_| DynamicJsonError::TypeMismatch {
+                    field: "uint",
+                    expected: "unsigned 64-bit integer string",
+                })
+        }
         _ => Err(DynamicJsonError::TypeMismatch {
             field: "uint",
             expected: "unsigned 64-bit integer",
@@ -808,7 +895,8 @@ mod tests {
         msg.set_bytes_by_name("tags", &[1, 2, 3]).unwrap();
 
         let bytes = msg.encode().unwrap();
-        let back = DynamicMessage::decode_descriptor(desc, &bytes, &DecoderLimits::default()).unwrap();
+        let back =
+            DynamicMessage::decode_descriptor(desc, &bytes, &DecoderLimits::default()).unwrap();
         assert_eq!(back.get_varint_by_name("id").unwrap(), Some(42));
         assert_eq!(back.get_string_by_name("name").unwrap(), Some("Ada"));
         assert_eq!(back.get_bytes_by_name("tags"), Some(&[1u8, 2, 3][..]));
@@ -817,8 +905,18 @@ mod tests {
     #[test]
     fn name_based_lookup() {
         let mut desc = MessageDescriptor::new();
-        desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-        desc.add_field(FieldDescriptor::new(2, "name", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
+        desc.add_field(FieldDescriptor::new(
+            1,
+            "id",
+            WireClass::Varint,
+            FieldKind::Scalar(ScalarKind::Int64),
+        ));
+        desc.add_field(FieldDescriptor::new(
+            2,
+            "name",
+            WireClass::Len,
+            FieldKind::Scalar(ScalarKind::String),
+        ));
 
         let mut msg = DynamicMessage::with_descriptor(desc);
         msg.set_varint_by_name("id", 7).unwrap();
@@ -834,7 +932,12 @@ mod tests {
     #[test]
     fn unknown_fields_via_descriptor() {
         let mut desc = MessageDescriptor::new();
-        desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
+        desc.add_field(FieldDescriptor::new(
+            1,
+            "id",
+            WireClass::Varint,
+            FieldKind::Scalar(ScalarKind::Int64),
+        ));
 
         let mut msg = DynamicMessage::with_descriptor(desc);
         msg.set_varint(1, 42);
@@ -848,8 +951,18 @@ mod tests {
     #[test]
     fn json_roundtrip() {
         let mut desc = MessageDescriptor::new();
-        desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-        desc.add_field(FieldDescriptor::new(2, "name", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
+        desc.add_field(FieldDescriptor::new(
+            1,
+            "id",
+            WireClass::Varint,
+            FieldKind::Scalar(ScalarKind::Int64),
+        ));
+        desc.add_field(FieldDescriptor::new(
+            2,
+            "name",
+            WireClass::Len,
+            FieldKind::Scalar(ScalarKind::String),
+        ));
 
         let mut msg = DynamicMessage::with_descriptor(desc.clone());
         msg.set_varint_by_name("id", 42).unwrap();
@@ -864,8 +977,18 @@ mod tests {
     #[test]
     fn text_format_contains_fields() {
         let mut desc = MessageDescriptor::new();
-        desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-        desc.add_field(FieldDescriptor::new(2, "name", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
+        desc.add_field(FieldDescriptor::new(
+            1,
+            "id",
+            WireClass::Varint,
+            FieldKind::Scalar(ScalarKind::Int64),
+        ));
+        desc.add_field(FieldDescriptor::new(
+            2,
+            "name",
+            WireClass::Len,
+            FieldKind::Scalar(ScalarKind::String),
+        ));
 
         let mut msg = DynamicMessage::with_descriptor(desc);
         msg.set_varint_by_name("id", 42).unwrap();
@@ -879,15 +1002,26 @@ mod tests {
     #[test]
     fn bytes_backed_borrowed_decode() {
         let mut desc = MessageDescriptor::new();
-        desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-        desc.add_field(FieldDescriptor::new(2, "data", WireClass::Len, FieldKind::Scalar(ScalarKind::Bytes)));
+        desc.add_field(FieldDescriptor::new(
+            1,
+            "id",
+            WireClass::Varint,
+            FieldKind::Scalar(ScalarKind::Int64),
+        ));
+        desc.add_field(FieldDescriptor::new(
+            2,
+            "data",
+            WireClass::Len,
+            FieldKind::Scalar(ScalarKind::Bytes),
+        ));
 
         let mut msg = DynamicMessage::with_descriptor(desc.clone());
         msg.set_varint_by_name("id", 1).unwrap();
         msg.set_bytes_by_name("data", b"hello world").unwrap();
 
         let bytes = msg.encode().unwrap();
-        let borrowed = DynamicMessage::decode_borrowed(desc, &bytes, &DecoderLimits::default()).unwrap();
+        let borrowed =
+            DynamicMessage::decode_borrowed(desc, &bytes, &DecoderLimits::default()).unwrap();
 
         assert_eq!(borrowed.get_varint(1), Some(1));
         assert_eq!(borrowed.get_bytes(2), Some(&b"hello world"[..]));
@@ -896,15 +1030,26 @@ mod tests {
     #[test]
     fn borrowed_to_owned_roundtrip() {
         let mut desc = MessageDescriptor::new();
-        desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-        desc.add_field(FieldDescriptor::new(2, "data", WireClass::Len, FieldKind::Scalar(ScalarKind::Bytes)));
+        desc.add_field(FieldDescriptor::new(
+            1,
+            "id",
+            WireClass::Varint,
+            FieldKind::Scalar(ScalarKind::Int64),
+        ));
+        desc.add_field(FieldDescriptor::new(
+            2,
+            "data",
+            WireClass::Len,
+            FieldKind::Scalar(ScalarKind::Bytes),
+        ));
 
         let mut msg = DynamicMessage::with_descriptor(desc.clone());
         msg.set_varint_by_name("id", 7).unwrap();
         msg.set_bytes_by_name("data", b"xyz").unwrap();
 
         let bytes = msg.encode().unwrap();
-        let borrowed = DynamicMessage::decode_borrowed(desc, &bytes, &DecoderLimits::default()).unwrap();
+        let borrowed =
+            DynamicMessage::decode_borrowed(desc, &bytes, &DecoderLimits::default()).unwrap();
         let owned = borrowed.to_owned();
 
         assert_eq!(owned, msg.raw);
@@ -913,8 +1058,18 @@ mod tests {
     #[test]
     fn remove_by_name() {
         let mut desc = MessageDescriptor::new();
-        desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-        desc.add_field(FieldDescriptor::new(2, "name", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
+        desc.add_field(FieldDescriptor::new(
+            1,
+            "id",
+            WireClass::Varint,
+            FieldKind::Scalar(ScalarKind::Int64),
+        ));
+        desc.add_field(FieldDescriptor::new(
+            2,
+            "name",
+            WireClass::Len,
+            FieldKind::Scalar(ScalarKind::String),
+        ));
 
         let mut msg = DynamicMessage::with_descriptor(desc);
         msg.set_varint_by_name("id", 1).unwrap();
@@ -927,7 +1082,12 @@ mod tests {
     #[test]
     fn oneof_descriptor() {
         let mut desc = MessageDescriptor::new();
-        desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
+        desc.add_field(FieldDescriptor::new(
+            1,
+            "id",
+            WireClass::Varint,
+            FieldKind::Scalar(ScalarKind::Int64),
+        ));
         desc.add_oneof(OneofDescriptor::new("contact", vec![10, 11]));
         assert_eq!(desc.oneof_members("contact"), Some(&[10, 11][..]));
     }
