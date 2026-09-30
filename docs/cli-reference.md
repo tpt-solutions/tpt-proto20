@@ -229,10 +229,25 @@ x-status: ok
 tpt20 health <endpoint> [--service NAME] [--deadline-ms N] [--tls-cert FILE]
 ```
 
-Calls `tpt20.health.v1.Health/Check` with `{1: service}` (omitted for the
-overall server status) and expects `{1: status}` back, using the gRPC health
-numbering: `0` UNKNOWN, `1` SERVING, `2` NOT_SERVING, `3` SERVICE_UNKNOWN.
-Prints `<endpoint>: <STATUS>`; exits `0` only for `SERVING`, otherwise `1`.
+Calls `tpt20.health.v1.Health/Check` (served by
+`tpt20_rpc::health::HealthService`, see [RPC model](rpc-model.md#built-in-health-and-reflection-services))
+with the service name (empty for the overall server) and prints
+`<endpoint>: <STATUS>` (`UNKNOWN`, `SERVING`, `NOT_SERVING`,
+`SERVICE_UNKNOWN`). Exits `0` only for `SERVING`, otherwise `1`.
+
+## `reflect-remote`
+
+```sh
+tpt20 reflect-remote <endpoint> [--descriptor] [--package NAME]
+                     [--format json|binary] [--out FILE] [--deadline-ms N] [--tls-cert FILE]
+```
+
+Asks a running server (one that registered
+`tpt20_rpc::reflection::ReflectionService`) what it serves. Without
+`--descriptor` it prints the fully qualified service names, one per line; with
+it, the schema descriptor of `--package` (default: the only registered one) as
+JSON or binary. Use it to get a schema for `decode --schema`-style tooling
+without the original `.tpt` files.
 
 ## `reflect`
 
@@ -292,4 +307,5 @@ time yet (`tpt20 diff` checks two schema files directly).
 | `conformance` | Stub — does not run the real suite |
 | `call` | Fully functional over HTTP/2 (TLS, metadata, deadline, streaming, compression) |
 | `health` | Fully functional (`tpt20.health.v1.Health/Check`) |
+| `reflect-remote` | Fully functional (`tpt20.reflection.v1.Reflection`) |
 | `registry publish` / `list` / `get` | Functional (local filesystem; immutable versions, integrity-checked fetch) |

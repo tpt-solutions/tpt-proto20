@@ -189,3 +189,35 @@ fn service_constants_use_package_qualified_names() {
 fn _stream_bound_is_send(s: impl Stream<Item = PingRequest> + Send + 'static) -> impl Send {
     s
 }
+
+#[tokio::test]
+async fn generated_descriptor_is_served_through_reflection() {
+    use tpt20_codegen_tests::generated::{DESCRIPTOR, FINGERPRINT, PACKAGE, SERVICE_NAMES};
+    use tpt20_rpc::reflection::{self, ReflectionService};
+
+    assert_eq!(PACKAGE, "codegen_test.v1");
+    assert_eq!(SERVICE_NAMES, &["codegen_test.v1.Pinger"]);
+
+    let reflection =
+        ReflectionService::new().register(PACKAGE, DESCRIPTOR, FINGERPRINT, SERVICE_NAMES);
+    let (srv, rx) = InProcessServer::bind(8);
+    let rpc = Arc::new(
+        Server::new()
+            .add_service(PingerServer::new(Impl))
+            .add_service(reflection),
+    );
+    tokio::spawn(rpc.serve_in_process(rx));
+    let ch = Channel::new(srv.transport());
+    let ctx = RpcContext::new();
+
+    assert_eq!(
+        reflection::list_services(&ch, &ctx).await.unwrap(),
+        SERVICE_NAMES
+    );
+    let remote = reflection::get_descriptor(&ch, &ctx, "").await.unwrap();
+    assert_eq!(remote.fingerprint, FINGERPRINT);
+    let d = tpt20_descriptor::Descriptor::from_binary(&remote.descriptor).unwrap();
+    let svc = d.find_service("Pinger").expect("service in descriptor");
+    assert_eq!(svc.methods.len(), 6);
+    assert!(d.find_message("Outer").is_some());
+}

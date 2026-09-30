@@ -301,6 +301,31 @@ enum Commands {
         tls_cert: Option<PathBuf>,
     },
 
+    /// List a running server's services, or fetch its schema descriptor
+    /// (`tpt20.reflection.v1.Reflection`)
+    ReflectRemote {
+        /// Target endpoint
+        endpoint: String,
+        /// Fetch the descriptor instead of listing services
+        #[arg(short, long)]
+        descriptor: bool,
+        /// Package whose descriptor to fetch (default: the only one)
+        #[arg(short, long, default_value = "")]
+        package: String,
+        /// Descriptor output format: json or binary
+        #[arg(short, long, default_value = "json")]
+        format: DescriptorFormat,
+        /// Output file for the descriptor (defaults to stdout)
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// Deadline in milliseconds
+        #[arg(long, default_value_t = 5000)]
+        deadline_ms: u64,
+        /// CA certificate (PEM) to trust; enables TLS
+        #[arg(long)]
+        tls_cert: Option<PathBuf>,
+    },
+
     /// Introspect a descriptor
     Reflect {
         /// Schema file
@@ -495,6 +520,26 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             deadline_ms,
             tls_cert,
         } => cmd_health(endpoint, service, deadline_ms, tls_cert).await,
+        Commands::ReflectRemote {
+            endpoint,
+            descriptor,
+            package,
+            format,
+            out,
+            deadline_ms,
+            tls_cert,
+        } => {
+            cmd_reflect_remote(
+                endpoint,
+                descriptor,
+                package,
+                format,
+                out,
+                deadline_ms,
+                tls_cert,
+            )
+            .await
+        }
         Commands::Reflect { file, message } => cmd_reflect(file, message),
         Commands::Registry { command } => cmd_registry(command),
     }
@@ -1560,77 +1605,71 @@ fn raw_fields_text(bytes: &[u8]) -> Result<String, CliError> {
     Ok(out)
 }
 
-/// Native health check convention: `tpt20.health.v1.Health/Check` takes
-/// `{1: service string}` and answers `{1: status}` where status is
-/// 0 UNKNOWN, 1 SERVING, 2 NOT_SERVING, 3 SERVICE_UNKNOWN (the same numbering
-/// as the gRPC health protocol).
-const HEALTH_METHOD: &str = "tpt20.health.v1.Health/Check";
-
 async fn cmd_health(
     endpoint: String,
     service: String,
     deadline_ms: u64,
     tls_cert: Option<PathBuf>,
 ) -> Result<(), CliError> {
-    let mut request = tpt20_core::RawMessage::new();
-    if !service.is_empty() {
-        request.push(tpt20_core::Field::new(
-            1,
-            tpt20_core::WireClass::Len,
-            tpt20_core::Value::Len(service.clone().into_bytes()),
-        ));
-    }
-    let request = request
-        .encode()
-        .map_err(|e| CliError::Parse(e.to_string()))?;
-    let outputs = perform_call(
+    let channel = tpt20_rpc::Channel::new(tpt20_transport::http2::Http2Transport::new(
         build_endpoint(&endpoint, tls_cert.as_deref())?,
-        HEALTH_METHOD,
-        vec![request],
-        &[],
-        StreamingTypeArg::Unary,
-        Some(deadline_ms),
-    )
-    .await?;
-
-    let response = outputs
-        .into_iter()
-        .find_map(|o| match o {
-            CallOutput::Message(b) => Some(b),
-            CallOutput::Trailers(_) => None,
-        })
-        .ok_or_else(|| CliError::Transport("server sent no health response".into()))?;
-    let raw = tpt20_core::RawMessage::decode(
-        &response,
-        &tpt20_core::DecoderLimits::default(),
-        tpt20_core::UnknownFieldPolicy::Preserve,
-    )
-    .map_err(|e| CliError::Parse(e.to_string()))?;
-    let status = raw
-        .fields
-        .iter()
-        .find(|f| f.field_id == 1)
-        .and_then(|f| match f.value {
-            tpt20_core::Value::Varint(v) => Some(v),
-            _ => None,
-        })
-        .unwrap_or(0);
-    let name = match status {
-        1 => "SERVING",
-        2 => "NOT_SERVING",
-        3 => "SERVICE_UNKNOWN",
-        _ => "UNKNOWN",
-    };
+    ));
+    let ctx =
+        tpt20_rpc::RpcContext::new().with_timeout(std::time::Duration::from_millis(deadline_ms));
+    let status = tpt20_rpc::health::check(&channel, &ctx, &service)
+        .await
+        .map_err(|e| CliError::Transport(e.to_string()))?;
     let target = if service.is_empty() {
         endpoint.clone()
     } else {
         format!("{endpoint} ({service})")
     };
-    println!("{target}: {name}");
-    if status == 1 {
+    println!("{target}: {}", status.as_str());
+    if status == tpt20_rpc::health::ServingStatus::Serving {
         Ok(())
     } else {
-        Err(CliError::Transport(format!("service is {name}")))
+        Err(CliError::Transport(format!(
+            "service is {}",
+            status.as_str()
+        )))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// reflect-remote
+// ---------------------------------------------------------------------------
+
+async fn cmd_reflect_remote(
+    endpoint: String,
+    descriptor: bool,
+    package: String,
+    format: DescriptorFormat,
+    out: Option<PathBuf>,
+    deadline_ms: u64,
+    tls_cert: Option<PathBuf>,
+) -> Result<(), CliError> {
+    let endpoint = build_endpoint(&endpoint, tls_cert.as_deref())?;
+    let channel = tpt20_rpc::Channel::new(tpt20_transport::http2::Http2Transport::new(endpoint));
+    let ctx =
+        tpt20_rpc::RpcContext::new().with_timeout(std::time::Duration::from_millis(deadline_ms));
+    let rpc_err = |e: tpt20_rpc::RpcError| CliError::Transport(e.to_string());
+
+    if !descriptor {
+        for name in tpt20_rpc::reflection::list_services(&channel, &ctx)
+            .await
+            .map_err(rpc_err)?
+        {
+            println!("{name}");
+        }
+        return Ok(());
+    }
+    let remote = tpt20_rpc::reflection::get_descriptor(&channel, &ctx, &package)
+        .await
+        .map_err(rpc_err)?;
+    let parsed = tpt20_descriptor::Descriptor::from_binary(&remote.descriptor)?;
+    match format {
+        DescriptorFormat::Json => write_output_str(&parsed.to_json()?, out),
+        DescriptorFormat::Binary => write_output(&remote.descriptor, out),
     }
 }
 

@@ -234,6 +234,10 @@ let user = client.get_user(&RpcContext::new().with_timeout(Duration::from_secs(2
 - Errors are `RpcError`s; the final status travels in the `grpc-status` /
   `grpc-message` trailers. A call that ends without a status is an error.
 - Client-/bidi-streaming calls take any `Stream<Item = Req> + Send + 'static`.
+- For schemas with services the module also defines `PACKAGE`, `FINGERPRINT`,
+  `SERVICE_NAMES` and `DESCRIPTOR` (the binary `TPD1` descriptor), which feed
+  `tpt20_rpc::reflection::ReflectionService::register` so a server can expose
+  its own schema.
 - Generated code needs the `tpt20-rpc` crate in addition to `tpt20-core` and
   `tpt20-json`.
 

@@ -222,6 +222,23 @@ compressed messages are always accepted and decompressed under the receiver's
 message-size limit (a small message cannot inflate past it). An unsupported
 `grpc-encoding` resets the stream.
 
+### Built-in health and reflection services
+
+Two ready-made services can be added to any `Server`:
+
+- **Health** — `tpt20_rpc::health::HealthService::new()` returns the service
+  and a `HealthReporter` for setting per-service statuses
+  (`Serving`/`NotServing`; the overall server, name `""`, is `Serving` unless
+  set; unregistered names are `ServiceUnknown`). `health::check(&channel, &ctx,
+  "svc")` is the client call; `tpt20 health` uses it. Wire: request
+  `{1: service string}`, response `{1: status}` with gRPC numbering.
+- **Reflection** — `ReflectionService::new().register(PACKAGE, DESCRIPTOR,
+  FINGERPRINT, SERVICE_NAMES)` serves the schema descriptor(s) the server was
+  built with (generated code exposes those four constants for every schema
+  that declares services). `reflection::list_services` / `get_descriptor` are
+  the client calls; `tpt20 reflect-remote` uses them. Methods: `ListServices`,
+  `GetDescriptor`.
+
 ### RPC runtime (`Channel`, `Server`)
 
 `tpt20_rpc::Channel` runs calls (unary, server/client/bidi streaming) over any

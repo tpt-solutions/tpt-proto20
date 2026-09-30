@@ -28,5 +28,7 @@ http2 = ["tpt20-transport/http2"]
 
 [dev-dependencies]
 tpt20-observability = { path = "../tpt20-observability" }
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
+tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
 tokio = { version = "1", features = ["full"] }
 tpt20-transport = { path = "../tpt20-transport", features = ["http2"] }

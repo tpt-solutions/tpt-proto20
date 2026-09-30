@@ -28,9 +28,10 @@ see the unchecked items.
 - [x] unary, server/client/bidi streaming, deadlines, cancellation, metadata,
       rich errors, TLS, health checking (`tpt20 health` convention)
 - [x] compression (gzip/deflate over HTTP/2, negotiated, bounded decompression)
-- [ ] **reflection** — the gRPC reflection service is not wired to the real
-      wire protocol (`compat/tpt20-compat-grpc`); native RPC reflection service
-      does not exist (schema reflection is offline via `tpt20-reflect`)
+- [x] reflection — native `tpt20.reflection.v1.Reflection` service
+      (`ListServices`, `GetDescriptor`) and `tpt20 reflect-remote`; the *gRPC*
+      reflection wire protocol (`grpc.reflection.v1alpha`) is still not
+      implemented
 - [x] observability — metrics, structured logs and W3C trace propagation are
       built into `Channel`/`Server` (`docs/observability.md`)
 

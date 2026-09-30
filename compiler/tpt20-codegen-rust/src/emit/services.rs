@@ -46,6 +46,49 @@ impl<'a> Emitter<'a> {
         for svc in &services {
             self.emit_service(svc);
         }
+        self.emit_descriptor_consts();
+    }
+
+    /// Embeds the package descriptor so servers can expose it through the
+    /// reflection service.
+    fn emit_descriptor_consts(&mut self) {
+        let mut descriptor = tpt20_descriptor::Descriptor::new(self.pkg.clone());
+        let fingerprint = self
+            .pkg
+            .fingerprint
+            .clone()
+            .unwrap_or_else(|| descriptor.compute_fingerprint());
+        let Ok(bytes) = descriptor.to_binary() else {
+            return;
+        };
+        let package = self.pkg.name.clone().unwrap_or_default();
+        let names: Vec<String> = self
+            .pkg
+            .services
+            .iter()
+            .map(|s| {
+                if package.is_empty() {
+                    s.name.clone()
+                } else {
+                    format!("{package}.{}", s.name)
+                }
+            })
+            .collect();
+        let mut o = String::new();
+        let _ = write!(
+            o,
+            "\n/// Package name of this schema.\npub const PACKAGE: &str = {package:?};\n\n/// Schema fingerprint.\npub const FINGERPRINT: &str = {fingerprint:?};\n\n/// Fully qualified names of the services declared by this schema.\npub const SERVICE_NAMES: &[&str] = &[{}];\n\n/// Binary (`TPD1`) descriptor of this schema, for `__rpc::reflection::ReflectionService::register`.\npub const DESCRIPTOR: &[u8] = &[\n",
+            names.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>().join(", ")
+        );
+        for chunk in bytes.chunks(24) {
+            o.push_str("    ");
+            for b in chunk {
+                let _ = write!(o, "{b}, ");
+            }
+            o.push('\n');
+        }
+        o.push_str("];\n");
+        self.out.push_str(&o);
     }
 
     fn emit_service(&mut self, svc: &ir::ServiceIr) {

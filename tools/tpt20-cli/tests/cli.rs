@@ -84,6 +84,10 @@ fn handler(mut call: IncomingHttp2Call) -> Boxed {
                     tpt20_core::Value::Varint(status),
                 ));
                 call.send_message(resp.encode().unwrap()).await?;
+                // The RPC layer requires a final status.
+                let mut md = Metadata::new();
+                md.insert("grpc-status", "0");
+                call.send_trailers(md).await?;
             }
             "Slow" => {
                 tokio::time::sleep(Duration::from_secs(3)).await;
@@ -449,4 +453,86 @@ fn registry_publish_list_get_roundtrip_and_immutability() {
     let o = tpt20(&["registry", "get", "1.0.0", "-r", reg]);
     assert_eq!(o.status.code(), Some(1));
     assert!(stderr(&o).contains("fingerprint"), "{}", stderr(&o));
+}
+
+/// Serves a `tpt20_rpc::Server` over HTTP/2 on its own runtime thread.
+fn start_rpc_server(server: std::sync::Arc<tpt20_rpc::Server>) -> String {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            tx.send(listener.local_addr().unwrap().port()).unwrap();
+            let _ = Http2Server::new(Endpoint::new("x"))
+                .serve_listener(
+                    listener,
+                    move |call| {
+                        let server = server.clone();
+                        Box::pin(async move {
+                            server.handle_call(call).await;
+                            Ok(())
+                        })
+                    },
+                    std::future::pending(),
+                )
+                .await;
+        });
+    });
+    format!("127.0.0.1:{}", rx.recv().unwrap())
+}
+
+#[test]
+fn builtin_health_and_reflection_services_work_with_the_cli() {
+    use tpt20_rpc::health::{HealthService, ServingStatus};
+    use tpt20_rpc::reflection::ReflectionService;
+
+    let schema = "package rfl.v1;\nmessage M { 1: id int64; }\nservice S { Do(M) returns (M); }\n";
+    let compiled = tpt20_compiler::compile(schema, None).unwrap();
+    let mut descriptor = tpt20_descriptor::Descriptor::new(compiled.ir);
+    let fingerprint = descriptor.compute_fingerprint();
+    let bytes = descriptor.to_binary().unwrap();
+
+    let (health, reporter) = HealthService::new();
+    reporter.set_status("rfl.v1.S", ServingStatus::Serving);
+    reporter.set_status("rfl.v1.Down", ServingStatus::NotServing);
+    let reflection =
+        ReflectionService::new().register("rfl.v1", &bytes, fingerprint, &["rfl.v1.S"]);
+    let addr = start_rpc_server(std::sync::Arc::new(
+        tpt20_rpc::Server::new()
+            .add_service(health)
+            .add_service(reflection),
+    ));
+
+    // health
+    assert!(tpt20(&["health", &addr]).status.success());
+    let o = tpt20(&["health", &addr, "-s", "rfl.v1.S"]);
+    assert!(o.status.success() && stdout(&o).contains("SERVING"));
+    let o = tpt20(&["health", &addr, "-s", "rfl.v1.Down"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(stdout(&o).contains("NOT_SERVING"), "{}", stdout(&o));
+    let o = tpt20(&["health", &addr, "-s", "nope"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(stdout(&o).contains("SERVICE_UNKNOWN"));
+
+    // reflection: service list, descriptor as JSON and binary
+    let o = tpt20(&["reflect-remote", &addr]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(stdout(&o).trim(), "rfl.v1.S");
+    let o = tpt20(&["reflect-remote", &addr, "-d"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stdout(&o).contains("\"M\""), "{}", stdout(&o));
+    let o = tpt20(&[
+        "reflect-remote",
+        &addr,
+        "-d",
+        "-f",
+        "binary",
+        "-p",
+        "rfl.v1",
+    ]);
+    assert!(o.status.success());
+    assert_eq!(o.stdout, bytes);
+    let o = tpt20(&["reflect-remote", &addr, "-d", "-p", "missing.v1"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(stderr(&o).contains("NOT_FOUND"), "{}", stderr(&o));
 }
