@@ -5,5 +5,15 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+description = "Human-readable text format printer and parser for tpt20 messages (spec §14.3)"
+keywords = ["tpt20", "text-format", "debugging"]
+categories = ["encoding"]
 
 [dependencies]
+tpt20-core = { path = "../tpt20-core" }
+tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
+tpt20-ir = { path = "../../compiler/tpt20-ir" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }

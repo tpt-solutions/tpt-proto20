@@ -337,14 +337,14 @@ items below as "fully verified by the integration suite" until that crate compil
   - [x] Enums representable by name or by number
   - [ ] Configurable default-value emission (defaults always omitted)
   - [ ] Configurable unknown-field handling
-- [ ] Text format
-  - [ ] Printer (message → human-readable text, matching spec §14.3 example)
-  - [ ] Parser (text → message)
-  - [ ] Repeated field support
-  - [ ] Map field support
-  - [ ] Oneof support
-  - [ ] Nested message support
-  - [ ] Deterministic output ordering
+- [x] Text format (`tpt20-text`: schema-driven `TextFormat::print` / `parse`)
+  - [x] Printer (message → human-readable text, matching spec §14.3 example)
+  - [x] Parser (text → message)
+  - [x] Repeated field support (packed wire input unpacked; `[a, b]` list syntax)
+  - [x] Map field support
+  - [x] Oneof support
+  - [x] Nested message support
+  - [x] Deterministic output ordering
 
 ---
 
@@ -609,10 +609,8 @@ that the underlying features are missing — see per-item notes below.
   - [x] Streaming semantics conformance
 - [x] Fuzz targets
   - [x] Binary decoder fuzz target
-  - [ ] JSON decoder fuzz target (mislabeled: compiles, but actually fuzzes wire/binary
-        decode, not JSON text decoding — no JSON parser is exercised)
-  - [ ] Text parser fuzz target (mislabeled: compiles, but only fuzzes wire decode plus
-        one-way `DynamicMessage::to_text()`; there is no `from_text` parser to fuzz yet)
+  - [x] JSON decoder fuzz target (`DynamicMessage::from_json` over arbitrary text)
+  - [x] Text parser fuzz target (parse → print → re-parse stability, plus wire → text)
   - [x] Schema parser fuzz target
   - [x] Descriptor decoder fuzz target
   - [x] Dynamic message decoder fuzz target

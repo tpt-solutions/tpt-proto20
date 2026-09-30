@@ -1024,8 +1024,10 @@ version = "0.1.0"
 dependencies = [
  "arbitrary",
  "libfuzzer-sys",
+ "tpt20-compiler",
  "tpt20-core",
- "tpt20-json",
+ "tpt20-descriptor",
+ "tpt20-text",
 ]
 
 [[package]]
@@ -1387,6 +1389,13 @@ dependencies = [
 [[package]]
 name = "tpt20-text"
 version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "tpt20-compiler",
+ "tpt20-core",
+ "tpt20-descriptor",
+ "tpt20-ir",
+]
 
 [[package]]
 name = "tpt20-transport"
