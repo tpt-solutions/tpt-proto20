@@ -1372,9 +1372,14 @@ version = "0.1.0"
 name = "tpt20-rpc"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "futures",
  "thiserror",
+ "tokio",
  "tpt20-core",
+ "tpt20-json",
  "tpt20-stdlib",
+ "tpt20-transport",
 ]
 
 [[package]]

@@ -144,7 +144,8 @@ impl RpcError {
         }
     }
 
-    fn new(status: Status, message: impl Into<String>) -> RpcError {
+    /// Creates an error with an arbitrary status code.
+    pub fn new(status: Status, message: impl Into<String>) -> RpcError {
         RpcError {
             status,
             message: message.into(),

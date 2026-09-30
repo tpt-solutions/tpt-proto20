@@ -29,6 +29,7 @@ use h2::{client, server, Reason, RecvStream, SendStream};
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response};
 use std::future::{poll_fn, Future};
 use std::pin::Pin;
+#[cfg(feature = "tls")]
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -1003,6 +1004,52 @@ impl IncomingHttp2Call {
             let _ = tx
                 .send(Err(TransportError::Internal("call aborted".into())))
                 .await;
+        }
+    }
+}
+
+/// Response half of an HTTP/2 call.
+struct Http2Sender {
+    response_tx: Option<mpsc::Sender<Result<FramedMessage, TransportError>>>,
+    trailers_tx: Option<oneshot::Sender<Metadata>>,
+}
+
+#[async_trait]
+impl crate::traits::CallSender for Http2Sender {
+    async fn send_message(&self, payload: Vec<u8>) -> Result<(), TransportError> {
+        let tx = self
+            .response_tx
+            .as_ref()
+            .ok_or(TransportError::ConnectionClosed)?;
+        tx.send(Ok(FramedMessage {
+            flags: FrameFlags::empty(),
+            payload,
+        }))
+        .await
+        .map_err(|_| TransportError::ConnectionClosed)
+    }
+
+    async fn send_trailers(&mut self, trailers: Metadata) -> Result<(), TransportError> {
+        if let Some(tx) = self.trailers_tx.take() {
+            let _ = tx.send(trailers);
+        }
+        self.response_tx = None;
+        Ok(())
+    }
+}
+
+impl crate::traits::IncomingCall for IncomingHttp2Call {
+    fn into_parts(self) -> crate::traits::IncomingCallParts {
+        let mut request_rx = self.request_rx;
+        crate::traits::IncomingCallParts {
+            method: self.method,
+            metadata: self.metadata,
+            request: self.request,
+            incoming: Box::pin(futures::stream::poll_fn(move |cx| request_rx.poll_recv(cx))),
+            sender: Box::new(Http2Sender {
+                response_tx: self.response_tx,
+                trailers_tx: self.trailers_tx,
+            }),
         }
     }
 }

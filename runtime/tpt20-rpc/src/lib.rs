@@ -15,6 +15,7 @@
 
 pub mod auth;
 pub mod cancellation;
+pub mod client;
 pub mod compression;
 pub mod context;
 pub mod deadline;
@@ -23,9 +24,11 @@ pub mod extensions;
 pub mod metadata;
 pub mod peer;
 pub mod retry;
+pub mod server;
 pub mod status;
 pub mod stream;
 pub mod trace;
+pub mod wire;
 
 pub use auth::{
     AclAuthorizer, AllowAllAuthorizer, AuthContext, AuthError, Authenticator, Authorizer,
@@ -55,3 +58,8 @@ mod tests {
         assert!(ctx.extensions().is_empty());
     }
 }
+
+pub use async_trait::async_trait;
+pub use client::Channel;
+pub use futures;
+pub use server::{ResponseSender, Server, ServerCall, Service};

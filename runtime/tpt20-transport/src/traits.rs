@@ -29,6 +29,10 @@ pub enum StreamItem {
     Trailer(Metadata),
 }
 
+/// Stream of response messages and trailers.
+pub type ResponseStream =
+    Pin<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>;
+
 /// A single RPC call, providing a sink for requests and a stream for responses.
 pub struct Call {
     /// Sink for sending request messages. Close with `Sink::close` when done.
@@ -68,4 +72,39 @@ pub trait Transport: Send + Sync {
         metadata: &Metadata,
         streaming_type: StreamingType,
     ) -> Result<Call, TransportError>;
+}
+
+/// Stream of further request messages received by a server.
+pub type RequestStream = Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
+
+/// The sending half of a server-side call: response messages and trailers.
+#[async_trait]
+pub trait CallSender: Send + Sync {
+    /// Sends one response message to the client.
+    async fn send_message(&self, payload: Vec<u8>) -> Result<(), TransportError>;
+
+    /// Sends the trailing metadata and ends the response. Nothing may be
+    /// sent afterwards.
+    async fn send_trailers(&mut self, trailers: Metadata) -> Result<(), TransportError>;
+}
+
+/// A server-side call split into independently usable halves, so a handler
+/// can read the request stream while writing responses (bidi streaming).
+pub struct IncomingCallParts {
+    /// The RPC method path (e.g. `pkg.Service/Method`).
+    pub method: String,
+    /// Request metadata.
+    pub metadata: Metadata,
+    /// The initial request message.
+    pub request: Vec<u8>,
+    /// Further request messages (client streaming / bidi).
+    pub incoming: RequestStream,
+    /// Response half.
+    pub sender: Box<dyn CallSender>,
+}
+
+/// A call received by a transport's server, in transport-neutral form.
+pub trait IncomingCall: Send {
+    /// Splits the call into its request and response halves.
+    fn into_parts(self) -> IncomingCallParts;
 }

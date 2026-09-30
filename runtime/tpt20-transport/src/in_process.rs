@@ -63,6 +63,52 @@ impl IncomingRequest {
     }
 }
 
+/// Response half of an in-process call.
+struct InProcessSender {
+    response_tx: Option<mpsc::UnboundedSender<Result<FramedMessage, TransportError>>>,
+    trailers_tx: Option<oneshot::Sender<Result<Metadata, TransportError>>>,
+}
+
+#[async_trait]
+impl crate::traits::CallSender for InProcessSender {
+    async fn send_message(&self, payload: Vec<u8>) -> Result<(), TransportError> {
+        let tx = self
+            .response_tx
+            .as_ref()
+            .ok_or(TransportError::ConnectionClosed)?;
+        tx.send(Ok(FramedMessage {
+            flags: FrameFlags::empty(),
+            payload,
+        }))
+        .map_err(|_| TransportError::ConnectionClosed)
+    }
+
+    async fn send_trailers(&mut self, trailers: Metadata) -> Result<(), TransportError> {
+        if let Some(tx) = self.trailers_tx.take() {
+            let _ = tx.send(Ok(trailers));
+        }
+        // Closing the response channel is what ends the client's stream.
+        self.response_tx = None;
+        Ok(())
+    }
+}
+
+impl crate::traits::IncomingCall for IncomingRequest {
+    fn into_parts(self) -> crate::traits::IncomingCallParts {
+        let mut request_rx = self.request_rx;
+        crate::traits::IncomingCallParts {
+            method: self.method,
+            metadata: self.metadata,
+            request: self.request,
+            incoming: Box::pin(futures::stream::poll_fn(move |cx| request_rx.poll_recv(cx))),
+            sender: Box::new(InProcessSender {
+                response_tx: Some(self.response_tx),
+                trailers_tx: self.trailers_tx,
+            }),
+        }
+    }
+}
+
 /// Stream of response items from an in-process call.
 struct InProcessResponseStream {
     response_rx: mpsc::UnboundedReceiver<Result<FramedMessage, TransportError>>,

@@ -33,6 +33,10 @@ impl RpcContext {
         self.deadline = deadline;
         self
     }
+    /// Sets the deadline to `timeout` from now.
+    pub fn with_timeout(self, timeout: Duration) -> Self {
+        self.with_deadline(Deadline::from_now(timeout))
+    }
     pub fn with_cancellation(mut self, cancellation: CancellationToken) -> Self {
         self.cancellation = cancellation;
         self
