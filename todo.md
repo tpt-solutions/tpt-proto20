@@ -410,7 +410,7 @@ diagram in spec §5 and the repo layout in spec §26.
   - [x] Keepalive/ping behavior (`Endpoint::with_keepalive`, client and server)
   - [x] TLS with ALPN — client + server on rustls 0.23 / tokio-rustls 0.26 (ring),
         ALPN from `TlsConfig`, PEM bytes/path, opt-in accept-invalid-certs, server-side
-        client-CA verification (client-certificate *presentation* is not implemented yet)
+        client-CA verification and client-certificate presentation (mTLS round trip tested; CLI `--tls-client-cert/--tls-client-key`)
   - [x] Cleartext h2c for local development (explicit opt-in only)
 - [x] Message framing: 1-byte flags + 4-byte big-endian length + N-byte payload
   - [x] Compression-enabled flag

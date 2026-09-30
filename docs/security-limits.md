@@ -82,6 +82,10 @@ before large allocations are made for its contents.
 These are covered in detail in [RPC model](rpc-model.md) and
 [Compatibility adapters](compatibility-adapters.md):
 
+- **Client certificates** — `TlsConfig::with_client_identity_pem` /
+  `with_client_identity_paths` make the client present a certificate (tested
+  against a server with `with_client_ca_pem`); the CLI exposes
+  `--tls-client-cert` / `--tls-client-key`.
 - **TLS / mTLS** — `Endpoint`/`TlsConfig` in `tpt20-transport` support
   server TLS and, via `require_client_cert(true)`, mutual TLS. **The `tls`
   Cargo feature does not currently compile** (see

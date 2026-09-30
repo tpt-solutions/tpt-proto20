@@ -207,7 +207,9 @@ x-status: ok
 ```
 
 - `endpoint` is `host:port` or `http(s)://host:port`. `https://` (or
-  `--tls-cert`) enables TLS with ALPN `h2`; `--tls-cert` is the PEM CA
+  `--tls-cert`) enables TLS with ALPN `h2`; `--tls-client-cert FILE --tls-client-key FILE` (global options, before or
+  after the subcommand) present a client certificate to servers that require
+  mTLS; `--tls-cert` is the PEM CA
   certificate to trust.
 - Request input: `--input` is a JSON object keyed by field ID (an array of
   objects sends several messages for `client`/`bidi` streams);

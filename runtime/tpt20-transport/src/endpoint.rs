@@ -25,6 +25,14 @@ pub struct TlsConfig {
     pub client_ca_path: Option<std::path::PathBuf>,
     /// If true, require client certificates (mTLS).
     pub require_client_cert: bool,
+    /// Client: PEM certificate chain presented to servers that ask for one (mTLS).
+    pub client_cert_pem: Option<Vec<u8>>,
+    /// Client: path to the PEM certificate chain presented for mTLS.
+    pub client_cert_path: Option<std::path::PathBuf>,
+    /// Client: PEM private key for the presented certificate.
+    pub client_key_pem: Option<Vec<u8>>,
+    /// Client: path to the PEM private key for the presented certificate.
+    pub client_key_path: Option<std::path::PathBuf>,
 }
 
 impl TlsConfig {
@@ -40,6 +48,10 @@ impl TlsConfig {
             client_ca_pem: None,
             client_ca_path: None,
             require_client_cert: false,
+            client_cert_pem: None,
+            client_cert_path: None,
+            client_key_pem: None,
+            client_key_path: None,
         }
     }
 
@@ -71,6 +83,30 @@ impl TlsConfig {
     pub fn with_client_ca_pem(mut self, pem: impl Into<Vec<u8>>) -> Self {
         self.client_ca_pem = Some(pem.into());
         self.require_client_cert = true;
+        self
+    }
+
+    /// Client side of mTLS: present this certificate chain and key when the
+    /// server asks for a client certificate.
+    pub fn with_client_identity_pem(
+        mut self,
+        cert_pem: impl Into<Vec<u8>>,
+        key_pem: impl Into<Vec<u8>>,
+    ) -> Self {
+        self.client_cert_pem = Some(cert_pem.into());
+        self.client_key_pem = Some(key_pem.into());
+        self
+    }
+
+    /// Like [`with_client_identity_pem`](Self::with_client_identity_pem),
+    /// reading the PEM files when connecting.
+    pub fn with_client_identity_paths(
+        mut self,
+        cert: impl Into<std::path::PathBuf>,
+        key: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        self.client_cert_path = Some(cert.into());
+        self.client_key_path = Some(key.into());
         self
     }
 

@@ -76,6 +76,15 @@ impl CliError {
 #[derive(Parser, Debug)]
 #[command(name = "tpt20", about = "tpt20 schema compiler tooling", version)]
 struct Cli {
+    /// PEM client certificate chain to present to servers that require mTLS
+    /// (used by `call`, `health` and `reflect-remote`; needs --tls-client-key)
+    #[arg(long, global = true, requires = "tls_client_key")]
+    tls_client_cert: Option<PathBuf>,
+
+    /// PEM private key for --tls-client-cert
+    #[arg(long, global = true, requires = "tls_client_cert")]
+    tls_client_key: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -437,6 +446,9 @@ enum CompressionArg {
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let (Some(cert), Some(key)) = (&cli.tls_client_cert, &cli.tls_client_key) {
+        let _ = CLIENT_IDENTITY.set((cert.clone(), key.clone()));
+    }
 
     match run(cli).await {
         Ok(()) => ExitCode::SUCCESS,
@@ -1355,6 +1367,9 @@ fn json_object_to_bytes(value: &serde_json::Value) -> Result<Vec<u8>, CliError> 
     raw.encode().map_err(|e| CliError::Parse(e.to_string()))
 }
 
+/// Client certificate and key from `--tls-client-cert` / `--tls-client-key`.
+static CLIENT_IDENTITY: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
+
 fn build_endpoint(
     endpoint: &str,
     tls_cert: Option<&Path>,
@@ -1379,6 +1394,9 @@ fn build_endpoint(
         })?;
         let mut tls = tpt20_transport::TlsConfig::http2();
         tls.cert_pem = Some(fs::read(cert)?);
+        if let Some((client_cert, client_key)) = CLIENT_IDENTITY.get() {
+            tls = tls.with_client_identity_pem(fs::read(client_cert)?, fs::read(client_key)?);
+        }
         ep = ep.with_tls(tls);
     }
     Ok(ep)

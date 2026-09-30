@@ -649,11 +649,17 @@ impl Http2Transport {
             .with_safe_default_protocol_versions()
             .map_err(|e| TransportError::Tls(e.to_string()))?;
 
+        let identity = client_identity(tls_config)?;
         let mut client_config = if tls_config.accept_invalid_certs {
-            builder
+            let builder = builder
                 .dangerous()
-                .with_custom_certificate_verifier(Arc::new(AcceptAnyServerCert(provider)))
-                .with_no_client_auth()
+                .with_custom_certificate_verifier(Arc::new(AcceptAnyServerCert(provider)));
+            match identity {
+                Some((chain, key)) => builder
+                    .with_client_auth_cert(chain, key)
+                    .map_err(|e| TransportError::Tls(e.to_string()))?,
+                None => builder.with_no_client_auth(),
+            }
         } else {
             let mut root_store = rustls::RootCertStore::empty();
             let mut pem: Option<Vec<u8>> = tls_config.cert_pem.clone();
@@ -672,14 +678,56 @@ impl Http2Transport {
                         .map_err(|e| TransportError::Tls(e.to_string()))?;
                 }
             }
-            builder
-                .with_root_certificates(root_store)
-                .with_no_client_auth()
+            let builder = builder.with_root_certificates(root_store);
+            match identity {
+                Some((chain, key)) => builder
+                    .with_client_auth_cert(chain, key)
+                    .map_err(|e| TransportError::Tls(e.to_string()))?,
+                None => builder.with_no_client_auth(),
+            }
         };
         client_config.alpn_protocols = tls_config.alpn_protocols.clone();
 
         Ok(tokio_rustls::TlsConnector::from(Arc::new(client_config)))
     }
+}
+
+type ClientIdentity = (
+    Vec<rustls::pki_types::CertificateDer<'static>>,
+    rustls::pki_types::PrivateKeyDer<'static>,
+);
+
+/// Loads the client certificate chain and key, if one is configured.
+#[cfg(feature = "tls")]
+fn client_identity(tls: &crate::TlsConfig) -> Result<Option<ClientIdentity>, TransportError> {
+    let configured = tls.client_cert_pem.is_some()
+        || tls.client_cert_path.is_some()
+        || tls.client_key_pem.is_some()
+        || tls.client_key_path.is_some();
+    if !configured {
+        return Ok(None);
+    }
+    let err = |e: &dyn std::fmt::Display| TransportError::Tls(e.to_string());
+    let cert_pem = pem_bytes(
+        &tls.client_cert_pem,
+        &tls.client_cert_path,
+        "client certificate",
+    )?;
+    let key_pem = pem_bytes(
+        &tls.client_key_pem,
+        &tls.client_key_path,
+        "client private key",
+    )?;
+    let chain = rustls_pemfile::certs(&mut cert_pem.as_slice())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| err(&e))?;
+    if chain.is_empty() {
+        return Err(TransportError::Tls("no client certificate found".into()));
+    }
+    let key = rustls_pemfile::private_key(&mut key_pem.as_slice())
+        .map_err(|e| err(&e))?
+        .ok_or_else(|| TransportError::Tls("no client private key found".into()))?;
+    Ok(Some((chain, key)))
 }
 
 /// Certificate verifier that accepts any server certificate (development only).
@@ -1833,6 +1881,46 @@ mod tests {
             .start_call("M", vec![], &Metadata::new(), StreamingType::Unary)
             .await;
         assert!(matches!(bad, Err(TransportError::Tls(_))));
+    }
+
+    #[cfg(feature = "tls")]
+    #[tokio::test]
+    async fn mtls_requires_and_accepts_client_certificate() {
+        // One CA signs the server's and the client's certificates.
+        let ca_key = rcgen::KeyPair::generate().unwrap();
+        let mut ca_params = rcgen::CertificateParams::new(vec![]).unwrap();
+        ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        ca_params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "test ca");
+        let ca = ca_params.self_signed(&ca_key).unwrap();
+        let issue = |names: Vec<String>| {
+            let key = rcgen::KeyPair::generate().unwrap();
+            let params = rcgen::CertificateParams::new(names).unwrap();
+            let cert = params.signed_by(&key, &ca, &ca_key).unwrap();
+            (cert.pem().into_bytes(), key.serialize_pem().into_bytes())
+        };
+        let (server_cert, server_key) = issue(vec!["localhost".into()]);
+        let (client_cert, client_key) = issue(vec!["client".into()]);
+        let ca_pem = ca.pem().into_bytes();
+
+        let mut server_tls = crate::TlsConfig::http2().with_client_ca_pem(ca_pem.clone());
+        server_tls.cert_pem = Some(server_cert);
+        server_tls.key_pem = Some(server_key);
+        let (mut ep, _stop) = start(Endpoint::new("x").with_tls(server_tls), echo).await;
+        ep.address = ep.address.replace("127.0.0.1", "localhost");
+
+        let mut trust_only = crate::TlsConfig::http2();
+        trust_only.cert_pem = Some(ca_pem);
+
+        // No client certificate: the server refuses the connection.
+        let denied = echo_call(ep.clone().with_tls(trust_only.clone()), b"x".to_vec()).await;
+        assert!(denied.is_err(), "anonymous client was accepted");
+
+        // With a certificate signed by the trusted CA the call succeeds.
+        let with_identity = trust_only.with_client_identity_pem(client_cert, client_key);
+        let ok = echo_call(ep.with_tls(with_identity), b"mtls".to_vec()).await;
+        assert_eq!(ok.unwrap(), b"resp:mtls");
     }
 
     // ---- abuse resistance -------------------------------------------------
