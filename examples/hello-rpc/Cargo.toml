@@ -1,0 +1,25 @@
+[package]
+name = "hello-rpc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+description = "End-to-end example: schema -> generated code -> RPC service, JSON and text format"
+
+[dependencies]
+tpt20-core = { path = "../../runtime/tpt20-core" }
+tpt20-json = { path = "../../runtime/tpt20-json" }
+tpt20-rpc = { path = "../../runtime/tpt20-rpc", features = ["http2"] }
+tpt20-transport = { path = "../../runtime/tpt20-transport", features = ["http2"] }
+tpt20-text = { path = "../../runtime/tpt20-text" }
+tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+[build-dependencies]
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
+tpt20-codegen-rust = { path = "../../compiler/tpt20-codegen-rust" }

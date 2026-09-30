@@ -1,0 +1,17 @@
+package hello.v1;
+
+message HelloRequest {
+  1: name string;
+  2: languages repeated string;
+}
+
+message HelloReply {
+  1: greeting string;
+  2: lucky_number int32?;
+}
+
+service Greeter {
+  SayHello(HelloRequest) returns (HelloReply);
+  // One reply per requested language.
+  SayHelloInEach(HelloRequest) returns (stream HelloReply);
+}

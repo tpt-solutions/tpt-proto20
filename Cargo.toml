@@ -23,6 +23,7 @@ members = [
     "tools/tpt20-registry",
     "tests/rust-codegen-tests",
     "benches",
+    "examples/hello-rpc",
     "tests/conformance",
     "fuzz/binary_decoder",
     "fuzz/json_decoder",

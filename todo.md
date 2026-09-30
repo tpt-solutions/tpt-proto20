@@ -23,33 +23,33 @@ diagram in spec §5 and the repo layout in spec §26.
 - [x] `git init` the repository
 - [x] `.gitignore` for Rust (`target/`, etc.)
 - [x] Root Cargo workspace `Cargo.toml`
-- [ ] Create workspace layout per spec §26:
+- [x] Create workspace layout per spec §26:
   - [x] `compiler/tpt20-language/`
   - [x] `compiler/tpt20-ir/`
   - [x] `compiler/tpt20-descriptor/`
   - [x] `compiler/tpt20-compiler/`
   - [x] `compiler/tpt20-codegen-rust/`
-  - [ ] `compiler/tpt20-codegen-backends/`
+  - [x] `compiler/tpt20-codegen-backends/`
   - [x] `runtime/tpt20-core/`
-  - [ ] `runtime/tpt20-reflect/`
+  - [x] `runtime/tpt20-reflect/`
   - [x] `runtime/tpt20-json/`
-  - [ ] `runtime/tpt20-text/`
-  - [ ] `runtime/tpt20-stdlib/`
-  - [ ] `runtime/tpt20-rpc/`
-  - [ ] `runtime/tpt20-transport/`
+  - [x] `runtime/tpt20-text/`
+  - [x] `runtime/tpt20-stdlib/`
+  - [x] `runtime/tpt20-rpc/`
+  - [x] `runtime/tpt20-transport/`
   - [x] `runtime/tpt20-observability/`
-  - [ ] `compat/tpt20-compat-protobuf/`
-  - [ ] `compat/tpt20-compat-grpc/`
+  - [x] `compat/tpt20-compat-protobuf/`
+  - [x] `compat/tpt20-compat-grpc/`
   - [x] `tools/tpt20-cli/`
-  - [ ] `tools/tpt20-lint/`
-  - [ ] `tools/tpt20-diff/`
-  - [ ] `tools/tpt20-conformance/`
-  - [ ] `tools/tpt20-registry/`
-  - [ ] `docs/`
-  - [ ] `examples/`
+  - [x] `tools/tpt20-lint/`
+  - [x] `tools/tpt20-diff/`
+  - [x] `tools/tpt20-conformance/`
+  - [x] `tools/tpt20-registry/`
+  - [x] `docs/`
+  - [x] `examples/`
   - [x] `tests/`
-  - [ ] `fuzz/`
-  - [ ] `benches/`
+  - [x] `fuzz/`
+  - [x] `benches/`
   - [x] `provenance/`
 - [x] `LICENSE-MIT` (TPT Solutions)
 - [x] `LICENSE-APACHE` (TPT Solutions)
@@ -660,21 +660,22 @@ above for the underlying status.
 
 ## Phase 20 — Versioning, Release & Governance (spec §24, §27, §28.4)
 
-- [ ] Adopt semantic versioning for the project overall
-- [ ] Document stability policy for public APIs
-- [ ] Document stability policy for generated code
-- [ ] Document stability policy for the wire format
-- [ ] Document stability policy for the descriptor format
-- [ ] Document stability policy for CLI output
-- [ ] Document stability policy for registry APIs
-- [ ] Schema package versioning convention (e.g. `package user.v1;`)
-- [ ] Compatibility policy: wire format changes backward-compatible or protocol-version
+- [x] Adopt semantic versioning for the project overall (`docs/stability.md`)
+- [x] Document stability policy for public APIs
+- [x] Document stability policy for generated code
+- [x] Document stability policy for the wire format
+- [x] Document stability policy for the descriptor format
+- [x] Document stability policy for CLI output
+- [x] Document stability policy for registry APIs
+- [x] Schema package versioning convention (e.g. `package user.v1;`)
+- [x] Compatibility policy: wire format changes backward-compatible or protocol-version
       gated
-- [ ] Compatibility policy: descriptor format versioning
-- [ ] Compatibility policy: generated code stability documentation
-- [ ] Compatibility policy: CLI breaking changes follow semver
-- [ ] Community governance documentation
-- [ ] v1.0 acceptance-criteria sign-off checklist (mirrors spec §27.1–27.9):
+- [x] Compatibility policy: descriptor format versioning
+- [x] Compatibility policy: generated code stability documentation
+- [x] Compatibility policy: CLI breaking changes follow semver
+- [x] Community governance documentation (`docs/governance.md`)
+- [x] v1.0 acceptance-criteria sign-off checklist written (`docs/release-checklist.md`);
+      sign-off itself is open — it lists the unmet criteria (mirrors spec §27.1–27.9):
   - [ ] §27.1 Schema language acceptance criteria met
   - [ ] §27.2 Compiler acceptance criteria met
   - [ ] §27.3 Runtime acceptance criteria met
