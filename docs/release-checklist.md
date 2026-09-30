@@ -30,8 +30,8 @@ see the unchecked items.
 - [x] compression (gzip/deflate over HTTP/2, negotiated, bounded decompression)
 - [x] reflection — native `tpt20.reflection.v1.Reflection` service
       (`ListServices`, `GetDescriptor`) and `tpt20 reflect-remote`; the *gRPC*
-      reflection wire protocol (`grpc.reflection.v1alpha`) is still not
-      implemented
+      reflection wire protocol (`grpc.reflection.v1alpha`/`v1`) is served by
+      `tpt20-compat-grpc`'s `reflection_wire::ReflectionServer`
 - [x] observability — metrics, structured logs and W3C trace propagation are
       built into `Channel`/`Server` (`docs/observability.md`)
 
@@ -42,7 +42,7 @@ see the unchecked items.
 - [x] expose/consume gRPC-compatible services over the network:
       `GrpcServer::serve`/`serve_listener` (feature `server`) answer stock
       gRPC HTTP/2 clients (tested with a plain `h2` client); `GrpcClient`
-      consumes. Server reflection wire service is still missing.
+      consumes; reflection wire service included.
 
 ## 27.7 Tooling
 - [x] check, fmt, lint, diff, gen, decode, encode, JSON conversion, text

@@ -138,8 +138,7 @@ status, which defaults to `Serving` until explicitly set otherwise.
 
 `ReflectionService` exists as a minimal in-memory symbol registry, but it is
 **not yet wired to the real `grpc.reflection.v1alpha.ServerReflection` wire
-service** — existing gRPC reflection clients (e.g. `grpcurl -reflect`) cannot
-talk to it yet.
+service** — use `reflection_wire::ReflectionServer` (below) for that.
 
 ### Server and client status
 
@@ -150,7 +149,16 @@ type, standard 5-byte framing, and `grpc-status`/`grpc-message` trailers
 (`OK` if the handler sends no status, `INTERNAL` if it returns an error).
 Message bytes are opaque to the adapter — use generated tpt20 or protobuf
 codecs in the handler. `GrpcClient` can perform calls over any tpt20
-`Transport`. Not yet provided: the `grpc.reflection.v1alpha` wire service.
+`Transport`. 
+With the `reflection` feature, `reflection_wire::ReflectionServer` implements
+the `grpc.reflection.v1alpha` / `v1` `ServerReflectionInfo` stream
+(`list_services`, `file_by_filename`, `file_containing_symbol`) and serves real
+`FileDescriptorProto` bytes built from IR (validated against `prost-reflect`
+in tests). Route `ReflectionServer::handles(&call.method)` calls to
+`serve_call`. The descriptors describe the protobuf-compatible shape (proto3;
+maps as entry messages; explicit presence as `proto3_optional`), so they suit
+handlers speaking protobuf bytes; tpt20's native wire encoding differs.
+Extensions and imports are not supported.
 
 ## Choosing an adapter path
 

@@ -26,6 +26,8 @@ pub mod frame;
 pub mod health;
 pub mod metadata;
 pub mod reflection;
+#[cfg(feature = "reflection")]
+pub mod reflection_wire;
 pub mod server;
 pub mod status;
 pub mod streaming;

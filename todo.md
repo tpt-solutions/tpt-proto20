@@ -519,8 +519,9 @@ diagram in spec §5 and the repo layout in spec §26.
 - [x] Deadline mapping (tpt20 ↔ gRPC)
 - [x] Streaming mode mapping (unary/server/client/bidi)
 - [x] Health-checking protocol support
-- [ ] gRPC reflection support where feasible (minimal in-memory symbol registry exists;
-      not wired to the real `grpc.reflection.v1alpha.ServerReflection` wire service)
+- [x] gRPC reflection support where feasible (`reflection_wire::ReflectionServer`: v1alpha/v1
+      `ServerReflectionInfo` with real `FileDescriptorProto`s, validated by `prost-reflect`;
+      no extensions/imports)
 
 ---
 
