@@ -419,7 +419,7 @@ diagram in spec §5 and the repo layout in spec §26.
   - [x] Usable in tests
   - [ ] Usable in embedded systems
   - [ ] Usable in local development
-  - [ ] Usable in benchmarking (no `benches/` yet — Phase 18)
+  - [x] Usable in benchmarking (`benches/benches/rpc.rs`)
   - [ ] Usable in fuzzing (no fuzz target exercises the transport directly yet)
 - [ ] Optional QUIC/HTTP3 transport (empty `quic` feature flag only, no implementation)
 - [x] Optional custom stream transport extension point (`Transport` trait)
@@ -615,27 +615,26 @@ that the underlying features are missing — see per-item notes below.
 
 ## Phase 18 — Performance & Benchmarking (`benches/`, spec §23)
 
-- [ ] Benchmark: small messages
-- [ ] Benchmark: large messages
-- [ ] Benchmark: nested messages
-- [ ] Benchmark: repeated fields
-- [ ] Benchmark: packed fields
-- [ ] Benchmark: maps
-- [ ] Benchmark: unknown fields
-- [ ] Benchmark: dynamic decoding
-- [ ] Benchmark: borrowed decoding
-- [ ] Benchmark: JSON conversion
-- [ ] Benchmark: unary RPC
-- [ ] Benchmark: streaming RPC
-- [ ] Benchmark: concurrent streams
-- [ ] Benchmark: cancellation storms
-- [ ] Benchmark: deadline storms
-- [ ] Benchmark: TLS overhead
-- [ ] Benchmark: compression overhead
-- [ ] Profiling pass and optimization backlog based on results
-- [ ] Confirm performance goals from spec §23 (fast varints, minimal allocations, efficient
-      repeated/map handling, efficient streaming, monomorphized codegen, optional
-      zero-copy decode, bounded memory, low-overhead observability)
+- [x] Benchmark: small messages (`benches/benches/wire.rs`)
+- [x] Benchmark: large messages
+- [x] Benchmark: nested messages
+- [x] Benchmark: repeated fields
+- [x] Benchmark: packed fields
+- [x] Benchmark: maps
+- [x] Benchmark: unknown fields
+- [x] Benchmark: dynamic decoding
+- [x] Benchmark: borrowed decoding
+- [x] Benchmark: JSON conversion
+- [x] Benchmark: unary RPC (`benches/benches/rpc.rs`)
+- [x] Benchmark: streaming RPC
+- [x] Benchmark: concurrent streams
+- [x] Benchmark: cancellation storms
+- [x] Benchmark: deadline storms
+- [x] Benchmark: TLS overhead
+- [ ] Benchmark: compression overhead (blocked: message compression is not implemented)
+- [x] Profiling pass and optimization backlog based on results (`docs/performance.md`)
+- [ ] Confirm performance goals from spec §23 — assessed in `docs/performance.md`; all met or
+      explained except low-overhead observability (not yet measured)
 
 ---
 

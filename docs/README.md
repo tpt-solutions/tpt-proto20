@@ -15,6 +15,7 @@ policy. It satisfies the documentation acceptance criteria in `spec.txt` §27.9.
 | [Observability](observability.md) | Metrics, tracing attributes, structured logging |
 | [Code generation](code-generation.md) | What `tpt20 gen rust` produces and how to use it |
 | [CLI reference](cli-reference.md) | Every `tpt20` subcommand, its flags, and current limitations |
+| [Performance](performance.md) | Benchmark suite, reference numbers, and the optimization backlog |
 | [Provenance policy](provenance-policy.md) | Clean-room and AI-assisted contribution policy |
 
 ## Project status

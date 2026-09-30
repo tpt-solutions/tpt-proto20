@@ -1,0 +1,37 @@
+[package]
+name = "tpt20-benches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Criterion benchmarks for the tpt20 wire format, JSON, reflection and RPC stack (spec §23)"
+
+[dependencies]
+tpt20-core = { path = "../runtime/tpt20-core" }
+tpt20-json = { path = "../runtime/tpt20-json" }
+tpt20-rpc = { path = "../runtime/tpt20-rpc", features = ["http2"] }
+tpt20-transport = { path = "../runtime/tpt20-transport", features = ["http2", "tls"] }
+tpt20-reflect = { path = "../runtime/tpt20-reflect" }
+tpt20-descriptor = { path = "../compiler/tpt20-descriptor" }
+tpt20-compiler = { path = "../compiler/tpt20-compiler" }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+rcgen = "0.13"
+
+[build-dependencies]
+tpt20-compiler = { path = "../compiler/tpt20-compiler" }
+tpt20-codegen-rust = { path = "../compiler/tpt20-codegen-rust" }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "wire"
+harness = false
+
+[[bench]]
+name = "rpc"
+harness = false
