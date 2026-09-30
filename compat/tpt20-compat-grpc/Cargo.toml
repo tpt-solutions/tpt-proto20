@@ -26,6 +26,7 @@ base64 = "0.22"
 tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
+h2 = "0.4"
 tokio = { version = "1", features = ["test-util", "macros"] }
 
 [features]

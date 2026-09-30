@@ -43,8 +43,54 @@ impl GrpcServer {
 
     /// Runs the server, accepting connections and dispatching RPC calls.
     ///
-    /// The handler receives parsed gRPC calls. Return an error to stop
-    /// serving.
+    /// Each call is handed to `handler` as a [`GrpcCall`]. When the handler
+    /// returns, the call ends: with the status it sent through
+    /// [`GrpcCall::send_status`], `OK` if it sent none, or `INTERNAL` if it
+    /// returned an error. Requests are accepted with any
+    /// `application/grpc[+proto]` content type and answered in kind.
+    #[cfg(feature = "server")]
+    pub async fn serve<F, Fut>(&self, handler: F) -> Result<(), GrpcError>
+    where
+        F: Fn(GrpcCall) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Result<(), GrpcError>> + Send + 'static,
+    {
+        let listener = tpt20_transport::Http2Server::new(self.endpoint.clone())
+            .bind()
+            .await?;
+        self.serve_listener(listener, handler, std::future::pending())
+            .await
+    }
+
+    /// Like [`serve`](Self::serve) on an already-bound listener, stopping
+    /// gracefully when `shutdown` completes.
+    #[cfg(feature = "server")]
+    pub async fn serve_listener<F, Fut, S>(
+        &self,
+        listener: tokio::net::TcpListener,
+        handler: F,
+        shutdown: S,
+    ) -> Result<(), GrpcError>
+    where
+        F: Fn(GrpcCall) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Result<(), GrpcError>> + Send + 'static,
+        S: Future<Output = ()>,
+    {
+        let server = tpt20_transport::Http2Server::new(self.endpoint.clone());
+        server
+            .serve_listener(
+                listener,
+                move |call| {
+                    let handler = handler.clone();
+                    Box::pin(bridge(call, handler))
+                },
+                shutdown,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Without the `server` feature there is no HTTP/2 stack to serve on.
+    #[cfg(not(feature = "server"))]
     pub async fn serve<F, Fut>(&self, handler: F) -> Result<(), GrpcError>
     where
         F: Fn(GrpcCall) -> Fut + Send + Sync + Clone + 'static,
@@ -55,6 +101,54 @@ impl GrpcServer {
             "gRPC server requires the `server` feature to be enabled".into(),
         ))
     }
+}
+
+/// Connects one transport call to a [`GrpcCall`] handler.
+#[cfg(feature = "server")]
+async fn bridge<F, Fut>(
+    mut incoming: tpt20_transport::http2::IncomingHttp2Call,
+    handler: F,
+) -> Result<(), tpt20_transport::TransportError>
+where
+    F: Fn(GrpcCall) -> Fut,
+    Fut: Future<Output = Result<(), GrpcError>>,
+{
+    let (response_tx, mut response_rx) = tokio::sync::mpsc::channel(32);
+    let (trailers_tx, trailers_rx) = tokio::sync::oneshot::channel();
+    let call = GrpcCall {
+        method: incoming.method.clone(),
+        metadata: incoming.metadata.clone(),
+        payload: std::mem::take(&mut incoming.request),
+        response_tx,
+        trailers_tx: Some(trailers_tx),
+    };
+    let handled = handler(call);
+    let forward = async {
+        while let Some(item) = response_rx.recv().await {
+            match item {
+                Ok(framed) => incoming.send_message(framed.payload).await?,
+                Err(_) => break,
+            }
+        }
+        Ok::<_, tpt20_transport::TransportError>(())
+    };
+    let (outcome, forwarded) = futures::join!(handled, forward);
+    forwarded?;
+    let trailers = match trailers_rx.await {
+        Ok(Ok(t)) => t,
+        _ => {
+            let mut t = tpt20_transport::Metadata::new();
+            match outcome {
+                Ok(()) => t.insert("grpc-status", "0"),
+                Err(e) => {
+                    t.insert("grpc-status", "13");
+                    t.insert("grpc-message", e.to_string());
+                }
+            }
+            t
+        }
+    };
+    incoming.send_trailers(trailers).await
 }
 
 /// A parsed incoming gRPC call.

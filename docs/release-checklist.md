@@ -39,9 +39,10 @@ see the unchecked items.
 - [x] import protobuf schemas (proto2/proto3; no editions, extensions dropped)
 - [x] encode/decode protobuf-compatible binary (self-consistency tested)
 - [ ] differential testing against an established protobuf implementation
-- [ ] expose/consume gRPC-compatible services over the network: framing,
-      status/metadata mapping and `GrpcClient` exist; `GrpcServer::serve` is a
-      stub
+- [x] expose/consume gRPC-compatible services over the network:
+      `GrpcServer::serve`/`serve_listener` (feature `server`) answer stock
+      gRPC HTTP/2 clients (tested with a plain `h2` client); `GrpcClient`
+      consumes. Server reflection wire service is still missing.
 
 ## 27.7 Tooling
 - [x] check, fmt, lint, diff, gen, decode, encode, JSON conversion, text

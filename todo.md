@@ -509,8 +509,9 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 15 — Compatibility Adapter: gRPC (`tpt20-compat-grpc`, spec §10.3)
 
-- [x] HTTP/2 framing compatible with gRPC (5-byte length-prefixed frame codec; actual
-      network `GrpcServer::serve()` is still a hardcoded "not supported" stub)
+- [x] HTTP/2 framing compatible with gRPC (5-byte length-prefixed frame codec; live
+      `GrpcServer::serve()` / `serve_listener()` behind the `server` feature, tested with a
+      stock `h2` client)
 - [x] Protobuf-compatible message payload support
 - [x] Status code mapping (tpt20 ↔ gRPC) — `GrpcClient` reads `grpc-status` /
       `grpc-message` trailers (percent-decoded); a missing status is `Unknown`, not `Ok`

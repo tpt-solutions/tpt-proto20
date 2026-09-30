@@ -143,9 +143,14 @@ talk to it yet.
 
 ### Server and client status
 
-`GrpcServer::serve()` is currently a hardcoded "not supported" stub — there
-is no live network gRPC server yet, only the framing/mapping building blocks
-above. `GrpcClient` can perform calls over any tpt20 `Transport`. Track `todo.md` Phase 15 for progress.
+With the `server` feature, `GrpcServer::serve()` / `serve_listener()` run a live
+HTTP/2 server: requests with any `application/grpc[+sub]` content type are
+dispatched to your handler as `GrpcCall`s and answered with the same content
+type, standard 5-byte framing, and `grpc-status`/`grpc-message` trailers
+(`OK` if the handler sends no status, `INTERNAL` if it returns an error).
+Message bytes are opaque to the adapter — use generated tpt20 or protobuf
+codecs in the handler. `GrpcClient` can perform calls over any tpt20
+`Transport`. Not yet provided: the `grpc.reflection.v1alpha` wire service.
 
 ## Choosing an adapter path
 

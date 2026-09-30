@@ -1554,6 +1554,7 @@ dependencies = [
  "base64",
  "bytes",
  "futures",
+ "h2",
  "http",
  "thiserror",
  "tokio",

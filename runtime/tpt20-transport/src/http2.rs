@@ -1007,6 +1007,16 @@ async fn handle_stream<F>(
         .unwrap_or_default();
     let response_codec: Codec = cfg.codec.filter(|(alg, _)| accepted.contains(alg));
 
+    // gRPC clients expect `application/grpc[+sub]` echoed back; anything else
+    // gets the native content type.
+    let response_content_type = request
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| v.starts_with("application/grpc"))
+        .and_then(|v| HeaderValue::from_str(v).ok())
+        .unwrap_or_else(|| HeaderValue::from_static(CONTENT_TYPE));
+
     let mut body = request.into_body();
     let mut frames = FrameBuffer::new(max);
 
@@ -1035,7 +1045,7 @@ async fn handle_stream<F>(
 
     let mut response = Response::builder()
         .status(200)
-        .header("content-type", CONTENT_TYPE)
+        .header("content-type", response_content_type)
         .header("grpc-accept-encoding", Compression::accept_header());
     if let Some((alg, _)) = response_codec {
         response = response.header("grpc-encoding", alg.name());
