@@ -520,10 +520,8 @@ items below as "fully verified by the integration suite" until that crate compil
 - [x] HTTP/2 framing compatible with gRPC (5-byte length-prefixed frame codec; actual
       network `GrpcServer::serve()` is still a hardcoded "not supported" stub)
 - [x] Protobuf-compatible message payload support
-- [x] Status code mapping (tpt20 ↔ gRPC) — mapping functions work, but
-      `GrpcClient`/`GrpcStream::poll_next` doesn't call them yet: it hardcodes `Status::Ok`
-      on every trailer instead of reading `grpc-status`/`grpc-message` (bug — a failed
-      call is currently misreported as success)
+- [x] Status code mapping (tpt20 ↔ gRPC) — `GrpcClient` reads `grpc-status` /
+      `grpc-message` trailers (percent-decoded); a missing status is `Unknown`, not `Ok`
 - [x] Metadata mapping (tpt20 ↔ gRPC)
 - [x] Deadline mapping (tpt20 ↔ gRPC)
 - [x] Streaming mode mapping (unary/server/client/bidi)

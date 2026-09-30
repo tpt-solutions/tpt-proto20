@@ -91,12 +91,11 @@ codes, `to_grpc_status`/`from_grpc_status` are a direct pass-through
 (`status.code()`) rather than a translation table — there is no
 representational drift to worry about between the two systems.
 
-> **Known bug (`todo.md` Phase 15):** the mapping functions themselves work
-> correctly, but `GrpcClient`/`GrpcStream::poll_next` don't call them yet —
-> they hardcode `Status::Ok` for every response instead of reading the
-> `grpc-status`/`grpc-message` trailers. **A failed call made through
-> `GrpcClient` is currently misreported as successful.** Do not rely on
-> client-side status reporting from this crate until that's fixed.
+`GrpcClient` decodes the final trailers into `GrpcResponse::Trailers`: the
+`grpc-status` code becomes the `status`, `grpc-message` (percent-decoded) the
+`message`, and both keys are removed from the returned metadata. A response
+that ends without `grpc-status` is reported as `Status::Unknown`, never as
+success, and a non-numeric or out-of-range code is an error.
 
 ### Metadata mapping
 
@@ -146,8 +145,7 @@ talk to it yet.
 
 `GrpcServer::serve()` is currently a hardcoded "not supported" stub — there
 is no live network gRPC server yet, only the framing/mapping building blocks
-above. `GrpcClient` can perform calls but inherits the status-mapping bug
-described above. Track `todo.md` Phase 15 for progress.
+above. `GrpcClient` can perform calls over any tpt20 `Transport`. Track `todo.md` Phase 15 for progress.
 
 ## Choosing an adapter path
 
