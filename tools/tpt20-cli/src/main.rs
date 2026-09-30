@@ -146,7 +146,7 @@ enum Commands {
         out: Option<PathBuf>,
     },
 
-    /// Decode binary bytes to a JSON representation
+    /// Decode binary bytes (schema-free JSON, or text format with --schema)
     Decode {
         /// Binary input file (defaults to stdin)
         #[arg(short, long)]
@@ -154,6 +154,12 @@ enum Commands {
         /// Output file (defaults to stdout)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Schema file; with --message, prints schema-aware text format
+        #[arg(short, long, requires = "message")]
+        schema: Option<PathBuf>,
+        /// Message type to decode as (e.g. `User` or `Outer.Child`)
+        #[arg(short, long, requires = "schema")]
+        message: Option<String>,
     },
 
     /// Encode JSON input to binary
@@ -166,7 +172,7 @@ enum Commands {
         output: Option<PathBuf>,
     },
 
-    /// Convert text format to binary
+    /// Convert text format to binary (schema-driven)
     TextToBinary {
         /// Text input file (defaults to stdin)
         #[arg(short, long)]
@@ -174,9 +180,15 @@ enum Commands {
         /// Output file (defaults to stdout)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Schema file
+        #[arg(short, long)]
+        schema: PathBuf,
+        /// Message type (e.g. `User` or `Outer.Child`)
+        #[arg(short, long)]
+        message: String,
     },
 
-    /// Convert binary to text format
+    /// Convert binary to text format (schema-driven)
     BinaryToText {
         /// Binary input file (defaults to stdin)
         #[arg(short, long)]
@@ -184,6 +196,12 @@ enum Commands {
         /// Output file (defaults to stdout)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Schema file
+        #[arg(short, long)]
+        schema: PathBuf,
+        /// Message type (e.g. `User` or `Outer.Child`)
+        #[arg(short, long)]
+        message: String,
     },
 
     /// Convert JSON to binary
@@ -231,12 +249,25 @@ enum Commands {
         endpoint: String,
         /// Method to call (e.g. user.v1.UserService/GetUser)
         method: String,
-        /// JSON input file (defaults to stdin)
+        /// JSON input file: a field-id-keyed object, or an array of them for
+        /// client/bidi streams (defaults to stdin when no other input is given)
         #[arg(short, long)]
         input: Option<PathBuf>,
-        /// Binary input file
+        /// Binary input file (one message)
         #[arg(short, long)]
         binary_input: Option<PathBuf>,
+        /// Text-format input file (needs --schema and --request-type)
+        #[arg(long, requires_all = ["schema", "request_type"])]
+        text_input: Option<PathBuf>,
+        /// Schema file used for text input/output
+        #[arg(long)]
+        schema: Option<PathBuf>,
+        /// Request message type (for --text-input)
+        #[arg(long, requires = "schema")]
+        request_type: Option<String>,
+        /// Response message type; responses print as text format
+        #[arg(long, requires = "schema")]
+        response_type: Option<String>,
         /// Streaming call type: unary, server, client, bidi
         #[arg(short, long, default_value = "unary")]
         streaming: StreamingTypeArg,
@@ -246,19 +277,25 @@ enum Commands {
         /// Deadline in milliseconds
         #[arg(short, long)]
         deadline_ms: Option<u64>,
-        /// TLS certificate file
+        /// CA certificate (PEM) to trust; enables TLS
         #[arg(long)]
         tls_cert: Option<PathBuf>,
-        /// Compression algorithm: none, gzip, deflate
+        /// Compression algorithm: none (others are not supported yet)
         #[arg(long, default_value = "none")]
         compression: CompressionArg,
     },
 
-    /// Check service health
+    /// Check service health (`tpt20.health.v1.Health/Check`)
     Health {
         /// Target endpoint
         endpoint: String,
-        /// TLS certificate file
+        /// Service name to check (empty = overall server status)
+        #[arg(short, long, default_value = "")]
+        service: String,
+        /// Deadline in milliseconds
+        #[arg(short, long, default_value_t = 5000)]
+        deadline_ms: u64,
+        /// CA certificate (PEM) to trust; enables TLS
         #[arg(long)]
         tls_cert: Option<PathBuf>,
     },
@@ -368,10 +405,25 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Diff { old, new } => cmd_diff(old, new),
         Commands::Gen { backend } => cmd_gen(backend),
         Commands::Descriptors { file, format, out } => cmd_descriptors(file, format, out),
-        Commands::Decode { input, output } => cmd_decode(input, output),
+        Commands::Decode {
+            input,
+            output,
+            schema,
+            message,
+        } => cmd_decode(input, output, schema, message),
         Commands::Encode { input, output } => cmd_encode(input, output),
-        Commands::TextToBinary { input, output } => cmd_text_to_binary(input, output),
-        Commands::BinaryToText { input, output } => cmd_binary_to_text(input, output),
+        Commands::TextToBinary {
+            input,
+            output,
+            schema,
+            message,
+        } => cmd_text_to_binary(input, output, schema, message),
+        Commands::BinaryToText {
+            input,
+            output,
+            schema,
+            message,
+        } => cmd_binary_to_text(input, output, schema, message),
         Commands::JsonToBinary { input, output } => cmd_json_to_binary(input, output),
         Commands::BinaryToJson { input, output } => cmd_binary_to_json(input, output),
         Commands::ImportProto { input, output } => cmd_import_proto(input, output),
@@ -381,26 +433,39 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             method,
             input,
             binary_input,
+            text_input,
+            schema,
+            request_type,
+            response_type,
             streaming,
             metadata,
             deadline_ms,
             tls_cert,
             compression,
         } => {
-            cmd_call(
+            cmd_call(CallOpts {
                 endpoint,
                 method,
                 input,
                 binary_input,
+                text_input,
+                schema,
+                request_type,
+                response_type,
                 streaming,
                 metadata,
                 deadline_ms,
                 tls_cert,
                 compression,
-            )
+            })
             .await
         }
-        Commands::Health { endpoint, tls_cert } => cmd_health(endpoint, tls_cert).await,
+        Commands::Health {
+            endpoint,
+            service,
+            deadline_ms,
+            tls_cert,
+        } => cmd_health(endpoint, service, deadline_ms, tls_cert).await,
         Commands::Reflect { file, message } => cmd_reflect(file, message),
         Commands::Registry { command } => cmd_registry(command),
     }
@@ -946,8 +1011,31 @@ fn field_value_to_json(field: &tpt20_core::Field) -> serde_json::Value {
     }
 }
 
-fn cmd_decode(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), CliError> {
+fn load_descriptor(path: &Path) -> Result<tpt20_descriptor::Descriptor, CliError> {
+    let src = fs::read_to_string(path)?;
+    let compiled = tpt20_compiler::compile(&src, path.to_str())
+        .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
+    Ok(tpt20_descriptor::Descriptor::new(compiled.ir))
+}
+
+fn text_err(e: tpt20_text::TextError) -> CliError {
+    CliError::Parse(e.to_string())
+}
+
+fn cmd_decode(
+    input: Option<PathBuf>,
+    output: Option<PathBuf>,
+    schema: Option<PathBuf>,
+    message: Option<String>,
+) -> Result<(), CliError> {
     let bytes = read_input(input)?;
+    if let (Some(schema), Some(message)) = (schema, message) {
+        let descriptor = load_descriptor(&schema)?;
+        let text = tpt20_text::TextFormat::new(&descriptor)
+            .print_bytes(&message, &bytes)
+            .map_err(text_err)?;
+        return write_output_str(&text, output);
+    }
     let raw = tpt20_core::RawMessage::decode(
         &bytes,
         &tpt20_core::DecoderLimits::default(),
@@ -983,51 +1071,32 @@ fn cmd_encode(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), Cli
     write_output(&bytes, output)
 }
 
-fn cmd_text_to_binary(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), CliError> {
+fn cmd_text_to_binary(
+    input: Option<PathBuf>,
+    output: Option<PathBuf>,
+    schema: PathBuf,
+    message: String,
+) -> Result<(), CliError> {
     let text = read_input_string(input)?;
-    let mut raw = tpt20_core::RawMessage::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let parts: Vec<&str> = line.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            continue;
-        }
-        let field_name = parts[0].trim();
-        let value_str = parts[1].trim();
-
-        let field_id = field_name.parse::<u32>().unwrap_or(0);
-        if field_id == 0 {
-            continue;
-        }
-
-        let (wire, value) = parse_text_value(value_str)?;
-        raw.push(tpt20_core::Field::new(field_id, wire, value));
-    }
-    let bytes = raw.encode().map_err(|e| CliError::Parse(e.to_string()))?;
+    let descriptor = load_descriptor(&schema)?;
+    let bytes = tpt20_text::TextFormat::new(&descriptor)
+        .parse_to_bytes(&message, &text)
+        .map_err(text_err)?;
     write_output(&bytes, output)
 }
 
-fn cmd_binary_to_text(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), CliError> {
+fn cmd_binary_to_text(
+    input: Option<PathBuf>,
+    output: Option<PathBuf>,
+    schema: PathBuf,
+    message: String,
+) -> Result<(), CliError> {
     let bytes = read_input(input)?;
-    let raw = tpt20_core::RawMessage::decode(
-        &bytes,
-        &tpt20_core::DecoderLimits::default(),
-        tpt20_core::UnknownFieldPolicy::Preserve,
-    )
-    .map_err(|e| CliError::Parse(e.to_string()))?;
-
-    let mut out = String::new();
-    for field in &raw.fields {
-        out.push_str(&format!(
-            "{}: {}\n",
-            field.field_id,
-            core_value_to_text(&field.value)
-        ));
-    }
-    write_output_str(&out, output)
+    let descriptor = load_descriptor(&schema)?;
+    let text = tpt20_text::TextFormat::new(&descriptor)
+        .print_bytes(&message, &bytes)
+        .map_err(text_err)?;
+    write_output_str(&text, output)
 }
 
 fn cmd_json_to_binary(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), CliError> {
@@ -1051,7 +1120,7 @@ fn cmd_json_to_binary(input: Option<PathBuf>, output: Option<PathBuf>) -> Result
 }
 
 fn cmd_binary_to_json(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), CliError> {
-    cmd_decode(input, output)
+    cmd_decode(input, output, None, None)
 }
 
 fn read_input_string(input: Option<PathBuf>) -> Result<String, CliError> {
@@ -1113,42 +1182,6 @@ fn json_value_to_core(
             Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(bytes)))
         }
     }
-}
-
-fn parse_text_value(s: &str) -> Result<(tpt20_core::WireClass, tpt20_core::Value), CliError> {
-    let s = s.trim();
-    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        let inner = &s[1..s.len() - 1];
-        return Ok((
-            tpt20_core::WireClass::Len,
-            tpt20_core::Value::Len(inner.as_bytes().to_vec()),
-        ));
-    }
-    if let Ok(b) = s.parse::<bool>() {
-        return Ok((
-            tpt20_core::WireClass::Varint,
-            tpt20_core::Value::Varint(if b { 1 } else { 0 }),
-        ));
-    }
-    if let Ok(i) = s.parse::<i64>() {
-        return Ok((
-            tpt20_core::WireClass::Varint,
-            tpt20_core::Value::Varint(i as u64),
-        ));
-    }
-    if let Ok(u) = s.parse::<u64>() {
-        return Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(u)));
-    }
-    if let Ok(f) = s.parse::<f64>() {
-        return Ok((
-            tpt20_core::WireClass::Fixed64,
-            tpt20_core::Value::Fixed64(f.to_bits()),
-        ));
-    }
-    Ok((
-        tpt20_core::WireClass::Len,
-        tpt20_core::Value::Len(s.as_bytes().to_vec()),
-    ))
 }
 
 fn core_value_to_text(value: &tpt20_core::Value) -> String {
@@ -1258,75 +1291,320 @@ fn run_conformance_test(path: &Path) -> Result<(), CliError> {
 }
 
 // ---------------------------------------------------------------------------
-// call (RPC debugger)
+// call (RPC debugger) and health
 // ---------------------------------------------------------------------------
 
-async fn cmd_call(
+struct CallOpts {
     endpoint: String,
     method: String,
     input: Option<PathBuf>,
     binary_input: Option<PathBuf>,
+    text_input: Option<PathBuf>,
+    schema: Option<PathBuf>,
+    request_type: Option<String>,
+    response_type: Option<String>,
     streaming: StreamingTypeArg,
     metadata: Vec<String>,
     deadline_ms: Option<u64>,
-    _tls_cert: Option<PathBuf>,
-    _compression: CompressionArg,
-) -> Result<(), CliError> {
-    let request_bytes = if let Some(p) = binary_input {
-        fs::read(p)?
-    } else if let Some(p) = input {
-        let json = fs::read_to_string(p)?;
-        serde_json::to_vec(
-            &serde_json::from_str::<serde_json::Value>(&json)
-                .map_err(|e| CliError::Parse(e.to_string()))?,
-        )?
-    } else {
-        let mut buf = String::new();
-        io::stdin().read_to_string(&mut buf)?;
-        serde_json::to_vec(
-            &serde_json::from_str::<serde_json::Value>(&buf)
-                .map_err(|e| CliError::Parse(e.to_string()))?,
-        )?
-    };
+    tls_cert: Option<PathBuf>,
+    compression: CompressionArg,
+}
 
-    let mut md = tpt20_rpc::Metadata::with_default_limit();
-    for kv in &metadata {
-        let parts: Vec<&str> = kv.splitn(2, '=').collect();
-        if parts.len() == 2 {
-            md.insert_text(parts[0], parts[1])
-                .map_err(|e| CliError::Transport(e.to_string()))?;
-        }
+/// Encodes a field-id-keyed JSON object to wire bytes.
+fn json_object_to_bytes(value: &serde_json::Value) -> Result<Vec<u8>, CliError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| CliError::Parse("expected json object".into()))?;
+    let mut raw = tpt20_core::RawMessage::new();
+    for (key, val) in obj {
+        let id: u32 = key
+            .parse()
+            .map_err(|_| CliError::Parse(format!("invalid field id: {key}")))?;
+        let (wire, value) = json_value_to_core(val)?;
+        raw.push(tpt20_core::Field::new(id, wire, value));
     }
+    raw.encode().map_err(|e| CliError::Parse(e.to_string()))
+}
+
+fn build_endpoint(
+    endpoint: &str,
+    tls_cert: Option<&Path>,
+) -> Result<tpt20_transport::Endpoint, CliError> {
+    let (https, address) = if let Some(rest) = endpoint.strip_prefix("https://") {
+        (true, rest)
+    } else if let Some(rest) = endpoint.strip_prefix("http://") {
+        (false, rest)
+    } else {
+        (false, endpoint)
+    };
+    let address = address.trim_end_matches('/');
+    if address.is_empty() || !address.contains(':') {
+        return Err(CliError::Usage(format!(
+            "endpoint `{endpoint}` must look like host:port or http(s)://host:port"
+        )));
+    }
+    let mut ep = tpt20_transport::Endpoint::new(address);
+    if https || tls_cert.is_some() {
+        let cert = tls_cert.ok_or_else(|| {
+            CliError::Usage("https endpoints need --tls-cert (PEM CA certificate to trust)".into())
+        })?;
+        let mut tls = tpt20_transport::TlsConfig::http2();
+        tls.cert_pem = Some(fs::read(cert)?);
+        ep = ep.with_tls(tls);
+    }
+    Ok(ep)
+}
+
+enum CallOutput {
+    Message(Vec<u8>),
+    Trailers(Vec<(String, String)>),
+}
+
+/// Performs one call and collects everything the server sends back.
+async fn perform_call(
+    endpoint: tpt20_transport::Endpoint,
+    method: &str,
+    messages: Vec<Vec<u8>>,
+    metadata: &[String],
+    streaming: StreamingTypeArg,
+    deadline_ms: Option<u64>,
+) -> Result<Vec<CallOutput>, CliError> {
+    use futures::{SinkExt, StreamExt};
+    use tpt20_transport::{StreamItem, StreamingType, Transport};
 
     let streaming_type = match streaming {
-        StreamingTypeArg::Unary => tpt20_transport::StreamingType::Unary,
-        StreamingTypeArg::Server => tpt20_transport::StreamingType::ServerStream,
-        StreamingTypeArg::Client => tpt20_transport::StreamingType::ClientStream,
-        StreamingTypeArg::Bidi => tpt20_transport::StreamingType::Bidi,
+        StreamingTypeArg::Unary => StreamingType::Unary,
+        StreamingTypeArg::Server => StreamingType::ServerStream,
+        StreamingTypeArg::Client => StreamingType::ClientStream,
+        StreamingTypeArg::Bidi => StreamingType::Bidi,
+    };
+    let client_streams = matches!(
+        streaming_type,
+        StreamingType::ClientStream | StreamingType::Bidi
+    );
+    if !client_streams && messages.len() != 1 {
+        return Err(CliError::Usage(
+            "unary and server-streaming calls take exactly one request message".into(),
+        ));
+    }
+
+    let mut md = tpt20_transport::Metadata::new();
+    for kv in metadata {
+        let (k, v) = kv
+            .split_once('=')
+            .ok_or_else(|| CliError::Usage(format!("metadata `{kv}` must be key=value")))?;
+        md.insert(k, v);
+    }
+
+    let transport = tpt20_transport::http2::Http2Transport::new(endpoint);
+    let run = async {
+        let mut messages = messages.into_iter();
+        let first = messages.next().unwrap_or_default();
+        let mut call = transport
+            .start_call(method, first, &md, streaming_type)
+            .await
+            .map_err(|e| CliError::Transport(e.to_string()))?;
+        if client_streams {
+            for m in messages {
+                call.sink
+                    .send(m)
+                    .await
+                    .map_err(|e| CliError::Transport(e.to_string()))?;
+            }
+            call.sink
+                .close()
+                .await
+                .map_err(|e| CliError::Transport(e.to_string()))?;
+        }
+        let mut out = Vec::new();
+        while let Some(item) = call.stream.next().await {
+            match item.map_err(|e| CliError::Transport(e.to_string()))? {
+                StreamItem::Message(bytes) => out.push(CallOutput::Message(bytes)),
+                StreamItem::Trailer(t) => {
+                    let mut kv: Vec<(String, String)> = t
+                        .iter()
+                        .flat_map(|(k, vs)| vs.iter().map(move |v| (k.to_string(), v.clone())))
+                        .collect();
+                    kv.sort();
+                    out.push(CallOutput::Trailers(kv));
+                }
+            }
+        }
+        Ok::<_, CliError>(out)
+    };
+    match deadline_ms {
+        Some(ms) => tokio::time::timeout(std::time::Duration::from_millis(ms), run)
+            .await
+            .map_err(|_| CliError::Transport(format!("deadline of {ms}ms exceeded")))?,
+        None => run.await,
+    }
+}
+
+async fn cmd_call(opts: CallOpts) -> Result<(), CliError> {
+    if !matches!(opts.compression, CompressionArg::None) {
+        return Err(CliError::Usage(
+            "compression is not supported by the HTTP/2 transport yet; use --compression none"
+                .into(),
+        ));
+    }
+    let descriptor = match &opts.schema {
+        Some(p) => Some(load_descriptor(p)?),
+        None => None,
     };
 
-    println!("RPC call to {} ({})", endpoint, method);
-    println!("metadata: {:?}", md.iter().collect::<Vec<_>>());
+    let messages: Vec<Vec<u8>> = if let Some(p) = &opts.binary_input {
+        vec![fs::read(p)?]
+    } else if let Some(p) = &opts.text_input {
+        let (Some(d), Some(ty)) = (&descriptor, &opts.request_type) else {
+            return Err(CliError::Usage(
+                "--text-input needs --schema and --request-type".into(),
+            ));
+        };
+        let text = fs::read_to_string(p)?;
+        vec![tpt20_text::TextFormat::new(d)
+            .parse_to_bytes(ty, &text)
+            .map_err(text_err)?]
+    } else {
+        let json = read_input_string(opts.input.clone())?;
+        let value: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| CliError::Parse(format!("invalid json: {e}")))?;
+        match &value {
+            serde_json::Value::Array(items) => items
+                .iter()
+                .map(json_object_to_bytes)
+                .collect::<Result<_, _>>()?,
+            other => vec![json_object_to_bytes(other)?],
+        }
+    };
 
-    if let Some(d) = deadline_ms {
-        println!("deadline: {}ms", d);
+    let endpoint = build_endpoint(&opts.endpoint, opts.tls_cert.as_deref())?;
+    let outputs = perform_call(
+        endpoint,
+        &opts.method,
+        messages,
+        &opts.metadata,
+        opts.streaming,
+        opts.deadline_ms,
+    )
+    .await?;
+
+    let mut stdout = io::stdout().lock();
+    let mut n = 0usize;
+    for out in outputs {
+        match out {
+            CallOutput::Message(bytes) => {
+                n += 1;
+                writeln!(stdout, "# message {n} ({} bytes)", bytes.len())?;
+                let text = match (&descriptor, &opts.response_type) {
+                    (Some(d), Some(ty)) => tpt20_text::TextFormat::new(d)
+                        .print_bytes(ty, &bytes)
+                        .map_err(text_err)?,
+                    _ => raw_fields_text(&bytes)?,
+                };
+                write!(stdout, "{text}")?;
+            }
+            CallOutput::Trailers(kv) => {
+                writeln!(stdout, "# trailers")?;
+                for (k, v) in kv {
+                    writeln!(stdout, "{k}: {v}")?;
+                }
+            }
+        }
     }
-    println!("streaming: {:?}", streaming_type);
-    println!("request sent ({} bytes)", request_bytes.len());
-    println!("(In-process transport: no server response in CLI stub)");
-
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// health
-// ---------------------------------------------------------------------------
+/// Schema-free `id: value` listing of a wire message.
+fn raw_fields_text(bytes: &[u8]) -> Result<String, CliError> {
+    let raw = tpt20_core::RawMessage::decode(
+        bytes,
+        &tpt20_core::DecoderLimits::default(),
+        tpt20_core::UnknownFieldPolicy::Preserve,
+    )
+    .map_err(|e| CliError::Parse(e.to_string()))?;
+    let mut out = String::new();
+    for f in &raw.fields {
+        out.push_str(&format!(
+            "{}: {}\n",
+            f.field_id,
+            core_value_to_text(&f.value)
+        ));
+    }
+    Ok(out)
+}
 
-async fn cmd_health(endpoint: String, _tls_cert: Option<PathBuf>) -> Result<(), CliError> {
-    println!("Checking health of {}", endpoint);
-    println!("health check initiated (in-process transport stub)");
-    println!("(In-process transport: no server response in CLI stub)");
-    Ok(())
+/// Native health check convention: `tpt20.health.v1.Health/Check` takes
+/// `{1: service string}` and answers `{1: status}` where status is
+/// 0 UNKNOWN, 1 SERVING, 2 NOT_SERVING, 3 SERVICE_UNKNOWN (the same numbering
+/// as the gRPC health protocol).
+const HEALTH_METHOD: &str = "tpt20.health.v1.Health/Check";
+
+async fn cmd_health(
+    endpoint: String,
+    service: String,
+    deadline_ms: u64,
+    tls_cert: Option<PathBuf>,
+) -> Result<(), CliError> {
+    let mut request = tpt20_core::RawMessage::new();
+    if !service.is_empty() {
+        request.push(tpt20_core::Field::new(
+            1,
+            tpt20_core::WireClass::Len,
+            tpt20_core::Value::Len(service.clone().into_bytes()),
+        ));
+    }
+    let request = request
+        .encode()
+        .map_err(|e| CliError::Parse(e.to_string()))?;
+    let outputs = perform_call(
+        build_endpoint(&endpoint, tls_cert.as_deref())?,
+        HEALTH_METHOD,
+        vec![request],
+        &[],
+        StreamingTypeArg::Unary,
+        Some(deadline_ms),
+    )
+    .await?;
+
+    let response = outputs
+        .into_iter()
+        .find_map(|o| match o {
+            CallOutput::Message(b) => Some(b),
+            CallOutput::Trailers(_) => None,
+        })
+        .ok_or_else(|| CliError::Transport("server sent no health response".into()))?;
+    let raw = tpt20_core::RawMessage::decode(
+        &response,
+        &tpt20_core::DecoderLimits::default(),
+        tpt20_core::UnknownFieldPolicy::Preserve,
+    )
+    .map_err(|e| CliError::Parse(e.to_string()))?;
+    let status = raw
+        .fields
+        .iter()
+        .find(|f| f.field_id == 1)
+        .and_then(|f| match f.value {
+            tpt20_core::Value::Varint(v) => Some(v),
+            _ => None,
+        })
+        .unwrap_or(0);
+    let name = match status {
+        1 => "SERVING",
+        2 => "NOT_SERVING",
+        3 => "SERVICE_UNKNOWN",
+        _ => "UNKNOWN",
+    };
+    let target = if service.is_empty() {
+        endpoint.clone()
+    } else {
+        format!("{endpoint} ({service})")
+    };
+    println!("{target}: {name}");
+    if status == 1 {
+        Ok(())
+    } else {
+        Err(CliError::Transport(format!("service is {name}")))
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -467,7 +467,7 @@ items below as "fully verified by the integration suite" until that crate compil
   - [x] Cancellation reason
   - [x] Peer info where allowed
   - [x] Schema fingerprint where useful
-- [ ] CLI schema-aware debugging support (`tpt20 decode --schema ... --message ...`),
+- [x] CLI schema-aware debugging support (`tpt20 decode --schema ... --message ...`),
       full CLI wiring in Phase 16
 
 ---
@@ -548,23 +548,20 @@ items below as "fully verified by the integration suite" until that crate compil
 - [x] CLI command: `tpt20 encode`
 - [x] CLI command: `tpt20 json-to-binary`
 - [x] CLI command: `tpt20 binary-to-json`
-- [ ] CLI command: `tpt20 text-to-binary` (exists but is an ad hoc `field_id: value` line
-      parser, not backed by a real text-format grammar — depends on Phase 8 text parser)
-- [ ] CLI command: `tpt20 binary-to-text` (same ad hoc caveat as above)
+- [x] CLI command: `tpt20 text-to-binary` (schema-driven via `tpt20-text`)
+- [x] CLI command: `tpt20 binary-to-text` (schema-driven via `tpt20-text`)
 - [x] CLI command: `tpt20 import-proto`
 - [ ] CLI command: `tpt20 conformance` (exists but only decodes a `"binary"` hex field
       from a JSON dir — does not invoke the real `tpt20-conformance` suite from Phase 17)
-- [ ] CLI command: `tpt20 call` (RPC debugger) — parses JSON/binary input, metadata,
-      deadline, and streaming type, but never actually performs a network call; TLS and
-      compression args are accepted and silently ignored
-  - [ ] JSON input support
-  - [ ] Binary input support
-  - [ ] Metadata support
-  - [ ] Deadline support
-  - [ ] TLS configuration support
-  - [ ] Compression configuration support
-  - [ ] Streaming call support
-- [ ] CLI command: `tpt20 health` (prints placeholder text, no real request)
+- [x] CLI command: `tpt20 call` (RPC debugger over the HTTP/2 transport)
+  - [x] JSON input support
+  - [x] Binary input support
+  - [x] Metadata support
+  - [x] Deadline support (client-side)
+  - [x] TLS configuration support (`--tls-cert` CA)
+  - [ ] Compression configuration support (rejected until the transport implements it)
+  - [x] Streaming call support
+- [x] CLI command: `tpt20 health` (`tpt20.health.v1.Health/Check`)
 - [x] CLI command: `tpt20 reflect`
 - [x] CLI command: `tpt20 registry publish` (local-filesystem registry only)
 - [ ] `tpt20-registry` service/storage design

@@ -13,7 +13,7 @@
 - `descriptors` — emit the compiled descriptor (JSON or binary)
 - `decode` — decode binary to a dynamic JSON representation
 - `encode` — encode JSON to binary
-- `text-to-binary` — convert text format to binary
+
 - `binary-to-text` — convert binary to text format
 - `json-to-binary` — convert JSON to binary
 - `binary-to-json` — convert binary to JSON

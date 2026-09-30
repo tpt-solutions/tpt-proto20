@@ -102,15 +102,16 @@ descriptor format, to a file or stdout.
 ## `decode`
 
 ```sh
-tpt20 decode [--input FILE] [--output FILE]
+tpt20 decode [--input FILE] [--output FILE] [--schema FILE --message NAME]
 ```
 
-Decodes native-wire-format bytes (stdin by default) into a JSON object keyed
-by **field ID** (not field name) and prints it. **This command has no schema
-input** — it operates purely on the raw `(field_id, wire_class, value)`
-model, so it cannot tell you a field's name or declared type. Use `tpt20
-reflect` for schema-aware inspection. `binary-to-json` is an alias for this
-command.
+Without a schema, decodes native-wire-format bytes (stdin by default) into a
+JSON object keyed by **field ID**, operating purely on the raw
+`(field_id, wire_class, value)` model. With `--schema` and `--message`, the
+bytes are decoded against that message type and printed in the schema-aware
+[text format](#text-to-binary--binary-to-text) (field names, enum names,
+nested messages, maps, oneofs). `binary-to-json` is an alias for the
+schema-free form.
 
 ## `encode`
 
@@ -132,17 +133,33 @@ behavior described above.
 ## `text-to-binary` / `binary-to-text`
 
 ```sh
-tpt20 text-to-binary [--input FILE] [--output FILE]
-tpt20 binary-to-text [--input FILE] [--output FILE]
+tpt20 text-to-binary --schema FILE --message NAME [--input FILE] [--output FILE]
+tpt20 binary-to-text --schema FILE --message NAME [--input FILE] [--output FILE]
 ```
 
-> **Not the text format described in spec §14.3.** These commands implement
-> an ad hoc `field_id: value` line format (one field per line, values
-> inferred as quoted strings, booleans, integers, or floats) rather than a
-> real grammar over field *names*, nested messages, repeated fields, maps, or
-> oneofs. The proper text format's parser doesn't exist yet (`todo.md` Phase
-> 8) — these commands are a stopgap for quick manual inspection of scalar
-> fields only.
+Convert between the spec §14.3 text format and native wire bytes, driven by
+the schema (`tpt20-text`):
+
+```text
+id: 42
+name: "Ada"
+tags: "a"
+tags: "b"
+home {
+  street: "1 Way"
+}
+attrs {
+  key: "k"
+  value: "v"
+}
+```
+
+Fields are named by schema field name; repeated fields are one line per
+element (or `tags: ["a", "b"]`); maps are `name { key: … value: … }` entries;
+oneofs print only the member that wins on the wire; output order is
+deterministic (field id order, map entries sorted by key). `#` starts a
+comment. Unknown fields, type mismatches, out-of-range numbers, and
+syntax errors are reported as errors (exit 1) with line/column where known.
 
 ## `import-proto`
 
@@ -173,28 +190,47 @@ tpt20 conformance [--directory DIR] [--test NAME]
 ## `call`
 
 ```sh
-tpt20 call <endpoint> <method> [--input FILE] [--binary-input FILE]
-           [--streaming unary|server|client|bidi]
-           [--metadata key=value ...] [--deadline-ms N]
-           [--tls-cert FILE] [--compression none|gzip|deflate]
+tpt20 call <endpoint> <method> [--input FILE | --binary-input FILE |
+           --text-input FILE --schema FILE --request-type NAME]
+           [--response-type NAME] [--streaming unary|server|client|bidi]
+           [--metadata key=value ...] [--deadline-ms N] [--tls-cert FILE]
 ```
 
-> **Does not perform a network call.** The command parses JSON or binary
-> input, builds `Metadata` from `--metadata` pairs, and validates the
-> streaming/deadline arguments — but never dials `endpoint` or sends
-> anything. `--tls-cert` and `--compression` are accepted and silently
-> ignored. Treat this as argument-parsing scaffolding for a future real RPC
-> debugger, not a working `grpcurl`-equivalent yet.
+Performs a real call over the HTTP/2 transport and prints every response
+message followed by the trailing metadata:
+
+```text
+# message 1 (9 bytes)
+1: 42
+# trailers
+x-status: ok
+```
+
+- `endpoint` is `host:port` or `http(s)://host:port`. `https://` (or
+  `--tls-cert`) enables TLS with ALPN `h2`; `--tls-cert` is the PEM CA
+  certificate to trust.
+- Request input: `--input` is a JSON object keyed by field ID (an array of
+  objects sends several messages for `client`/`bidi` streams);
+  `--binary-input` is one raw wire message; `--text-input` parses the text
+  format against `--schema`/`--request-type`. With no input flag the JSON is
+  read from stdin.
+- Responses print in text format when `--schema` and `--response-type` are
+  given, otherwise as a schema-free `id: value` listing.
+- `--deadline-ms` is enforced client-side (exit 1 when exceeded).
+- `--compression` other than `none` is rejected with a usage error (exit 2):
+  the transport does not implement compression yet.
+- Unary and server-streaming calls require exactly one request message.
 
 ## `health`
 
 ```sh
-tpt20 health <endpoint> [--tls-cert FILE]
+tpt20 health <endpoint> [--service NAME] [--deadline-ms N] [--tls-cert FILE]
 ```
 
-Prints a placeholder message; does not contact `endpoint`. Not yet wired to
-[`tpt20-compat-grpc`'s health protocol support](compatibility-adapters.md#health-checking)
-or a native health check.
+Calls `tpt20.health.v1.Health/Check` with `{1: service}` (omitted for the
+overall server status) and expects `{1: status}` back, using the gRPC health
+numbering: `0` UNKNOWN, `1` SERVING, `2` NOT_SERVING, `3` SERVICE_UNKNOWN.
+Prints `<endpoint>: <STATUS>`; exits `0` only for `SERVING`, otherwise `1`.
 
 ## `reflect`
 
@@ -237,10 +273,10 @@ fingerprint, and a `"strict"` compatibility policy in a local
 | `init`, `check`, `fmt`, `lint`, `diff` | Fully functional |
 | `gen rust` | Fully functional (message/enum codegen only — no service codegen, see [Code generation](code-generation.md)) |
 | `descriptors`, `reflect` | Fully functional |
-| `decode` / `encode` / `json-to-binary` / `binary-to-json` | Functional, but schema-free (field-ID-keyed) |
-| `text-to-binary` / `binary-to-text` | Ad hoc scalar-only format, not the real text format |
+| `decode` / `encode` / `json-to-binary` / `binary-to-json` | Functional; schema-free (field-ID-keyed), except `decode --schema --message` which is schema-aware |
+| `text-to-binary` / `binary-to-text` | Fully functional, schema-driven text format |
 | `import-proto` | Functional; emits IR JSON, not `.tpt` source |
 | `conformance` | Stub — does not run the real suite |
-| `call` | Parses arguments only — makes no network call |
-| `health` | Placeholder only |
+| `call` | Fully functional over HTTP/2 (TLS, metadata, deadline, streaming); no compression |
+| `health` | Fully functional (`tpt20.health.v1.Health/Check`) |
 | `registry publish` | Functional (local filesystem only, no lookup/fetch) |
