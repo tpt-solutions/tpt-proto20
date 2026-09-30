@@ -47,6 +47,10 @@ message Outer {
   18: flags repeated uint32;
   19: inner Outer_Child;
   20: zigzag sint64;
+  21: homes map<string, Address>;
+  22: status_by_name map<string, Status>;
+  23: address_book repeated Address;
+  24: statuses repeated Status;
 }
 
 message PingRequest {

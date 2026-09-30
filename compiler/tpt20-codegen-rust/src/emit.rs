@@ -1088,15 +1088,7 @@ r#"        for (k, v) in &self.{fname} {{
                 } else {
                     format!("{ty}::decode_inner")
                 };
-                let bytes_dec = if view {
-                    "__scalar::decode_bytes_borrowed(&ef.value)"
-                } else {
-                    "__scalar::decode_bytes_borrowed(&ef.value)"
-                };
-                format!(
-                    "{method}({bytes_dec}, limits, depth + 1)?",
-                    bytes_dec = bytes_dec,
-                )
+                format!("{method}(__scalar::decode_bytes_borrowed(&ef.value)?, limits, depth + 1)?")
             }
         };
         let kt = self.owned_type(&[], &[key_scalar.to_string()]);
@@ -1634,14 +1626,14 @@ r#"        for (k, v) in &self.{fname} {{
                 FieldLabelIr::Repeated(t) => {
                     let mapper = self.json_mapper(scope, t.path[0].as_str(), t);
                     s.push_str(&format!(
-"        if !self.{fname}.is_empty() {{\n            let arr: Vec<__json::Value> = self.{fname}.iter().map(|v| {mapper}).collect();\n            obj.insert({name_lit}.to_string(), __json::Value::Array(arr));\n        }}\n"
+"        if !self.{fname}.is_empty() {{\n            let arr = self.{fname}.iter().map(|v| Ok::<_, __json::JsonError>({mapper})).collect::<Result<Vec<__json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}.to_string(), __json::Value::Array(arr));\n        }}\n"
                     ));
                 }
                 FieldLabelIr::Map { key, value } => {
                     let vmapper = self.json_mapper(scope, value.path[0].as_str(), value);
                     let kstr = key_to_string(key.path[0].as_str(), "k");
                     s.push_str(&format!(
-"        if !self.{fname}.is_empty() {{\n            let mobj: __json::json::Map<String, __json::Value> = self\n                .{fname}\n                .iter()\n                .map(|(k, v)| ({kstr}, {vmapper}))\n                .collect();\n            obj.insert({name_lit}.to_string(), __json::Value::Object(mobj));\n        }}\n"
+"        if !self.{fname}.is_empty() {{\n            let mobj = self\n                .{fname}\n                .iter()\n                .map(|(k, v)| Ok::<_, __json::JsonError>(({kstr}, {vmapper})))\n                .collect::<Result<__json::json::Map<String, __json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}.to_string(), __json::Value::Object(mobj));\n        }}\n"
                     ));
                 }
             }

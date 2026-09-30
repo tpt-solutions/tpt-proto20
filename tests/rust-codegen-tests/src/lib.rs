@@ -53,6 +53,31 @@ fn sample() -> Outer {
             unknown_fields: Default::default(),
         }),
         zigzag: i64::MIN,
+        homes: [(
+            "office".to_string(),
+            Address {
+                street: "2 Road".into(),
+                city: Some("X".into()),
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect(),
+        status_by_name: [("a".to_string(), Outer_Status::INACTIVE)]
+            .into_iter()
+            .collect(),
+        address_book: vec![
+            Address {
+                street: "a".into(),
+                ..Default::default()
+            },
+            Address {
+                street: "b".into(),
+                city: Some("c".into()),
+                ..Default::default()
+            },
+        ],
+        statuses: vec![Outer_Status::SUSPENDED, Outer_Status::ACTIVE],
         unknown_fields: Default::default(),
     }
 }
