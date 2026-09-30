@@ -1624,16 +1624,25 @@ r#"        for (k, v) in &self.{fname} {{
                     }
                 }
                 FieldLabelIr::Repeated(t) => {
-                    let mapper = self.json_mapper(scope, t.path[0].as_str(), t);
+                    let mapper = result_expr(&self.json_mapper(scope, t.path[0].as_str(), t));
                     s.push_str(&format!(
-"        if !self.{fname}.is_empty() {{\n            let arr = self.{fname}.iter().map(|v| Ok::<_, __json::JsonError>({mapper})).collect::<Result<Vec<__json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}.to_string(), __json::Value::Array(arr));\n        }}\n"
+"        if !self.{fname}.is_empty() {{\n            let arr = self.{fname}.iter().map(|v| {mapper}).collect::<Result<Vec<__json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}.to_string(), __json::Value::Array(arr));\n        }}\n"
                     ));
                 }
                 FieldLabelIr::Map { key, value } => {
-                    let vmapper = self.json_mapper(scope, value.path[0].as_str(), value);
                     let kstr = key_to_string(key.path[0].as_str(), "k");
+                    let vmapper = match self
+                        .json_mapper(scope, value.path[0].as_str(), value)
+                        .strip_suffix('?')
+                    {
+                        Some(fallible) => format!("{fallible}.map(|x| ({kstr}, x))"),
+                        None => format!(
+                            "Ok::<_, __json::JsonError>(({kstr}, {}))",
+                            self.json_mapper(scope, value.path[0].as_str(), value)
+                        ),
+                    };
                     s.push_str(&format!(
-"        if !self.{fname}.is_empty() {{\n            let mobj = self\n                .{fname}\n                .iter()\n                .map(|(k, v)| Ok::<_, __json::JsonError>(({kstr}, {vmapper})))\n                .collect::<Result<__json::json::Map<String, __json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}.to_string(), __json::Value::Object(mobj));\n        }}\n"
+"        if !self.{fname}.is_empty() {{\n            let mobj = self\n                .{fname}\n                .iter()\n                .map(|(k, v)| {vmapper})\n                .collect::<Result<__json::json::Map<String, __json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}.to_string(), __json::Value::Object(mobj));\n        }}\n"
                     ));
                 }
             }
@@ -1997,6 +2006,15 @@ fn anno_range(f: &ir::FieldIr) -> Option<(i64, i64)> {
         _ => None,
     });
     Some((ints.next()?, ints.next()?))
+}
+
+/// Turns a mapper expression into one evaluating to `Result<Value, JsonError>`:
+/// fallible mappers (`expr?`) already are one, infallible ones are wrapped.
+fn result_expr(mapper: &str) -> String {
+    match mapper.strip_suffix('?') {
+        Some(fallible) => fallible.to_string(),
+        None => format!("Ok::<_, __json::JsonError>({mapper})"),
+    }
 }
 
 /// Nested types are flattened to `Outer_Inner` names; mark those items so
