@@ -189,7 +189,7 @@ impl DynamicMessage {
         self.raw
             .fields
             .iter()
-            .filter(move |f| field_id.map_or(false, |id| f.field_id == id))
+            .filter(move |f| field_id == Some(f.field_id))
     }
 
     /// Returns the first value for a field by name, if present.
@@ -231,9 +231,10 @@ impl DynamicMessage {
 
     /// Reads a bytes field by name using the descriptor.
     pub fn get_bytes_by_name(&self, name: &str) -> Option<&[u8]> {
-        let Some(field) = self.descriptor.as_ref().and_then(|d| d.field_by_name(name)) else {
-            return None;
-        };
+        let field = self
+            .descriptor
+            .as_ref()
+            .and_then(|d| d.field_by_name(name))?;
         self.get_bytes(field.id)
     }
 
@@ -479,12 +480,10 @@ impl DynamicMessage {
         value: serde_json::Value,
     ) -> Result<DynamicMessage, DynamicJsonError> {
         let mut msg = DynamicMessage::with_descriptor(descriptor);
-        let obj = value
-            .as_object()
-            .ok_or_else(|| DynamicJsonError::TypeMismatch {
-                field: "root",
-                expected: "object",
-            })?;
+        let obj = value.as_object().ok_or(DynamicJsonError::TypeMismatch {
+            field: "root",
+            expected: "object",
+        })?;
         for (key, val) in obj {
             let Some(field_desc) = msg.descriptor.as_ref().and_then(|d| d.field_by_name(key))
             else {
@@ -627,12 +626,10 @@ fn json_value_to_field(
     let field_value = match &field.kind {
         FieldKind::Scalar(scalar) => match scalar {
             ScalarKind::Bool => {
-                let b = value
-                    .as_bool()
-                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
-                        field: "bool",
-                        expected: "boolean",
-                    })?;
+                let b = value.as_bool().ok_or(DynamicJsonError::TypeMismatch {
+                    field: "bool",
+                    expected: "boolean",
+                })?;
                 Value::Varint(if b { 1 } else { 0 })
             }
             ScalarKind::Int32 | ScalarKind::Int64 | ScalarKind::Sint32 | ScalarKind::Sint64 => {
@@ -655,30 +652,24 @@ fn json_value_to_field(
                 Value::Varint(u)
             }
             ScalarKind::Fixed32 | ScalarKind::SFixed32 => {
-                let n = value
-                    .as_u64()
-                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
-                        field: "fixed32",
-                        expected: "unsigned integer",
-                    })?;
+                let n = value.as_u64().ok_or(DynamicJsonError::TypeMismatch {
+                    field: "fixed32",
+                    expected: "unsigned integer",
+                })?;
                 Value::Fixed32(n as u32)
             }
             ScalarKind::Fixed64 | ScalarKind::SFixed64 => {
-                let n = value
-                    .as_u64()
-                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
-                        field: "fixed64",
-                        expected: "unsigned integer",
-                    })?;
+                let n = value.as_u64().ok_or(DynamicJsonError::TypeMismatch {
+                    field: "fixed64",
+                    expected: "unsigned integer",
+                })?;
                 Value::Fixed64(n)
             }
             ScalarKind::Float | ScalarKind::Double => {
-                let f = value
-                    .as_f64()
-                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
-                        field: "float",
-                        expected: "number",
-                    })?;
+                let f = value.as_f64().ok_or(DynamicJsonError::TypeMismatch {
+                    field: "float",
+                    expected: "number",
+                })?;
                 match wire_class {
                     WireClass::Fixed32 => Value::Fixed32(f32::to_bits(f as f32)),
                     WireClass::Fixed64 => Value::Fixed64(f64::to_bits(f)),
@@ -686,21 +677,17 @@ fn json_value_to_field(
                 }
             }
             ScalarKind::String => {
-                let s = value
-                    .as_str()
-                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
-                        field: "string",
-                        expected: "string",
-                    })?;
+                let s = value.as_str().ok_or(DynamicJsonError::TypeMismatch {
+                    field: "string",
+                    expected: "string",
+                })?;
                 Value::Len(s.as_bytes().to_vec())
             }
             ScalarKind::Bytes => {
-                let s = value
-                    .as_str()
-                    .ok_or_else(|| DynamicJsonError::TypeMismatch {
-                        field: "bytes",
-                        expected: "base64 string",
-                    })?;
+                let s = value.as_str().ok_or(DynamicJsonError::TypeMismatch {
+                    field: "bytes",
+                    expected: "base64 string",
+                })?;
                 let bytes =
                     base64_decode(s).map_err(|e| DynamicJsonError::InvalidBase64(e.to_string()))?;
                 Value::Len(bytes)
@@ -777,7 +764,7 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
     for chunk in bytes.chunks(4) {
         let pad = chunk.iter().filter(|&&c| c == b'=').count();
-        if pad > 2 || chunk[..4 - pad].iter().any(|&c| c == b'=') {
+        if pad > 2 || chunk[..4 - pad].contains(&b'=') {
             return Err("misplaced padding".to_string());
         }
         let mut n: u32 = 0;

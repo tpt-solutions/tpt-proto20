@@ -1,5 +1,5 @@
 use tpt20_compat_protobuf::wire::decode_protobuf;
-use tpt20_core::{Field, RawMessage, UnknownFieldPolicy, Value, WireClass};
+use tpt20_core::{Value, WireClass};
 
 #[test]
 fn decode_protobuf_varint() {

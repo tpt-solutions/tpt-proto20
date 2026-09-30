@@ -12,6 +12,8 @@
 //! Fields within these messages are part of the wire contract: adding new
 //! optional fields is safe; removing or changing existing field IDs is
 //! breaking.
+// Explicit `Default` impls document each well-known type's zero value.
+#![allow(clippy::derivable_impls)]
 
 pub mod json;
 pub mod schema;
@@ -790,7 +792,7 @@ impl StdValue {
                 _ => {}
             }
         }
-        v.ok_or_else(|| DecodeError::Internal("empty StdValue"))
+        v.ok_or(DecodeError::Internal("empty StdValue"))
     }
 }
 

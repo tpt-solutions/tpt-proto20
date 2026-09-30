@@ -175,7 +175,7 @@ pub mod base64 {
         let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
         for chunk in bytes.chunks(4) {
             let pad = chunk.iter().filter(|&&c| c == b'=').count();
-            if pad > 2 || chunk[..4 - pad].iter().any(|&c| c == b'=') {
+            if pad > 2 || chunk[..4 - pad].contains(&b'=') {
                 return Err(JsonError::Base64("misplaced padding".to_string()));
             }
             let mut n: u32 = 0;

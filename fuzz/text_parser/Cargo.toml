@@ -11,7 +11,7 @@ keywords = ["tpt20", "fuzzing", "testing", "security", "text-parser"]
 categories = ["development-tools", "testing"]
 
 [[bin]]
-name = "fuzz_target"
+name = "text-parser-fuzz"
 path = "fuzz_targets/fuzz_target.rs"
 test = false
 bench = false

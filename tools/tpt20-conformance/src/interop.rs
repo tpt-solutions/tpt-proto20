@@ -6,7 +6,7 @@ fn native_roundtrip_protobuf_encoded() {
     let mut native = RawMessage::new();
     native.push(Field::new(1, WireClass::Varint, Value::Varint(42)));
     native.push(Field::new(2, WireClass::Len, Value::Len(b"hello".to_vec())));
-    let native_bytes = native.encode().unwrap();
+    let _native_bytes = native.encode().unwrap();
 
     let proto_bytes = encode_protobuf(&native).unwrap();
     let decoded = decode_protobuf(&proto_bytes).unwrap();

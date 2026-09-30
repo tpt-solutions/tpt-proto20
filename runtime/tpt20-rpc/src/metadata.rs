@@ -80,12 +80,12 @@ impl From<Vec<u8>> for MetadataValue {
         MetadataValue::Binary(v)
     }
 }
-impl<'a> From<&'a str> for MetadataValue {
+impl From<&str> for MetadataValue {
     fn from(v: &str) -> Self {
         MetadataValue::Text(v.to_string())
     }
 }
-impl<'a> From<&'a [u8]> for MetadataValue {
+impl From<&[u8]> for MetadataValue {
     fn from(v: &[u8]) -> Self {
         MetadataValue::Binary(v.to_vec())
     }
@@ -186,7 +186,7 @@ impl Metadata {
 
     pub fn remove(&mut self, key: &str) -> Option<MetadataValue> {
         let key_ok = MetadataKey::new(key).ok();
-        let result = key_ok.and_then(|k| {
+        key_ok.and_then(|k| {
             let val = self.inner.remove(&k);
             if let Some(ref v) = val {
                 let size = key.len()
@@ -197,8 +197,7 @@ impl Metadata {
                 self.current_size = self.current_size.saturating_sub(size);
             }
             val
-        });
-        result
+        })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&MetadataKey, &MetadataValue)> {

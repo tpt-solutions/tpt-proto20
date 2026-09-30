@@ -3,7 +3,7 @@ use serde_json::Value;
 /// Converts an `i64` to a `serde_json::Value`, emitting as string when outside
 /// the safe JSON integer range.
 pub fn i64_to_value(v: i64) -> Value {
-    if v >= i64::MIN + 1 && v <= i64::MAX - 1 {
+    if (i64::MIN + 1..=i64::MAX - 1).contains(&v) {
         Value::Number(serde_json::Number::from(v))
     } else {
         Value::String(v.to_string())

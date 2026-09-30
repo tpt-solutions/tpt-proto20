@@ -730,7 +730,7 @@ fn _is_scalar_path(path: &[String]) -> bool {
     path.len() == 1
         && path
             .first()
-            .map_or(false, |p| _SCALAR_NAMES.contains(&p.as_str()))
+            .is_some_and(|p| _SCALAR_NAMES.contains(&p.as_str()))
 }
 
 fn interpret_value<'a>(
@@ -1081,10 +1081,6 @@ mod tests {
         let mut desc = Descriptor::new(pkg);
         desc.compute_fingerprint();
         desc
-    }
-
-    fn user_message() -> ir::MessageIr {
-        sample_descriptor().find_message("User").unwrap().clone()
     }
 
     #[test]

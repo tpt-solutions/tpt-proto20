@@ -48,9 +48,11 @@ fn bidi_stream_type_exists() {
 
 #[test]
 fn stream_trait_has_correct_associated_types() {
+    #[allow(dead_code)]
     fn check_stream<T: TryStream<Item = Vec<u8>, Error = tpt20_rpc::ReceiveError> + Send + Sync>(
         _: &T,
     ) {
     }
+    #[allow(dead_code)]
     fn check_sink<T: TrySink<Item = Vec<u8>, Error = tpt20_rpc::SendError> + Send + Sync>(_: &T) {}
 }

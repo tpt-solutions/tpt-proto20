@@ -105,18 +105,18 @@ pub fn to_wire_word(scalar: &str, v: &str) -> String {
 /// Wire word `{x}` -> element value for packed decoding.
 pub fn from_wire_word(scalar: &str, x: &str) -> String {
     match scalar {
-        "bool" => format!("({x} != 0)"),
-        "int32" => format!("({x} as i32)"),
-        "int64" => format!("({x} as i64)"),
-        "sint32" => format!("(__core::varint::decode_zigzag({x}) as i32)"),
+        "bool" => format!("{x} != 0"),
+        "int32" => format!("{x} as i32"),
+        "int64" => format!("{x} as i64"),
+        "sint32" => format!("__core::varint::decode_zigzag({x}) as i32"),
         "sint64" => format!("__core::varint::decode_zigzag({x})"),
-        "uint32" => format!("({x} as u32)"),
+        "uint32" => format!("{x} as u32"),
         "uint64" => x.to_string(),
         "fixed32" => x.to_string(),
-        "sfixed32" => format!("({x} as i32)"),
+        "sfixed32" => format!("{x} as i32"),
         "float32" => format!("f32::from_bits({x})"),
         "fixed64" => x.to_string(),
-        "sfixed64" => format!("({x} as i64)"),
+        "sfixed64" => format!("{x} as i64"),
         "float64" => format!("f64::from_bits({x})"),
         other => unreachable!("not packable: {other}"),
     }

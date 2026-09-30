@@ -199,7 +199,8 @@ fn separators_and_colon_before_message_are_optional() {
 fn parse_errors_are_reported_not_panicked() {
     let d = descriptor();
     let fmt = TextFormat::new(&d);
-    let cases: &[(&str, fn(&TextError) -> bool)] = &[
+    type Check = fn(&TextError) -> bool;
+    let cases: &[(&str, Check)] = &[
         ("bogus: 1", |e| matches!(e, TextError::UnknownField { .. })),
         ("id: 1 id: 2", |e| matches!(e, TextError::DuplicateField(_))),
         ("id: \"x\"", |e| matches!(e, TextError::TypeMismatch { .. })),

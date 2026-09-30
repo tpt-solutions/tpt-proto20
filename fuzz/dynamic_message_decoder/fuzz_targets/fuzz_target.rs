@@ -1,8 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use tpt20_core::Field;
-use tpt20_core::{DecoderLimits, RawMessage, UnknownFieldPolicy, Value, WireClass};
+use tpt20_core::{DecoderLimits, UnknownFieldPolicy};
 use tpt20_descriptor::Descriptor;
 use tpt20_ir as ir;
 

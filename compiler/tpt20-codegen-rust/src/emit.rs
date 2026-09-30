@@ -57,7 +57,7 @@ impl<'a> Emitter<'a> {
             self.emit_enum(&top_scope, e);
         }
         for m in &messages {
-            self.emit_message(&top_scope, &m);
+            self.emit_message(&top_scope, m);
         }
         if self.opts.builders && !self.pkg.messages.is_empty() {
             self.emit_build_error();
@@ -65,7 +65,7 @@ impl<'a> Emitter<'a> {
         if self.opts.services && !self.pkg.services.is_empty() {
             self.emit_services();
         }
-        self.out
+        allow_flat_type_names(&self.out)
     }
 
     /// Resolves a type reference to its flat Rust name and kind.
@@ -82,30 +82,6 @@ impl<'a> Emitter<'a> {
             Some((flat, kind)) => (flat.to_string(), kind),
             None => ("()".to_string(), TypeKind::Message),
         }
-    }
-
-    /// Returns true if the message or any of its transitive fields borrow
-    /// string/bytes payloads, which forces the view struct to carry a lifetime.
-    fn message_needs_lifetime(&self, msg: &ir::MessageIr) -> bool {
-        fn field_needs(f: &ir::FieldIr) -> bool {
-            match &f.label {
-                ir::FieldLabelIr::Singular(t) => {
-                    model::is_scalar_path(&t.path)
-                        && matches!(t.path[0].as_str(), "string" | "bytes")
-                }
-                ir::FieldLabelIr::Repeated(t) => {
-                    model::is_scalar_path(&t.path)
-                        && matches!(t.path[0].as_str(), "string" | "bytes")
-                }
-                ir::FieldLabelIr::Map { value, .. } => {
-                    model::is_scalar_path(&value.path)
-                        && matches!(value.path[0].as_str(), "string" | "bytes")
-                }
-            }
-        }
-        msg.fields.iter().any(field_needs)
-            || msg.oneofs.iter().any(|o| o.fields.iter().any(field_needs))
-            || msg.messages.iter().any(|m| self.message_needs_lifetime(m))
     }
 
     /// Owned Rust type for a referenced type relative to `scope`.
@@ -125,44 +101,6 @@ impl<'a> Emitter<'a> {
         }
         let base = self.resolve_ref(scope, path).0;
         format!("{base}View<'a>")
-    }
-
-    fn type_needs_lifetime(&self, scope: &[String], path: &[String]) -> bool {
-        if model::is_scalar_path(path) {
-            return matches!(path[0].as_str(), "string" | "bytes");
-        }
-        if let Some(msg) = self.find_message_ir(scope, path) {
-            self.message_needs_lifetime(msg)
-        } else {
-            true
-        }
-    }
-
-    fn find_message_ir(&self, scope: &[String], path: &[String]) -> Option<&'a ir::MessageIr> {
-        if path.is_empty() {
-            return None;
-        }
-        if let Some((flat, _)) = self.model.resolve(scope, path) {
-            return self.find_by_flat_name(&self.pkg.messages, flat);
-        }
-        None
-    }
-
-    fn find_by_flat_name(
-        &self,
-        messages: &'a [ir::MessageIr],
-        flat: &str,
-    ) -> Option<&'a ir::MessageIr> {
-        for m in messages {
-            let self_flat = naming::flat_type_name(&[], &m.name);
-            if self_flat == flat {
-                return Some(m);
-            }
-            if let Some(nested) = self.find_by_flat_name(&m.messages, flat) {
-                return Some(nested);
-            }
-        }
-        None
     }
 
     fn header(&mut self) {
@@ -562,7 +500,7 @@ impl Default for {flat} {{
         // ---- Nested declarations ---------------------------------------------
         let enums = msg.enums.clone();
         for e in &enums {
-            self.emit_enum(&inner_scope, &e);
+            self.emit_enum(&inner_scope, e);
         }
         let messages = msg.messages.clone();
         for m in &messages {
@@ -725,11 +663,11 @@ impl Default for {flat} {{
                             let cls = class_name(crate::WireClass::Varint);
                             match f.presence {
                                 Explicit => b.push_str(&format!(
-"        if let Some(v) = &self.{fname} {{\n            raw.push(__core::Field::new({id}, {cls}, __core::Value::Varint((v.to_i32() as u64))));\n        }}\n",
+"        if let Some(v) = &self.{fname} {{\n            raw.push(__core::Field::new({id}, {cls}, __core::Value::Varint(v.to_i32() as u64)));\n        }}\n",
                                     id = f.id
                                 )),
                                 Implicit => b.push_str(&format!(
-"        if self.{fname}.to_i32() != 0 {{\n            raw.push(__core::Field::new({id}, {cls}, __core::Value::Varint((self.{fname}.to_i32() as u64))));\n        }}\n",
+"        if self.{fname}.to_i32() != 0 {{\n            raw.push(__core::Field::new({id}, {cls}, __core::Value::Varint(self.{fname}.to_i32() as u64)));\n        }}\n",
                                     id = f.id
                                 )),
                             }
@@ -813,7 +751,7 @@ impl Default for {flat} {{
             }
             TypeKind::Enum { .. } => (
                 class_name(crate::WireClass::Varint),
-                "__core::Value::Varint((v.to_i32() as u64))".to_string(),
+                "__core::Value::Varint(v.to_i32() as u64)".to_string(),
             ),
             TypeKind::Message => (
                 class_name(crate::WireClass::Len),
@@ -874,7 +812,7 @@ r#"        for (k, v) in &self.{fname} {{
                 )
             }
             TypeKind::Enum { .. } => format!(
-"            Some({oneof_ty}::{variant}(v)) => raw.push(__core::Field::new({}, {}, __core::Value::Varint((v.to_i32() as u64)))),\n",
+"            Some({oneof_ty}::{variant}(v)) => raw.push(__core::Field::new({}, {}, __core::Value::Varint(v.to_i32() as u64))),\n",
                 mf.id,
                 class_name(crate::WireClass::Varint),
             ),
@@ -1161,11 +1099,7 @@ r#"        for (k, v) in &self.{fname} {{
                 )
             }
         };
-        let kt = if view {
-            self.owned_type(&[], &[key_scalar.to_string()])
-        } else {
-            self.owned_type(&[], &[key_scalar.to_string()])
-        };
+        let kt = self.owned_type(&[], &[key_scalar.to_string()]);
         format!(
             r#"                ({id}, {len}) => {{
                      let entry_bytes = __scalar::decode_bytes(&field.value)?;
@@ -2009,11 +1943,11 @@ r#"        for (k, v) in &self.{fname} {{
         if let Some((lo, hi)) = anno_range(f) {
             let check = if f.presence == ir::Presence::Explicit {
                 format!(
-"        if let Some(v) = &self.{fname} {{\n            if !(({lo})..=({hi})).contains(v) {{\n                return Err(BuildError::OutOfRange {{ field: {name_lit} }});\n            }}\n        }}\n"
+"        if let Some(v) = &self.{fname} {{\n            if !({lo}..={hi}).contains(v) {{\n                return Err(BuildError::OutOfRange {{ field: {name_lit} }});\n            }}\n        }}\n"
                 )
             } else {
                 format!(
-"        if !(({lo})..=({hi})).contains(&self.{fname}) {{\n            return Err(BuildError::OutOfRange {{ field: {name_lit} }});\n        }}\n"
+"        if !({lo}..={hi}).contains(&self.{fname}) {{\n            return Err(BuildError::OutOfRange {{ field: {name_lit} }});\n        }}\n"
                 )
             };
             out.push_str(&check);
@@ -2073,6 +2007,62 @@ fn anno_range(f: &ir::FieldIr) -> Option<(i64, i64)> {
     Some((ints.next()?, ints.next()?))
 }
 
+/// Nested types are flattened to `Outer_Inner` names; mark those items so
+/// consumers do not get `non_camel_case_types` warnings from generated code.
+fn allow_flat_type_names(code: &str) -> String {
+    let mut out = String::with_capacity(code.len() + 256);
+    for line in code.lines() {
+        let decl = line
+            .strip_prefix("pub struct ")
+            .or_else(|| line.strip_prefix("pub enum "));
+        if let Some(rest) = decl {
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if name.contains('_') {
+                out.push_str("#[allow(non_camel_case_types)]\n");
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// Wire-class expression as referenced from generated code.
+pub(crate) fn class_name(c: crate::WireClass) -> &'static str {
+    match c {
+        crate::WireClass::Varint => "__core::WireClass::Varint",
+        crate::WireClass::Fixed32 => "__core::WireClass::Fixed32",
+        crate::WireClass::Fixed64 => "__core::WireClass::Fixed64",
+        crate::WireClass::Len => "__core::WireClass::Len",
+    }
+}
+
+/// Produces a turbo-path call like `Type::<'a>::method` when `ty` carries a
+/// lifetime parameter, falling back to `Type::method` otherwise.
+pub(crate) fn turbo_call(ty: &str, method: &str) -> String {
+    if let Some(idx) = ty.find('<') {
+        let base = &ty[..idx];
+        let lt = &ty[idx..];
+        let lt_inner = &lt[1..lt.len() - 1];
+        format!("{base}::<{lt_inner}>::{method}")
+    } else {
+        format!("{ty}::{method}")
+    }
+}
+
+/// Core scalar helper for packed encoding of this pack kind.
+pub(crate) fn packed_encode_fn(pack: PackKind) -> &'static str {
+    match pack {
+        PackKind::Varint => "__scalar::encode_packed_varints",
+        PackKind::Fixed32 => "__scalar::encode_packed_fixed32",
+        PackKind::Fixed64 => "__scalar::encode_packed_fixed64",
+        PackKind::NotPackable => unreachable!(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2116,38 +2106,5 @@ mod tests {
 
     fn generate_module_pub(pkg: &tpt20_ir::PackageIr, opts: &CodegenOptions) -> String {
         Emitter::new(pkg, opts).generate()
-    }
-}
-
-/// Wire-class expression as referenced from generated code.
-pub(crate) fn class_name(c: crate::WireClass) -> &'static str {
-    match c {
-        crate::WireClass::Varint => "__core::WireClass::Varint",
-        crate::WireClass::Fixed32 => "__core::WireClass::Fixed32",
-        crate::WireClass::Fixed64 => "__core::WireClass::Fixed64",
-        crate::WireClass::Len => "__core::WireClass::Len",
-    }
-}
-
-/// Produces a turbo-path call like `Type::<'a>::method` when `ty` carries a
-/// lifetime parameter, falling back to `Type::method` otherwise.
-pub(crate) fn turbo_call(ty: &str, method: &str) -> String {
-    if let Some(idx) = ty.find('<') {
-        let base = &ty[..idx];
-        let lt = &ty[idx..];
-        let lt_inner = &lt[1..lt.len() - 1];
-        format!("{base}::<{lt_inner}>::{method}")
-    } else {
-        format!("{ty}::{method}")
-    }
-}
-
-/// Core scalar helper for packed encoding of this pack kind.
-pub(crate) fn packed_encode_fn(pack: PackKind) -> &'static str {
-    match pack {
-        PackKind::Varint => "__scalar::encode_packed_varints",
-        PackKind::Fixed32 => "__scalar::encode_packed_fixed32",
-        PackKind::Fixed64 => "__scalar::encode_packed_fixed64",
-        PackKind::NotPackable => unreachable!(),
     }
 }

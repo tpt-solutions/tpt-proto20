@@ -202,6 +202,12 @@ pub struct InProcessTransport {
     request_tx: mpsc::Sender<IncomingRequest>,
 }
 
+impl Default for InProcessTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InProcessTransport {
     /// Creates a new in-process transport connected to a fresh server.
     pub fn new() -> Self {

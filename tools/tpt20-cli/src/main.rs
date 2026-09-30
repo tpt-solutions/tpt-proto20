@@ -618,12 +618,6 @@ fn format_schema(src: &str) -> String {
                 out.push('\n');
                 last_was_newline = true;
             }
-            FmtToken::Indent => {
-                for _ in 0..indent {
-                    out.push_str("    ");
-                }
-                last_was_newline = false;
-            }
             FmtToken::OpenBrace => {
                 if !last_was_newline {
                     out.push('\n');
@@ -676,7 +670,6 @@ fn format_schema(src: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FmtToken {
     Newline,
-    Indent,
     OpenBrace,
     CloseBrace,
     Semicolon,
@@ -882,10 +875,10 @@ impl LintRule {
             }
             LintRule::ReservedReuse => {
                 let reserved_re = regex::Regex::new(r"reserved\s+\d+\s+to\s+\d+").unwrap();
+                let digits_re = regex::Regex::new(r"\d+").unwrap();
                 for cap in reserved_re.find_iter(src) {
                     let range = cap.as_str();
-                    let nums: Vec<u32> = regex::Regex::new(r"\d+")
-                        .unwrap()
+                    let nums: Vec<u32> = digits_re
                         .find_iter(range)
                         .filter_map(|m| m.as_str().parse().ok())
                         .collect();
@@ -948,9 +941,11 @@ fn cmd_gen(backend: GenBackend) -> Result<(), CliError> {
             let compiled = tpt20_compiler::compile(&src, input.to_str())
                 .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
 
-            let mut opts = tpt20_codegen_rust::CodegenOptions::default();
-            opts.builders = builders;
-            opts.services = !no_services;
+            let opts = tpt20_codegen_rust::CodegenOptions {
+                builders,
+                services: !no_services,
+                ..Default::default()
+            };
 
             let module = tpt20_codegen_rust::generate_module(&compiled.ir, &opts);
             fs::create_dir_all(&output)?;
@@ -1263,12 +1258,12 @@ fn cmd_conformance(directory: Option<PathBuf>, test: Option<String>) -> Result<(
         return Ok(());
     }
 
-    let entries = fs::read_dir(&dir).map_err(|e| CliError::Io(e))?;
+    let entries = fs::read_dir(&dir).map_err(CliError::Io)?;
     let mut passed = 0usize;
     let mut failed = 0usize;
 
     for entry in entries {
-        let entry = entry.map_err(|e| CliError::Io(e))?;
+        let entry = entry.map_err(CliError::Io)?;
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
@@ -1654,7 +1649,7 @@ fn cmd_reflect(file: PathBuf, message: Option<String>) -> Result<(), CliError> {
             println!("fields:");
             for f in &msg.fields {
                 let label = match &f.label {
-                    tpt20_ir::FieldLabelIr::Singular(t) => format!("{}", t.name()),
+                    tpt20_ir::FieldLabelIr::Singular(t) => t.name().to_string(),
                     tpt20_ir::FieldLabelIr::Repeated(t) => format!("repeated {}", t.name()),
                     tpt20_ir::FieldLabelIr::Map { key, value } => {
                         format!("map<{}, {}>", key.name(), value.name())
@@ -1844,7 +1839,7 @@ fn cmd_registry(command: RegistryCommands) -> Result<(), CliError> {
 // Local registry manifest helpers
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct LocalManifest {
     versions: Vec<VersionRecord>,
 }
@@ -1855,14 +1850,6 @@ struct VersionRecord {
     fingerprint: String,
     policy: String,
     published_at: String,
-}
-
-impl Default for LocalManifest {
-    fn default() -> Self {
-        LocalManifest {
-            versions: Vec::new(),
-        }
-    }
 }
 
 impl LocalManifest {

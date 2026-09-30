@@ -67,7 +67,6 @@ fn dynamic_message_encode_decode() {
 
 #[test]
 fn json_roundtrip_dynamic_message() {
-    use tpt20_stdlib::json::base64;
     let mut desc = MessageDescriptor::new();
     desc.add_field(FieldDescriptor::new(
         1,

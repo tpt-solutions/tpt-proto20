@@ -17,8 +17,10 @@ pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
 
+#[cfg(test)]
 use generated::{Address, Outer, OuterContact, Outer_Feature, Outer_Status};
 
+#[cfg(test)]
 fn sample() -> Outer {
     Outer {
         id: -5,
@@ -229,8 +231,10 @@ fn decoder_limits_are_enforced() {
     let nested = sample();
     let bytes = nested.encode();
 
-    let mut limits = tpt20_core::DecoderLimits::default();
-    limits.max_depth = 2;
+    let limits = tpt20_core::DecoderLimits {
+        max_depth: 2,
+        ..Default::default()
+    };
     assert_eq!(
         Outer::decode_with_limits(&bytes, &limits),
         Err(DecodeError::DepthExceeded)
@@ -240,8 +244,10 @@ fn decoder_limits_are_enforced() {
         name: "x".repeat(100),
         ..Default::default()
     };
-    let mut tight = tpt20_core::DecoderLimits::default();
-    tight.max_string_bytes = 16;
+    let tight = tpt20_core::DecoderLimits {
+        max_string_bytes: 16,
+        ..Default::default()
+    };
     assert_eq!(
         Outer::decode_with_limits(&big_string.encode(), &tight),
         Err(DecodeError::LimitExceeded { limit: 16 })
@@ -297,7 +303,7 @@ fn borrowed_view_decodes_without_owned_strings() {
     }
     let child = view.inner.as_ref().unwrap();
     assert_eq!(child.note, "n");
-    assert_eq!(child.leaf.as_ref().unwrap().value, true);
+    assert!(child.leaf.as_ref().unwrap().value);
 }
 
 #[test]

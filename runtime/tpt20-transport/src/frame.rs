@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn frame_rejects_reserved_bits() {
-        let mut bytes = vec![0xFE, 0, 0, 0, 0];
+        let bytes = vec![0xFE, 0, 0, 0, 0];
         assert!(Frame::decode(&bytes).is_err());
     }
 

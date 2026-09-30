@@ -1,9 +1,6 @@
 use tpt20_core::DynamicMessage;
 use tpt20_core::ScalarKind;
-use tpt20_core::{
-    DecoderLimits, Field, FieldDescriptor, FieldKind, MessageDescriptor, RawMessage,
-    UnknownFieldPolicy, Value, WireClass,
-};
+use tpt20_core::{DecoderLimits, FieldDescriptor, FieldKind, MessageDescriptor, WireClass};
 
 fn make_user_descriptor() -> MessageDescriptor {
     let mut desc = MessageDescriptor::new();

@@ -1,7 +1,5 @@
 use tpt20_core::ScalarKind;
-use tpt20_core::{
-    Field, FieldDescriptor, FieldKind, MessageDescriptor, RawMessage, Value, WireClass,
-};
+use tpt20_core::{FieldDescriptor, FieldKind, MessageDescriptor, WireClass};
 
 #[test]
 fn text_format_contains_varint() {

@@ -11,7 +11,7 @@ keywords = ["tpt20", "fuzzing", "testing", "security", "rpc-framing"]
 categories = ["development-tools", "testing"]
 
 [[bin]]
-name = "fuzz_target"
+name = "rpc-framing-fuzz"
 path = "fuzz_targets/fuzz_target.rs"
 test = false
 bench = false

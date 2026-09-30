@@ -2,7 +2,7 @@
 
 use tpt20_compat_grpc::{decode_grpc_frame, encode_grpc_frame, from_grpc_status, to_grpc_status};
 use tpt20_compat_protobuf::wire::{decode_protobuf, encode_protobuf};
-use tpt20_core::{Field, RawMessage, UnknownFieldPolicy, Value, WireClass};
+use tpt20_core::{Field, RawMessage, Value, WireClass};
 use tpt20_rpc::Status;
 
 #[test]

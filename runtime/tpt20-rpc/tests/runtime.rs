@@ -16,6 +16,8 @@ use tpt20_transport::{
 fn dec(b: &[u8]) -> Result<Vec<u8>, DecodeError> {
     Ok(b.to_vec())
 }
+// Must take `&Vec<u8>`: the response type is `Vec<u8>`.
+#[allow(clippy::ptr_arg)]
 fn enc(v: &Vec<u8>) -> Vec<u8> {
     v.clone()
 }

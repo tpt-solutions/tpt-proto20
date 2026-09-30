@@ -30,19 +30,24 @@ pub mod stream;
 pub mod trace;
 pub mod wire;
 
+pub use async_trait::async_trait;
 pub use auth::{
     AclAuthorizer, AllowAllAuthorizer, AuthContext, AuthError, Authenticator, Authorizer,
     AuthzError, DenyAllAuthorizer, MetadataAuthenticator, RoleBasedAuthorizer, TokenAuthenticator,
 };
 pub use cancellation::CancellationToken;
+pub use client::Channel;
 pub use compression::CompressionAlgorithm;
 pub use context::RpcContext;
 pub use deadline::Deadline;
 pub use error::{ReceiveError, RpcError, RpcErrorBuilder, SendError};
 pub use extensions::Extensions;
+pub use futures;
+pub use futures::stream::BoxStream;
 pub use metadata::{Metadata, MetadataError, MetadataKey, MetadataValue};
 pub use peer::PeerInfo;
 pub use retry::RetryPolicy;
+pub use server::{ResponseSender, Server, ServerCall, Service};
 pub use status::{Status, UnknownStatusCode};
 pub use stream::{BidiStream, ClientStreamSource, ServerStreamSink, TrySink, TryStream};
 pub use trace::TraceContext;
@@ -58,9 +63,3 @@ mod tests {
         assert!(ctx.extensions().is_empty());
     }
 }
-
-pub use async_trait::async_trait;
-pub use client::Channel;
-pub use futures;
-pub use futures::stream::BoxStream;
-pub use server::{ResponseSender, Server, ServerCall, Service};

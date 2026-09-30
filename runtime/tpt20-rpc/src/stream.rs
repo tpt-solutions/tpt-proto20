@@ -40,7 +40,9 @@ mod tests {
     use super::*;
     #[test]
     fn traits_are_object_safe() {
+        #[allow(dead_code)]
         fn assert_sink<T: TrySink<Item = i32, Error = SendError> + Send + Sync>(_: &T) {}
+        #[allow(dead_code)]
         fn assert_stream<T: TryStream<Item = i32, Error = ReceiveError> + Send + Sync>(_: &T) {}
     }
 }

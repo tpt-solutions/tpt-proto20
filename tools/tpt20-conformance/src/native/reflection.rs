@@ -2,7 +2,7 @@ use tpt20_core::{DecoderLimits, Field, RawMessage, UnknownFieldPolicy, Value, Wi
 use tpt20_descriptor::Descriptor;
 use tpt20_ir as ir;
 use tpt20_reflect::DynamicMessage as ReflectDynamicMessage;
-use tpt20_reflect::{ReflectEnum, ReflectValue};
+use tpt20_reflect::ReflectValue;
 
 fn sample_descriptor() -> Descriptor {
     let pkg = ir::PackageIr {
