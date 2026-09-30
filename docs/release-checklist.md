@@ -46,8 +46,8 @@ see the unchecked items.
 ## 27.7 Tooling
 - [x] check, fmt, lint, diff, gen, decode, encode, JSON conversion, text
       conversion, RPC debugging (`call`, `health`), registry publish/list/get
-- [ ] **conformance execution** — `tpt20 conformance` walks JSON vectors but does
-      not run the `tpt20-conformance` suite
+- [x] conformance execution — `tpt20 conformance` runs the JSON vectors in
+      `conformance/vectors` (52 cases); the Rust suite runs via `cargo test`
 
 ## 27.8 Security
 - [x] limit-enforcement and malformed-input tests; fuzz targets for every

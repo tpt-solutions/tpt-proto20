@@ -1,0 +1,291 @@
+{
+  "suite": "wire_decode",
+  "description": "Native wire format decoding (spec \u00a79): scalars, ordering, malformed input, limits and unknown-field policies. Hand-derived from the tag = (field_id << 3) | wire_class rule.",
+  "cases": [
+    {
+      "name": "varint_150",
+      "kind": "decode",
+      "hex": "089601",
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "varint",
+            "value": "150"
+          }
+        ]
+      }
+    },
+    {
+      "name": "varint_zero",
+      "kind": "decode",
+      "hex": "0800",
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "varint",
+            "value": "0"
+          }
+        ]
+      }
+    },
+    {
+      "name": "varint_max_u64",
+      "kind": "decode",
+      "hex": "08ffffffffffffffffff01",
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "varint",
+            "value": "18446744073709551615"
+          }
+        ]
+      }
+    },
+    {
+      "name": "fixed32_le",
+      "kind": "decode",
+      "hex": "0978563412",
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "fixed32",
+            "value": "305419896"
+          }
+        ]
+      }
+    },
+    {
+      "name": "fixed64_le",
+      "kind": "decode",
+      "hex": "0a0100000000000080",
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "fixed64",
+            "value": "9223372036854775809"
+          }
+        ]
+      }
+    },
+    {
+      "name": "len_hi",
+      "kind": "decode",
+      "hex": "0b026869",
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "len",
+            "value": "6869"
+          }
+        ]
+      }
+    },
+    {
+      "name": "len_empty",
+      "kind": "decode",
+      "hex": "0b00",
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "len",
+            "value": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "field_order_is_preserved",
+      "kind": "decode",
+      "hex": "080113017a0802",
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "varint",
+            "value": "1"
+          },
+          {
+            "id": 2,
+            "class": "len",
+            "value": "7a"
+          },
+          {
+            "id": 1,
+            "class": "varint",
+            "value": "2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "two_byte_tag_field_16",
+      "kind": "decode",
+      "hex": "800105",
+      "expect": {
+        "fields": [
+          {
+            "id": 16,
+            "class": "varint",
+            "value": "5"
+          }
+        ]
+      }
+    },
+    {
+      "name": "nested_payload_is_opaque_len",
+      "kind": "decode",
+      "hex": "0b02082a",
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "len",
+            "value": "082a"
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_message",
+      "kind": "decode",
+      "hex": "",
+      "expect": {
+        "fields": []
+      }
+    },
+    {
+      "name": "truncated_varint_value",
+      "kind": "decode",
+      "hex": "08",
+      "expect_error": "Truncated"
+    },
+    {
+      "name": "truncated_tag",
+      "kind": "decode",
+      "hex": "80",
+      "expect_error": "Truncated"
+    },
+    {
+      "name": "overlong_varint",
+      "kind": "decode",
+      "hex": "08ffffffffffffffffffff01",
+      "expect_error": "VarintOverflow"
+    },
+    {
+      "name": "truncated_fixed32",
+      "kind": "decode",
+      "hex": "09010203",
+      "expect_error": "Truncated"
+    },
+    {
+      "name": "truncated_fixed64",
+      "kind": "decode",
+      "hex": "0a01020304050607",
+      "expect_error": "Truncated"
+    },
+    {
+      "name": "len_past_end",
+      "kind": "decode",
+      "hex": "0b056162",
+      "expect_error": "Truncated"
+    },
+    {
+      "name": "limit_message_bytes",
+      "kind": "decode",
+      "hex": "0896010801",
+      "limits": {
+        "max_message_bytes": 4
+      },
+      "expect_error": "LimitExceeded"
+    },
+    {
+      "name": "limit_field_count_exceeded",
+      "kind": "decode",
+      "hex": "08010802",
+      "limits": {
+        "max_field_count": 1
+      },
+      "expect_error": "FieldCountExceeded"
+    },
+    {
+      "name": "limit_field_count_boundary_ok",
+      "kind": "decode",
+      "hex": "08010802",
+      "limits": {
+        "max_field_count": 2
+      },
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "varint",
+            "value": "1"
+          },
+          {
+            "id": 1,
+            "class": "varint",
+            "value": "2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown_field_policy_fail",
+      "kind": "decode",
+      "hex": "08011002",
+      "policy": "fail",
+      "known_ids": [
+        1
+      ],
+      "expect_error": "UnknownFieldForbidden"
+    },
+    {
+      "name": "unknown_field_policy_discard",
+      "kind": "decode",
+      "hex": "08011002",
+      "policy": "discard",
+      "known_ids": [
+        1
+      ],
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "varint",
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown_field_policy_preserve",
+      "kind": "decode",
+      "hex": "08011002",
+      "policy": "preserve",
+      "known_ids": [
+        1
+      ],
+      "expect": {
+        "fields": [
+          {
+            "id": 1,
+            "class": "varint",
+            "value": "1"
+          },
+          {
+            "id": 2,
+            "class": "varint",
+            "value": "2"
+          }
+        ]
+      }
+    }
+  ]
+}

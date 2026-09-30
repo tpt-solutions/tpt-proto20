@@ -21,6 +21,8 @@
 //! - `reflect`         introspect a descriptor
 //! - `registry publish` publish a descriptor to the local registry
 
+mod conformance;
+
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -1298,67 +1300,23 @@ fn cmd_import_proto(input: PathBuf, output: Option<PathBuf>) -> Result<(), CliEr
 // ---------------------------------------------------------------------------
 
 fn cmd_conformance(directory: Option<PathBuf>, test: Option<String>) -> Result<(), CliError> {
-    let dir = directory.unwrap_or_else(|| PathBuf::from("tests/conformance"));
-    if !dir.exists() {
-        println!("no conformance directory at {}", dir.display());
-        return Ok(());
+    let dir = directory.unwrap_or_else(|| PathBuf::from("conformance/vectors"));
+    if !dir.is_dir() {
+        return Err(CliError::Usage(format!(
+            "no conformance vectors at {} (use --directory)",
+            dir.display()
+        )));
     }
-
-    let entries = fs::read_dir(&dir).map_err(CliError::Io)?;
-    let mut passed = 0usize;
-    let mut failed = 0usize;
-
-    for entry in entries {
-        let entry = entry.map_err(CliError::Io)?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        if let Some(ref t) = test {
-            if name != *t {
-                continue;
-            }
-        }
-
-        match run_conformance_test(&path) {
-            Ok(()) => {
-                println!("PASS {}", name);
-                passed += 1;
-            }
-            Err(e) => {
-                eprintln!("FAIL {}: {}", name, e);
-                failed += 1;
-            }
-        }
+    let summary = conformance::run(&dir, test.as_deref()).map_err(CliError::Parse)?;
+    println!("\n{} passed, {} failed", summary.passed, summary.failed);
+    if summary.passed + summary.failed == 0 {
+        return Err(CliError::Usage("no conformance cases matched".into()));
     }
-
-    println!("\n{} passed, {} failed", passed, failed);
-    if failed > 0 {
-        Err(CliError::Diagnostics("conformance tests failed".into()))
+    if summary.failed > 0 {
+        Err(CliError::Diagnostics("conformance vectors failed".into()))
     } else {
         Ok(())
     }
-}
-
-fn run_conformance_test(path: &Path) -> Result<(), CliError> {
-    let raw = fs::read_to_string(path)?;
-    let _test: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| CliError::Parse(format!("invalid test json: {e}")))?;
-
-    if let Some(obj) = _test.as_object() {
-        if let Some(binary) = obj.get("binary").and_then(|v| v.as_str()) {
-            let bytes = hex::decode(binary).map_err(|e| CliError::Parse(e.to_string()))?;
-            tpt20_core::RawMessage::decode(
-                &bytes,
-                &tpt20_core::DecoderLimits::default(),
-                tpt20_core::UnknownFieldPolicy::Preserve,
-            )
-            .map_err(|e| CliError::Parse(e.to_string()))?;
-        }
-    }
-
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------

@@ -541,8 +541,7 @@ diagram in spec §5 and the repo layout in spec §26.
 - [x] CLI command: `tpt20 text-to-binary` (schema-driven via `tpt20-text`)
 - [x] CLI command: `tpt20 binary-to-text` (schema-driven via `tpt20-text`)
 - [x] CLI command: `tpt20 import-proto`
-- [ ] CLI command: `tpt20 conformance` (exists but only decodes a `"binary"` hex field
-      from a JSON dir — does not invoke the real `tpt20-conformance` suite from Phase 17)
+- [x] CLI command: `tpt20 conformance` (runs the JSON vectors in `conformance/vectors`)
 - [x] CLI command: `tpt20 call` (RPC debugger over the HTTP/2 transport)
   - [x] JSON input support
   - [x] Binary input support

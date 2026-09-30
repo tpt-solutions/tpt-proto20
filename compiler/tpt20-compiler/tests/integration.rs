@@ -103,6 +103,22 @@ fn oneof_member_must_be_singular() {
 }
 
 #[test]
+fn rejects_duplicate_enum_value_names() {
+    let diags = check("enum E { A = 0; A = 1; }", Some("e.tpt"));
+    assert!(diags.iter().any(|d| d.code == "E0003"), "{diags:?}");
+    // Distinct names sharing a number need `alias`.
+    let diags = check("enum E { A = 0; B = 0; }", Some("e.tpt"));
+    assert!(diags.iter().any(|d| d.code == "E0002"), "{diags:?}");
+    let diags = check("enum E { A = 0; B alias = 0; }", Some("e.tpt"));
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.severity != tpt20_compiler::Severity::Error),
+        "{diags:?}"
+    );
+}
+
+#[test]
 fn compat_added_field_is_safe() {
     let old = "message User { 1: id int64; }";
     let new = "message User { 1: id int64; 2: name string; }";

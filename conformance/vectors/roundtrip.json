@@ -1,0 +1,26 @@
+{
+  "suite": "roundtrip",
+  "description": "decode then encode reproduces canonical-order input byte for byte",
+  "cases": [
+    {
+      "name": "varint_and_len",
+      "kind": "roundtrip",
+      "hex": "08960113026869"
+    },
+    {
+      "name": "fixed_widths",
+      "kind": "roundtrip",
+      "hex": "09785634120a0100000000000080"
+    },
+    {
+      "name": "nested",
+      "kind": "roundtrip",
+      "hex": "0b02082a"
+    },
+    {
+      "name": "empty",
+      "kind": "roundtrip",
+      "hex": ""
+    }
+  ]
+}

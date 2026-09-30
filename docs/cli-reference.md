@@ -178,14 +178,14 @@ for supported/unsupported proto features.
 tpt20 conformance [--directory DIR] [--test NAME]
 ```
 
-> **Does not run the real conformance suite.** This walks a directory
-> (default `tests/conformance`) of `.json` files, and for each one that has a
-> top-level `"binary"` string field, hex-decodes it and attempts to
-> wire-decode it with default limits — that's the entire test. It does not
-> invoke `tools/tpt20-conformance` (the actual native/compatibility
-> conformance suite described in spec §22). Use `cargo test -p
-> tpt20-conformance` directly for real conformance coverage (subject to the
-> compile-status caveats in `todo.md` Phase 17).
+Runs the language-neutral JSON vectors in `DIR` (default
+`conformance/vectors`; see [`conformance/README.md`](../conformance/README.md))
+and prints `PASS`/`FAIL suite/case` per case plus a summary. The vectors cover
+wire decoding (scalars, ordering, malformed input, limits, unknown-field
+policies), canonical encoding, round trips, the text format, and schema
+diagnostics. `--test` selects a file, suite or single case by name. Exit codes:
+`0` all passed, `1` at least one failed, `2` no vectors / nothing matched.
+The larger Rust suite runs with `cargo test -p tpt20-conformance`.
 
 ## `call`
 
@@ -304,7 +304,7 @@ time yet (`tpt20 diff` checks two schema files directly).
 | `decode` / `encode` / `json-to-binary` / `binary-to-json` | Functional; schema-free (field-ID-keyed), except `decode --schema --message` which is schema-aware |
 | `text-to-binary` / `binary-to-text` | Fully functional, schema-driven text format |
 | `import-proto` | Functional; emits IR JSON, not `.tpt` source |
-| `conformance` | Stub — does not run the real suite |
+| `conformance` | Functional: runs the JSON conformance vectors in `conformance/vectors` |
 | `call` | Fully functional over HTTP/2 (TLS, metadata, deadline, streaming, compression) |
 | `health` | Fully functional (`tpt20.health.v1.Health/Check`) |
 | `reflect-remote` | Fully functional (`tpt20.reflection.v1.Reflection`) |

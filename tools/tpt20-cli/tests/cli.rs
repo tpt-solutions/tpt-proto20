@@ -536,3 +536,59 @@ fn builtin_health_and_reflection_services_work_with_the_cli() {
     assert_eq!(o.status.code(), Some(1));
     assert!(stderr(&o).contains("NOT_FOUND"), "{}", stderr(&o));
 }
+
+fn vectors_dir() -> String {
+    format!("{}/../../conformance/vectors", env!("CARGO_MANIFEST_DIR"))
+}
+
+#[test]
+fn conformance_runs_the_shipped_vectors() {
+    let o = tpt20(&["conformance", "-d", &vectors_dir()]);
+    assert!(o.status.success(), "{}{}", stdout(&o), stderr(&o));
+    let out = stdout(&o);
+    assert!(out.contains("PASS wire_decode/varint_150"), "{out}");
+    assert!(
+        out.contains("PASS text_format/nested_message_and_map"),
+        "{out}"
+    );
+    assert!(out.contains(" 0 failed"), "{out}");
+
+    // Filtering by suite or case name.
+    let o = tpt20(&[
+        "conformance",
+        "-d",
+        &vectors_dir(),
+        "-t",
+        "canonical_encoding",
+    ]);
+    assert!(o.status.success());
+    assert!(!stdout(&o).contains("wire_decode"), "{}", stdout(&o));
+    let o = tpt20(&["conformance", "-d", &vectors_dir(), "-t", "no_such_case"]);
+    assert_eq!(
+        o.status.code(),
+        Some(2),
+        "matching nothing is a usage error"
+    );
+}
+
+#[test]
+fn conformance_reports_failing_cases_with_exit_code_1() {
+    let bad = tmp(
+        "vectors.json",
+        br#"{"suite":"bad","cases":[
+            {"name":"wrong_fields","kind":"decode","hex":"0801","expect":{"fields":[{"id":1,"class":"varint","value":"2"}]}},
+            {"name":"wrong_error","kind":"decode","hex":"08","expect_error":"VarintOverflow"},
+            {"name":"not_canonical","kind":"canonical","fields":[{"id":2,"class":"varint","value":"1"},{"id":1,"class":"varint","value":"1"}],"hex":"10010801"},
+            {"name":"good","kind":"roundtrip","hex":"0801"}
+        ]}"#,
+    );
+    let dir = bad.parent().unwrap().to_str().unwrap().to_string();
+    let o = tpt20(&["conformance", "-d", &dir]);
+    assert_eq!(o.status.code(), Some(1));
+    let err = stderr(&o);
+    for case in ["wrong_fields", "wrong_error", "not_canonical"] {
+        assert!(err.contains(&format!("FAIL bad/{case}")), "{err}");
+    }
+    assert!(stdout(&o).contains("PASS bad/good"));
+    assert!(stdout(&o).contains("1 passed, 3 failed"), "{}", stdout(&o));
+}
