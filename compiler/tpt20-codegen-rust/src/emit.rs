@@ -1617,12 +1617,12 @@ r#"        for (k, v) in &self.{fname} {{
         let mut s = String::new();
         s.push_str(&format!("impl {flat} {{\n"));
         s.push_str(
-"    /// Converts to a JSON value (spec \u{a7}14.2): original field names,\n    /// 64-bit ints as strings, bytes as base64, defaults omitted.\n    pub fn to_json_value(&self) -> Result<__json::Value, __json::JsonError> {\n        let mut obj = __json::json::Map::new();\n",
+"    /// Converts to a JSON value (spec \u{a7}14.2): original field names,\n    /// 64-bit ints as strings, bytes as base64, defaults omitted.\n    pub fn to_json_value(&self) -> Result<__json::Value, __json::JsonError> {\n        self.to_json_value_with(&__json::JsonOptions::default())\n    }\n\n    /// Like [`to_json_value`](Self::to_json_value) with explicit options.\n    pub fn to_json_value_with(&self, opts: &__json::JsonOptions) -> Result<__json::Value, __json::JsonError> {\n        let _ = opts;\n        let mut obj = __json::json::Map::new();\n",
         );
         self.push_json_inserts(scope, msg, ctx, &mut s);
         self.push_json_oneof_inserts(scope, msg, ctx, &mut s);
         s.push_str(
-"        Ok(__json::Value::Object(obj))\n    }\n\n    /// Serializes to a JSON string.\n    pub fn to_json(&self) -> Result<String, __json::JsonError> {\n        let v = self.to_json_value()?;\n        __json::json::to_string(&v).map_err(Into::into)\n    }\n",
+"        Ok(__json::Value::Object(obj))\n    }\n\n    /// Serializes to a JSON string.\n    pub fn to_json(&self) -> Result<String, __json::JsonError> {\n        let v = self.to_json_value()?;\n        __json::json::to_string(&v).map_err(Into::into)\n    }\n\n    /// Serializes to a JSON string with explicit options.\n    pub fn to_json_with(&self, opts: &__json::JsonOptions) -> Result<String, __json::JsonError> {\n        let v = self.to_json_value_with(opts)?;\n        __json::json::to_string(&v).map_err(Into::into)\n    }\n",
         );
         s.push_str(&self.json_from_body(scope, msg, ctx));
         s.push_str("}\n");
@@ -1640,7 +1640,7 @@ r#"        for (k, v) in &self.{fname} {{
         use ir::FieldLabelIr;
         for f in &msg.fields {
             let fname = naming::field_ident(&f.name);
-            let name_lit = format!("{:?}", f.name);
+            let name_lit = format!("opts.key({:?}, {:?})", f.name, naming::lower_camel(&f.name));
             match &f.label {
                 FieldLabelIr::Singular(t) => {
                     let kind = self.resolve_ref(scope, &t.path).1;
@@ -1649,12 +1649,12 @@ r#"        for (k, v) in &self.{fname} {{
                             let jt = expr::json_to(t.path[0].as_str(), "v");
                             match f.presence {
                                 ir::Presence::Explicit => s.push_str(&format!(
-"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}.to_string(), {jt});\n        }}\n"
+"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}, {jt});\n        }}\n"
                                 )),
                                 ir::Presence::Implicit => {
                                     let cond = Self::skip_cond(t.path[0].as_str(), "v");
                                     s.push_str(&format!(
-"        let v = &self.{fname};\n        if {cond} {{\n            obj.insert({name_lit}.to_string(), {jt});\n        }}\n"
+"        let v = &self.{fname};\n        if opts.emit_defaults || {cond} {{\n            obj.insert({name_lit}, {jt});\n        }}\n"
                                     ));
                                 }
                             }
@@ -1663,22 +1663,22 @@ r#"        for (k, v) in &self.{fname} {{
                             let ety = self.resolve_ref(scope, &t.path).0;
                             match f.presence {
                                 ir::Presence::Explicit => s.push_str(&format!(
-"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}.to_string(), {ety}::json_name(v));\n        }}\n"
+"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}, {ety}::json_name(v));\n        }}\n"
                                 )),
                                 ir::Presence::Implicit => s.push_str(&format!(
-"        if self.{fname}.to_i32() != 0 {{\n            obj.insert({name_lit}.to_string(), {ety}::json_name(&self.{fname}));\n        }}\n"
+"        if opts.emit_defaults || self.{fname}.to_i32() != 0 {{\n            obj.insert({name_lit}, {ety}::json_name(&self.{fname}));\n        }}\n"
                                 )),
                             }
                         }
                         TypeKind::Message => s.push_str(&format!(
-"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}.to_string(), v.to_json_value()?);\n        }}\n"
+"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}, v.to_json_value_with(opts)?);\n        }}\n"
                         )),
                     }
                 }
                 FieldLabelIr::Repeated(t) => {
                     let mapper = result_expr(&self.json_mapper(scope, t.path[0].as_str(), t));
                     s.push_str(&format!(
-"        if !self.{fname}.is_empty() {{\n            let arr = self.{fname}.iter().map(|v| {mapper}).collect::<Result<Vec<__json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}.to_string(), __json::Value::Array(arr));\n        }}\n"
+"        if opts.emit_defaults || !self.{fname}.is_empty() {{\n            let arr = self.{fname}.iter().map(|v| {mapper}).collect::<Result<Vec<__json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}, __json::Value::Array(arr));\n        }}\n"
                     ));
                 }
                 FieldLabelIr::Map { key, value } => {
@@ -1694,7 +1694,7 @@ r#"        for (k, v) in &self.{fname} {{
                         ),
                     };
                     s.push_str(&format!(
-"        if !self.{fname}.is_empty() {{\n            let mobj = self\n                .{fname}\n                .iter()\n                .map(|(k, v)| {vmapper})\n                .collect::<Result<__json::json::Map<String, __json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}.to_string(), __json::Value::Object(mobj));\n        }}\n"
+"        if opts.emit_defaults || !self.{fname}.is_empty() {{\n            let mobj = self\n                .{fname}\n                .iter()\n                .map(|(k, v)| {vmapper})\n                .collect::<Result<__json::json::Map<String, __json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}, __json::Value::Object(mobj));\n        }}\n"
                     ));
                 }
             }
@@ -1708,7 +1708,7 @@ r#"        for (k, v) in &self.{fname} {{
             TypeKind::Enum { .. } => {
                 format!("{}::json_name(v)", self.resolve_ref(scope, &t.path).0)
             }
-            TypeKind::Message => "v.to_json_value()?".to_string(),
+            TypeKind::Message => "v.to_json_value_with(opts)?".to_string(),
         }
     }
 
@@ -1729,8 +1729,9 @@ r#"        for (k, v) in &self.{fname} {{
                 let t = mf.label.unwrap_type();
                 let val_expr = self.json_mapper(scope, t.path[0].as_str(), t);
                 s.push_str(&format!(
-"            Some({oty}::{variant}(v)) => {{\n                obj.insert({:?}.to_string(), {val_expr});\n            }}\n",
-                    mf.name
+"            Some({oty}::{variant}(v)) => {{\n                obj.insert(opts.key({:?}, {:?}), {val_expr});\n            }}\n",
+                    mf.name,
+                    naming::lower_camel(&mf.name)
                 ));
             }
             s.push_str("            None => {}\n        }\n");
@@ -1742,7 +1743,7 @@ r#"        for (k, v) in &self.{fname} {{
         use ir::FieldLabelIr;
         let mut b = String::new();
         b.push_str(
-"    /// Parses from a parsed JSON value.\n    pub fn from_json_value(v: &__json::Value) -> Result<Self, __json::JsonError> {\n        let obj = v\n            .as_object()\n            .ok_or(__json::JsonError::TypeMismatch { expected: \"object\" })?;\n        let mut out_msg = Self::default();\n",
+"    /// Parses from a parsed JSON value.\n    pub fn from_json_value(v: &__json::Value) -> Result<Self, __json::JsonError> {\n        Self::from_json_value_with(v, &__json::JsonOptions::default())\n    }\n\n    /// Parses from a parsed JSON value with explicit options.\n    pub fn from_json_value_with(v: &__json::Value, opts: &__json::JsonOptions) -> Result<Self, __json::JsonError> {\n        let _ = opts;\n        let obj = v\n            .as_object()\n            .ok_or(__json::JsonError::TypeMismatch { expected: \"object\" })?;\n        let mut out_msg = Self::default();\n",
         );
         for f in &msg.fields {
             let fname = naming::field_ident(&f.name);
@@ -1771,8 +1772,10 @@ r#"        for (k, v) in &self.{fname} {{
                         }
                         TypeKind::Message => {
                             let ty = self.owned_type(scope, &t.path);
-                            let value =
-                                self.boxed_expr(f.id, &format!("{ty}::from_json_value(jv)?"));
+                            let value = self.boxed_expr(
+                                f.id,
+                                &format!("{ty}::from_json_value_with(jv, opts)?"),
+                            );
                             b.push_str(&format!(
 "        if let Some(jv) = __json::get_field(obj, {names}) {{\n            out_msg.{fname} = Some({value});\n        }}\n"
                             ));
@@ -1795,8 +1798,21 @@ r#"        for (k, v) in &self.{fname} {{
             }
         }
         b.push_str(&self.json_oneof_pulls(scope, msg, ctx));
+        let mut known: Vec<String> = Vec::new();
+        for f in msg
+            .fields
+            .iter()
+            .chain(msg.oneofs.iter().flat_map(|o| o.fields.iter()))
+        {
+            known.push(format!("{:?}", f.name));
+            known.push(format!("{:?}", naming::lower_camel(&f.name)));
+        }
+        b.push_str(&format!(
+"        if opts.reject_unknown_fields {{\n            const KNOWN: &[&str] = &[{}];\n            if let Some(k) = obj.keys().find(|k| !KNOWN.contains(&k.as_str())) {{\n                return Err(__json::JsonError::UnknownField(k.clone()));\n            }}\n        }}\n",
+            known.join(", ")
+        ));
         b.push_str(
-"        Ok(out_msg)\n    }\n\n    /// Parses from a JSON string.\n    pub fn from_json(json: &str) -> Result<Self, __json::JsonError> {\n        let v: __json::Value = __json::json::from_str(json)?;\n        Self::from_json_value(&v)\n    }\n",
+"        Ok(out_msg)\n    }\n\n    /// Parses from a JSON string.\n    pub fn from_json(json: &str) -> Result<Self, __json::JsonError> {\n        let v: __json::Value = __json::json::from_str(json)?;\n        Self::from_json_value(&v)\n    }\n\n    /// Parses from a JSON string with explicit options.\n    pub fn from_json_with(json: &str, opts: &__json::JsonOptions) -> Result<Self, __json::JsonError> {\n        let v: __json::Value = __json::json::from_str(json)?;\n        Self::from_json_value_with(&v, opts)\n    }\n",
         );
         b
     }
@@ -1822,7 +1838,7 @@ r#"        for (k, v) in &self.{fname} {{
                     TypeKind::Message => self.boxed_expr(
                         mf.id,
                         &format!(
-                            "{}::from_json_value(jv)?",
+                            "{}::from_json_value_with(jv, opts)?",
                             self.resolve_ref(scope, &t.path).0
                         ),
                     ),
@@ -1843,7 +1859,7 @@ r#"        for (k, v) in &self.{fname} {{
                 format!("{}::from_json(item)", self.resolve_ref(scope, &t.path).0)
             }
             TypeKind::Message => format!(
-                "{}::from_json_value(item)",
+                "{}::from_json_value_with(item, opts)",
                 self.resolve_ref(scope, &t.path).0
             ),
         }

@@ -323,12 +323,12 @@ diagram in spec §5 and the repo layout in spec §26.
 - [x] JSON mapping
   - [x] Support original field names on decode
   - [x] Support lowerCamelCase field names on decode
-  - [ ] Configurable field-name style on encode (always emits original names)
+  - [x] Configurable field-name style on encode (`JsonOptions::field_names`)
   - [x] 64-bit integers representable as JSON strings
   - [x] Bytes fields as base64
   - [x] Enums representable by name or by number
-  - [ ] Configurable default-value emission (defaults always omitted)
-  - [ ] Configurable unknown-field handling
+  - [x] Configurable default-value emission (`JsonOptions::emit_defaults`)
+  - [x] Configurable unknown-field handling (`JsonOptions::reject_unknown_fields`)
 - [x] Text format (`tpt20-text`: schema-driven `TextFormat::print` / `parse`)
   - [x] Printer (message → human-readable text, matching spec §14.3 example)
   - [x] Parser (text → message)

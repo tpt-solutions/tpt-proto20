@@ -270,3 +270,18 @@ oneof message payloads that sit on a cycle are emitted as `Option<Box<T>>` /
 `Box<T>` so the generated types have finite size; repeated and map fields
 already heap-allocate and are unchanged. Borrowed views follow the same rule.
 Nesting is bounded at decode time by `DecoderLimits::max_depth`.
+
+## JSON options
+
+Every generated message has `to_json_with(&JsonOptions)` /
+`to_json_value_with` and `from_json_with` / `from_json_value_with` next to the
+plain `to_json` / `from_json` (which use `JsonOptions::default()`):
+
+- `field_names: FieldNameStyle::{Original, LowerCamel}` — member spelling on
+  encode (decode always accepts both);
+- `emit_defaults: bool` — also emit zero/empty implicit-presence fields, empty
+  lists and empty maps (absent explicit-presence and message fields stay out);
+- `reject_unknown_fields: bool` — decode fails with `JsonError::UnknownField`
+  for members that match no field (either spelling).
+
+Options propagate into nested messages.

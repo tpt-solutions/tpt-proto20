@@ -475,3 +475,105 @@ mod recursive {
         assert!(Expr::decode_borrowed(&bytes).is_ok());
     }
 }
+
+#[cfg(test)]
+mod json_options {
+    use super::generated::{Address, Outer, OuterContact};
+    use tpt20_json::{FieldNameStyle, JsonError, JsonOptions};
+
+    fn sample() -> Outer {
+        Outer {
+            id: 7,
+            tags: vec!["a".into()],
+            contact: Some(OuterContact::EmailAddr("x@y".into())),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn default_options_match_plain_json() {
+        let o = sample();
+        assert_eq!(
+            o.to_json_with(&JsonOptions::default()).unwrap(),
+            o.to_json().unwrap()
+        );
+    }
+
+    #[test]
+    fn lower_camel_names_on_encode_and_decode_accepts_both() {
+        let o = sample();
+        let opts = JsonOptions {
+            field_names: FieldNameStyle::LowerCamel,
+            ..Default::default()
+        };
+        let v: tpt20_json::json::Value =
+            tpt20_json::json::from_str(&o.to_json_with(&opts).unwrap()).unwrap();
+        assert!(v.get("emailAddr").is_some(), "{v}");
+        assert!(v.get("email_addr").is_none());
+        // Round trip through the camel spelling.
+        let back = Outer::from_json(&v.to_string()).unwrap();
+        assert_eq!(back.contact, o.contact);
+    }
+
+    #[test]
+    fn defaults_are_emitted_on_request() {
+        let o = Outer::default();
+        let plain: tpt20_json::json::Value =
+            tpt20_json::json::from_str(&o.to_json().unwrap()).unwrap();
+        assert_eq!(plain, tpt20_json::json::json!({}));
+        let opts = JsonOptions {
+            emit_defaults: true,
+            ..Default::default()
+        };
+        let full: tpt20_json::json::Value =
+            tpt20_json::json::from_str(&o.to_json_with(&opts).unwrap()).unwrap();
+        assert_eq!(full["id"], "0");
+        assert_eq!(full["name"], "");
+        assert_eq!(full["tags"], tpt20_json::json::json!([]));
+        assert_eq!(full["attrs"], tpt20_json::json::json!({}));
+        // Absent explicit-presence fields stay absent.
+        assert!(full.get("email").is_none());
+        // Emitted defaults decode back to the same message.
+        assert_eq!(Outer::from_json(&full.to_string()).unwrap(), o);
+    }
+
+    #[test]
+    fn unknown_members_are_ignored_unless_rejected() {
+        let json = r#"{"id":"3","bogus":1}"#;
+        assert_eq!(Outer::from_json(json).unwrap().id, 3);
+        let strict = JsonOptions {
+            reject_unknown_fields: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            Outer::from_json_with(json, &strict),
+            Err(JsonError::UnknownField("bogus".into()))
+        );
+        assert_eq!(
+            Outer::from_json_with(r#"{"id":"3","emailAddr":"a"}"#, &strict)
+                .unwrap()
+                .id,
+            3
+        );
+    }
+
+    #[test]
+    fn options_apply_to_nested_messages() {
+        let o = Outer {
+            home: Some(Address::default()),
+            ..Default::default()
+        };
+        let opts = JsonOptions {
+            emit_defaults: true,
+            ..Default::default()
+        };
+        let v: tpt20_json::json::Value =
+            tpt20_json::json::from_str(&o.to_json_with(&opts).unwrap()).unwrap();
+        assert_eq!(v["home"]["street"], "");
+        let strict = JsonOptions {
+            reject_unknown_fields: true,
+            ..Default::default()
+        };
+        assert!(Outer::from_json_with(r#"{"home":{"zip":"1"}}"#, &strict).is_err());
+    }
+}

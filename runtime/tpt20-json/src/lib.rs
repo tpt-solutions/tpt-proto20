@@ -37,6 +37,45 @@ pub enum JsonError {
     /// An enum name or number was not part of a closed enum.
     #[error("unknown enum value: {0}")]
     InvalidEnum(String),
+
+    /// The input contained a member the schema does not define (only
+    /// reported with [`JsonOptions::reject_unknown_fields`]).
+    #[error("unknown field: {0}")]
+    UnknownField(String),
+}
+
+/// How field names are spelled when encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FieldNameStyle {
+    /// The names as written in the schema (default).
+    #[default]
+    Original,
+    /// `lowerCamelCase` aliases.
+    LowerCamel,
+}
+
+/// Options for generated `to_json_with` / `from_json_with` methods.
+///
+/// The defaults reproduce the plain `to_json` / `from_json` behavior:
+/// original names, default values omitted, unknown members ignored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct JsonOptions {
+    /// Spelling of field names on encode. Decode accepts both spellings.
+    pub field_names: FieldNameStyle,
+    /// Emit fields that hold their default (zero/empty) value.
+    pub emit_defaults: bool,
+    /// Fail decoding on members that match no schema field.
+    pub reject_unknown_fields: bool,
+}
+
+impl JsonOptions {
+    /// Returns the member name to emit for a field.
+    pub fn key(&self, original: &str, lower_camel: &str) -> String {
+        match self.field_names {
+            FieldNameStyle::Original => original.to_string(),
+            FieldNameStyle::LowerCamel => lower_camel.to_string(),
+        }
+    }
 }
 
 impl From<serde_json::Error> for JsonError {
