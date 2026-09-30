@@ -49,7 +49,7 @@ orders of magnitude, not guarantees; re-run on your hardware).
 
 | Benchmark | Time |
 |---|---|
-| unary, in-process | 71 µs |
+| unary, in-process (observability inert / with metrics+logger) | 71 µs / 72.5 µs |
 | unary, HTTP/2 (h2c, pooled connection) | 280 µs |
 | unary, HTTP/2 + TLS 1.3 + ALPN (pooled connection) | 281 µs |
 | server streaming of 100 messages, in-process / h2c | 181 µs / 609 µs |
@@ -77,8 +77,12 @@ orders of magnitude, not guarantees; re-run on your hardware).
   ~4 µs over HTTP/2 once a stream is open. `Http2Transport` multiplexes all
   calls over one pooled connection, so TLS costs a handshake once, not per
   call (unary over TLS is now indistinguishable from plain h2c).
-- **Low-overhead observability:** the `tpt20-observability` hooks are not
-  on the benchmarked paths, so this goal is **not yet measured** here.
+- **Low-overhead observability:** the RPC runtime reports every call through
+  the `tpt20-observability` hooks. With nothing registered the instrumentation
+  is inert (an atomic load per call). With a metrics backend *and* a logger
+  registered (`benches/benches/rpc_observed.rs`, atomic counters) an
+  in-process unary call costs 72.5 µs versus 70.8 µs without — about 2 %, within
+  run-to-run noise.
 
 ## Optimization backlog (from the profiling pass)
 

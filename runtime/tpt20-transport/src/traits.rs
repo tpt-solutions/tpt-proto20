@@ -86,6 +86,14 @@ pub trait CallSender: Send + Sync {
     /// Sends the trailing metadata and ends the response. Nothing may be
     /// sent afterwards.
     async fn send_trailers(&mut self, trailers: Metadata) -> Result<(), TransportError>;
+
+    /// A future that completes when the peer is gone (the client dropped the
+    /// call, reset the stream, or the connection closed). It also completes
+    /// once the call has ended normally, so it must only be used to cancel
+    /// work that is still running. The default never completes.
+    fn closed_signal(&self) -> futures::future::BoxFuture<'static, ()> {
+        Box::pin(futures::future::pending())
+    }
 }
 
 /// A server-side call split into independently usable halves, so a handler

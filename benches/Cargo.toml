@@ -15,6 +15,7 @@ tpt20-json = { path = "../runtime/tpt20-json" }
 tpt20-rpc = { path = "../runtime/tpt20-rpc", features = ["http2"] }
 tpt20-transport = { path = "../runtime/tpt20-transport", features = ["http2", "tls"] }
 tpt20-reflect = { path = "../runtime/tpt20-reflect" }
+tpt20-observability = { path = "../runtime/tpt20-observability" }
 tpt20-descriptor = { path = "../compiler/tpt20-descriptor" }
 tpt20-compiler = { path = "../compiler/tpt20-compiler" }
 tokio = { version = "1", features = ["full"] }
@@ -34,4 +35,8 @@ harness = false
 
 [[bench]]
 name = "rpc"
+harness = false
+
+[[bench]]
+name = "rpc_observed"
 harness = false

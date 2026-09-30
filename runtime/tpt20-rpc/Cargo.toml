@@ -16,6 +16,7 @@ tpt20-core = { path = "../tpt20-core" }
 tpt20-stdlib = { path = "../tpt20-stdlib" }
 tpt20-transport = { path = "../tpt20-transport" }
 tpt20-json = { path = "../tpt20-json" }
+tpt20-observability = { path = "../tpt20-observability" }
 futures = "0.3"
 async-trait = "0.1"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
@@ -26,5 +27,6 @@ default = []
 http2 = ["tpt20-transport/http2"]
 
 [dev-dependencies]
+tpt20-observability = { path = "../tpt20-observability" }
 tokio = { version = "1", features = ["full"] }
 tpt20-transport = { path = "../tpt20-transport", features = ["http2"] }

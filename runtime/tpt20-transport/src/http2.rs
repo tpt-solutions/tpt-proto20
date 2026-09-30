@@ -1039,11 +1039,13 @@ async fn handle_stream<F>(
             }
         }
     });
+    let (closed_tx, closed_rx) = watch::channel(false);
     tokio::spawn(write_response(
         send,
         response_rx,
         trailers_rx,
         response_codec,
+        closed_tx,
     ));
 
     let call = IncomingHttp2Call {
@@ -1053,6 +1055,7 @@ async fn handle_stream<F>(
         response_tx: Some(response_tx),
         trailers_tx: Some(trailers_tx),
         request_rx,
+        closed: closed_rx,
     };
     let _ = handler(call).await;
 }
@@ -1062,8 +1065,19 @@ async fn write_response(
     mut messages: mpsc::Receiver<Result<FramedMessage, TransportError>>,
     trailers: oneshot::Receiver<Metadata>,
     codec: Codec,
+    closed: watch::Sender<bool>,
 ) {
-    while let Some(item) = messages.recv().await {
+    loop {
+        // Watch for the client resetting the stream even while the handler
+        // has nothing to send, so it can be cancelled promptly.
+        let item = tokio::select! {
+            item = messages.recv() => item,
+            _ = poll_fn(|cx| send.poll_reset(cx)) => {
+                let _ = closed.send(true);
+                return;
+            }
+        };
+        let Some(item) = item else { break };
         match item {
             Ok(message) => {
                 // Handlers send plain payloads; compression (when negotiated)
@@ -1073,6 +1087,7 @@ async fn write_response(
                     return;
                 };
                 if write_all(&mut send, frame).await.is_err() {
+                    let _ = closed.send(true);
                     return;
                 }
             }
@@ -1108,6 +1123,7 @@ pub struct IncomingHttp2Call {
     response_tx: Option<mpsc::Sender<Result<FramedMessage, TransportError>>>,
     trailers_tx: Option<oneshot::Sender<Metadata>>,
     request_rx: mpsc::Receiver<Vec<u8>>,
+    closed: watch::Receiver<bool>,
 }
 
 impl IncomingHttp2Call {
@@ -1155,6 +1171,8 @@ impl IncomingHttp2Call {
 struct Http2Sender {
     response_tx: Option<mpsc::Sender<Result<FramedMessage, TransportError>>>,
     trailers_tx: Option<oneshot::Sender<Metadata>>,
+    /// Changes (or closes) when the response writer sees the stream reset.
+    closed: watch::Receiver<bool>,
 }
 
 #[async_trait]
@@ -1179,6 +1197,13 @@ impl crate::traits::CallSender for Http2Sender {
         self.response_tx = None;
         Ok(())
     }
+
+    fn closed_signal(&self) -> futures::future::BoxFuture<'static, ()> {
+        let mut rx = self.closed.clone();
+        Box::pin(async move {
+            let _ = rx.changed().await;
+        })
+    }
 }
 
 impl crate::traits::IncomingCall for IncomingHttp2Call {
@@ -1192,6 +1217,7 @@ impl crate::traits::IncomingCall for IncomingHttp2Call {
             sender: Box::new(Http2Sender {
                 response_tx: self.response_tx,
                 trailers_tx: self.trailers_tx,
+                closed: self.closed,
             }),
         }
     }

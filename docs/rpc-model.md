@@ -232,7 +232,9 @@ is a thin typed layer over these. Conventions: method path
 `<package>.<Service>/<Method>`; final status in the `grpc-status` /
 `grpc-message` (percent-encoded) trailers; deadline in `grpc-timeout`;
 binary metadata keys end in `-bin` and travel as base64. The server enforces
-the client's deadline, cancels the call context when the client disconnects,
+the client's deadline and, when the client goes away (cancels, drops the call,
+resets the stream), cancels the call context **and drops the handler future**
+so abandoned work stops,
 and always terminates a call with a status (handler panics become `INTERNAL`).
 
 QUIC/HTTP3 is an empty feature flag with no implementation yet.

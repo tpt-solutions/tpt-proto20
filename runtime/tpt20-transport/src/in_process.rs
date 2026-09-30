@@ -35,6 +35,8 @@ pub struct IncomingRequest {
     response_tx: mpsc::UnboundedSender<Result<FramedMessage, TransportError>>,
     trailers_tx: Option<oneshot::Sender<Result<Metadata, TransportError>>>,
     request_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    /// Resolves (with an error) when the client drops its response stream.
+    client_gone: tokio::sync::watch::Receiver<()>,
 }
 
 impl IncomingRequest {
@@ -67,6 +69,7 @@ impl IncomingRequest {
 struct InProcessSender {
     response_tx: Option<mpsc::UnboundedSender<Result<FramedMessage, TransportError>>>,
     trailers_tx: Option<oneshot::Sender<Result<Metadata, TransportError>>>,
+    client_gone: tokio::sync::watch::Receiver<()>,
 }
 
 #[async_trait]
@@ -91,6 +94,15 @@ impl crate::traits::CallSender for InProcessSender {
         self.response_tx = None;
         Ok(())
     }
+
+    fn closed_signal(&self) -> futures::future::BoxFuture<'static, ()> {
+        let mut rx = self.client_gone.clone();
+        Box::pin(async move {
+            // The sender lives in the client's response stream; it is dropped
+            // with it, which is what `changed()` reports as an error.
+            let _ = rx.changed().await;
+        })
+    }
 }
 
 impl crate::traits::IncomingCall for IncomingRequest {
@@ -104,6 +116,7 @@ impl crate::traits::IncomingCall for IncomingRequest {
             sender: Box::new(InProcessSender {
                 response_tx: Some(self.response_tx),
                 trailers_tx: self.trailers_tx,
+                client_gone: self.client_gone,
             }),
         }
     }
@@ -113,6 +126,8 @@ impl crate::traits::IncomingCall for IncomingRequest {
 struct InProcessResponseStream {
     response_rx: mpsc::UnboundedReceiver<Result<FramedMessage, TransportError>>,
     trailers_rx: oneshot::Receiver<Result<Metadata, TransportError>>,
+    /// Dropped with the stream to tell the server the client is gone.
+    _alive: tokio::sync::watch::Sender<()>,
 }
 
 impl Stream for InProcessResponseStream {
@@ -228,6 +243,7 @@ impl Transport for InProcessTransport {
         let (response_tx, response_rx) = mpsc::unbounded_channel();
         let (trailers_tx, trailers_rx) = oneshot::channel();
         let (request_msg_tx, request_msg_rx) = mpsc::unbounded_channel();
+        let (alive_tx, client_gone) = tokio::sync::watch::channel(());
 
         let incoming = IncomingRequest {
             method: method.to_string(),
@@ -237,6 +253,7 @@ impl Transport for InProcessTransport {
             response_tx,
             trailers_tx: Some(trailers_tx),
             request_rx: request_msg_rx,
+            client_gone,
         };
 
         self.request_tx
@@ -247,6 +264,7 @@ impl Transport for InProcessTransport {
         let stream = InProcessResponseStream {
             response_rx,
             trailers_rx,
+            _alive: alive_tx,
         };
 
         Ok(Call {

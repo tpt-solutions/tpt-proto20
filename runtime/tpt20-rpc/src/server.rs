@@ -11,6 +11,7 @@ use crate::cancellation::CancellationToken;
 use crate::context::RpcContext;
 use crate::deadline::Deadline;
 use crate::error::RpcError;
+use crate::observe::{CallInfo, CallObserver, Side};
 use crate::wire;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -41,6 +42,7 @@ struct SenderInner {
     sender: Mutex<Box<dyn CallSender>>,
     finished: AtomicBool,
     cancel: CancellationToken,
+    obs: CallObserver,
 }
 
 /// Writes responses for one call. Cheap to clone; the final status is sent
@@ -51,14 +53,19 @@ pub struct ResponseSender {
 }
 
 impl ResponseSender {
-    fn new(sender: Box<dyn CallSender>, cancel: CancellationToken) -> Self {
+    fn new(sender: Box<dyn CallSender>, cancel: CancellationToken, obs: CallObserver) -> Self {
         ResponseSender {
             inner: Arc::new(SenderInner {
                 sender: Mutex::new(sender),
                 finished: AtomicBool::new(false),
                 cancel,
+                obs,
             }),
         }
+    }
+
+    fn observer(&self) -> &CallObserver {
+        &self.inner.obs
     }
 
     /// Sends one response message. A failure means the client is gone and
@@ -67,11 +74,15 @@ impl ResponseSender {
         if self.inner.finished.load(Ordering::SeqCst) {
             return Err(RpcError::failed_precondition("call already finished").finish());
         }
+        let len = payload.len();
         let sender = self.inner.sender.lock().await;
         sender.send_message(payload).await.map_err(|e| {
             self.inner.cancel.cancel();
+            self.inner.obs.transport_error(&e);
             wire::transport_error(e)
-        })
+        })?;
+        self.inner.obs.message_sent(len);
+        Ok(())
     }
 
     /// Ends the call with `result` as its final status (first call wins).
@@ -79,6 +90,7 @@ impl ResponseSender {
         if self.inner.finished.swap(true, Ordering::SeqCst) {
             return;
         }
+        self.inner.obs.finish_result(&result);
         let mut sender = self.inner.sender.lock().await;
         let _ = sender.send_trailers(wire::status_trailers(&result)).await;
     }
@@ -118,8 +130,9 @@ impl ServerCall {
         F: FnOnce(RpcContext, Req) -> Fut + Send,
         Fut: Future<Output = Result<Resp, RpcError>> + Send,
     {
+        self.sender.observer().set_streaming("unary");
         let result = async {
-            let req = decode_request(&decode, &self.request)?;
+            let req = decode_request(&decode, &self.request, self.sender.observer())?;
             let resp = handler(self.ctx.clone(), req).await?;
             self.sender.send(encode(&resp)).await
         }
@@ -137,8 +150,9 @@ impl ServerCall {
         F: FnOnce(RpcContext, Req) -> Fut + Send,
         Fut: Future<Output = Result<BoxStream<'static, Result<Resp, RpcError>>, RpcError>> + Send,
     {
+        self.sender.observer().set_streaming("server_streaming");
         let result = async {
-            let req = decode_request(&decode, &self.request)?;
+            let req = decode_request(&decode, &self.request, self.sender.observer())?;
             let stream = handler(self.ctx.clone(), req).await?;
             pump_responses(&self.ctx, &self.sender, &encode, stream).await
         }
@@ -160,9 +174,11 @@ impl ServerCall {
         F: FnOnce(RpcContext, BoxStream<'static, Result<Req, RpcError>>) -> Fut + Send,
         Fut: Future<Output = Result<Resp, RpcError>> + Send,
     {
+        self.sender.observer().set_streaming("client_streaming");
         let requests = request_stream(
             std::mem::replace(&mut self.incoming, futures::stream::empty().boxed()),
             decode,
+            self.sender.clone(),
         );
         let result = async {
             let resp = handler(self.ctx.clone(), requests).await?;
@@ -182,9 +198,11 @@ impl ServerCall {
         F: FnOnce(RpcContext, BoxStream<'static, Result<Req, RpcError>>) -> Fut + Send,
         Fut: Future<Output = Result<BoxStream<'static, Result<Resp, RpcError>>, RpcError>> + Send,
     {
+        self.sender.observer().set_streaming("bidi_streaming");
         let requests = request_stream(
             std::mem::replace(&mut self.incoming, futures::stream::empty().boxed()),
             decode,
+            self.sender.clone(),
         );
         let result = async {
             let stream = handler(self.ctx.clone(), requests).await?;
@@ -198,21 +216,26 @@ impl ServerCall {
 fn decode_request<Req>(
     decode: &impl Fn(&[u8]) -> Result<Req, DecodeError>,
     bytes: &[u8],
+    obs: &CallObserver,
 ) -> Result<Req, RpcError> {
-    decode(bytes)
-        .map_err(|e| RpcError::invalid_argument(format!("invalid request message: {e}")).finish())
+    obs.message_received(bytes.len());
+    decode(bytes).map_err(|e| {
+        obs.decode_failure();
+        RpcError::invalid_argument(format!("invalid request message: {e}")).finish()
+    })
 }
 
 fn request_stream<Req, D>(
     incoming: RequestStream,
     decode: D,
+    sender: ResponseSender,
 ) -> BoxStream<'static, Result<Req, RpcError>>
 where
     Req: Send + 'static,
     D: Fn(&[u8]) -> Result<Req, DecodeError> + Send + Sync + 'static,
 {
     incoming
-        .map(move |bytes| decode_request(&decode, &bytes))
+        .map(move |bytes| decode_request(&decode, &bytes, sender.observer()))
         .boxed()
 }
 
@@ -265,18 +288,33 @@ impl Server {
     pub async fn handle_call(&self, call: impl IncomingCall) {
         let parts = call.into_parts();
         let cancel = CancellationToken::new();
-        let sender = ResponseSender::new(parts.sender, cancel.clone());
+        let first = |key: &str| parts.metadata.get(key).and_then(|v| v.first());
+        let client_timeout = first(wire::TIMEOUT_KEY).and_then(|v| wire::decode_timeout(v));
+        let trace = first(wire::TRACEPARENT_KEY).and_then(|v| wire::decode_traceparent(v));
+        let obs = CallObserver::start(
+            Side::Server,
+            &parts.method,
+            None,
+            CallInfo {
+                request_id: trace.as_ref().map(|t| t.trace_id.clone()),
+                peer: None,
+                deadline: client_timeout,
+            },
+        );
+        let client_gone = parts.sender.closed_signal();
+        let sender = ResponseSender::new(parts.sender, cancel.clone(), obs);
 
         let mut ctx = match wire::from_wire_metadata(&parts.metadata) {
             Ok(md) => RpcContext::new().with_metadata(md),
             Err(e) => return sender.finish(Err(e)).await,
         }
         .with_cancellation(cancel.clone());
-        let client_timeout = parts
-            .metadata
-            .get(wire::TIMEOUT_KEY)
-            .and_then(|v| v.first())
-            .and_then(|v| wire::decode_timeout(v));
+        if let Some(mut t) = trace {
+            if let Some(state) = first(wire::TRACESTATE_KEY) {
+                t.trace_state = state.clone();
+            }
+            ctx = ctx.with_trace(t);
+        }
         ctx = ctx.with_deadline(Deadline::from_now(
             client_timeout.unwrap_or(Duration::from_secs(365 * 24 * 3600)),
         ));
@@ -306,32 +344,46 @@ impl Server {
             sender: sender.clone(),
         };
         let handling = AssertUnwindSafe(service.handle(method, server_call)).catch_unwind();
-        let outcome = match client_timeout {
-            Some(d) => tokio::time::timeout(d, handling).await.map_err(|_| ()),
-            None => Ok(handling.await),
+        let run = async {
+            match client_timeout {
+                Some(d) => tokio::time::timeout(d, handling).await.map_err(|_| ()),
+                None => Ok(handling.await),
+            }
         };
-        match outcome {
-            Err(()) => {
+        // Race the handler against the client going away: the handler future
+        // is dropped (at its next await) and its context cancelled, so work
+        // for a caller that no longer listens does not keep running.
+        tokio::select! {
+            biased;
+            outcome = run => match outcome {
+                Err(()) => {
+                    cancel.cancel();
+                    sender
+                        .finish(Err(
+                            RpcError::deadline_exceeded("deadline exceeded").finish()
+                        ))
+                        .await;
+                }
+                Ok(Err(_panic)) => {
+                    cancel.cancel();
+                    sender
+                        .finish(Err(RpcError::internal("handler panicked").finish()))
+                        .await;
+                }
+                // A handler that returns without finishing is a bug; never
+                // leave the client hanging or seeing an implicit success.
+                Ok(Ok(())) => {
+                    sender
+                        .finish(Err(
+                            RpcError::internal("handler did not complete the call").finish()
+                        ))
+                        .await;
+                }
+            },
+            _ = client_gone => {
                 cancel.cancel();
                 sender
-                    .finish(Err(
-                        RpcError::deadline_exceeded("deadline exceeded").finish()
-                    ))
-                    .await;
-            }
-            Ok(Err(_panic)) => {
-                cancel.cancel();
-                sender
-                    .finish(Err(RpcError::internal("handler panicked").finish()))
-                    .await;
-            }
-            // A handler that returns without finishing is a bug; never leave
-            // the client hanging or seeing an implicit success.
-            Ok(Ok(())) => {
-                sender
-                    .finish(Err(
-                        RpcError::internal("handler did not complete the call").finish()
-                    ))
+                    .finish(Err(RpcError::cancelled("client went away").finish()))
                     .await;
             }
         }

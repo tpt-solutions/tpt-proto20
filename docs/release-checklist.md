@@ -31,8 +31,8 @@ see the unchecked items.
 - [ ] **reflection** — the gRPC reflection service is not wired to the real
       wire protocol (`compat/tpt20-compat-grpc`); native RPC reflection service
       does not exist (schema reflection is offline via `tpt20-reflect`)
-- [ ] **observability** — `tpt20-observability` exists but is not yet wired
-      into `Channel`/`Server` call boundaries
+- [x] observability — metrics, structured logs and W3C trace propagation are
+      built into `Channel`/`Server` (`docs/observability.md`)
 
 ## 27.6 Compatibility
 - [x] import protobuf schemas (proto2/proto3; no editions, extensions dropped)

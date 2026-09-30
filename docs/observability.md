@@ -47,11 +47,12 @@ Wire your backend in globally through the hook registry rather than passing
 a `Metrics` implementation through every call site:
 
 ```rust
-use tpt20_observability::{set_global_metrics, global_metrics};
+use tpt20_observability::{set_global_metrics, global_metrics_or_noop};
 
-set_global_metrics(std::sync::Arc::new(MyPrometheusMetrics::new()));
+// Once, at startup (later calls are ignored); the backend must be `'static`.
+set_global_metrics(Box::leak(Box::new(MyPrometheusMetrics::new())));
 // elsewhere:
-global_metrics().requests_started(&labels);
+global_metrics_or_noop().requests_started(&labels);
 ```
 
 Map these directly onto Prometheus counters/histograms or an OpenTelemetry
@@ -116,14 +117,42 @@ are populated (to JSON, logfmt, or whatever your logging pipeline expects).
 policy that restricts logging client addresses, without changing the
 `LogEvent` shape used elsewhere.
 
+Implement `Logger` and register it with `set_global_logger` to receive the
+events; `emit_log` is a no-op until you do.
+
+## Built into the RPC runtime
+
+`tpt20-rpc` (`Channel` on the client, `Server` on the server) reports every
+call through these hooks — there is nothing to call yourself. With no
+metrics backend and no logger registered the instrumentation is inert.
+
+- **Metrics**, per call and per side: started/completed (completion carries
+  the final `status`), duration, active streams (+1/−1), cancelled,
+  deadline-exceeded, messages and bytes sent/received, decode failures,
+  connection errors and stream resets (client). Labels: `service`, `method`,
+  `streaming_type` (`unary`/`server_streaming`/`client_streaming`/
+  `bidi_streaming`), `status`, and `transport` = `"client"` or `"server"`
+  (the RPC layer reports which side observed the call; it does not know the
+  concrete transport). On the server the streaming type is known once
+  dispatch picks the method, so `started` for a call to an unknown
+  service/method carries an empty `streaming_type`.
+- **A call that is dropped** before completing (for example a response
+  stream abandoned early) is reported as `CANCELLED`.
+- **Logs**: one `LogEvent` per call per side at completion with `service`,
+  `method`, `status`, `request_id`, the deadline, and — for cancellations —
+  a `cancellation_reason`. `peer_info` is not populated by the transports
+  yet.
+- **Tracing**: the call's `TraceContext` travels as a W3C `traceparent`
+  (and `tracestate`) header: the client sends `ctx.trace()` when it holds
+  valid ids, the server exposes the received context as `ctx.trace()` and uses
+  the trace id as the log `request_id` (a `req-N` id otherwise). Wire
+  spans to your tracing backend from the `rpc.*` constants above.
+
 ## Schema-aware debugging (CLI)
 
-Spec §19.4 calls for `tpt20 decode --schema user.tpt --message user.v1.User`.
-The current CLI's `decode` command operates on the raw field model without a
-schema (see [CLI reference § decode](cli-reference.md#decode)); schema-aware
-inspection today goes through `tpt20 reflect` instead. `tpt20-observability`
-itself contains no CLI code — this remains tracked as CLI work, not runtime
-work.
+Spec §19.4: `tpt20 decode --schema user.tpt --message User` prints a message
+in the schema-aware [text format](cli-reference.md#text-to-binary--binary-to-text)
+(see also `tpt20 reflect`).
 
 ## Putting it together
 

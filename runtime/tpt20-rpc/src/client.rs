@@ -5,6 +5,8 @@
 
 use crate::context::RpcContext;
 use crate::error::RpcError;
+use crate::observe::{CallInfo, CallObserver, Side};
+use crate::status::Status;
 use crate::wire;
 use futures::stream::BoxStream;
 use futures::{SinkExt, StreamExt};
@@ -73,6 +75,7 @@ impl Channel {
         ctx: &RpcContext,
         first: Vec<u8>,
         streaming: StreamingType,
+        obs: &CallObserver,
     ) -> Result<Call, RpcError> {
         if ctx.cancellation().is_cancelled() {
             return Err(RpcError::cancelled("call cancelled before start").finish());
@@ -85,10 +88,32 @@ impl Channel {
             wire::TIMEOUT_KEY,
             wire::encode_timeout(ctx.remaining_time()),
         );
+        if let Some(tp) = wire::encode_traceparent(ctx.trace()) {
+            md.insert(wire::TRACEPARENT_KEY, tp);
+            if !ctx.trace().trace_state.is_empty() {
+                md.insert(wire::TRACESTATE_KEY, ctx.trace().trace_state.clone());
+            }
+        }
         self.transport
             .start_call(method, first, &md, streaming)
             .await
-            .map_err(wire::transport_error)
+            .map_err(|e| {
+                obs.transport_error(&e);
+                wire::transport_error(e)
+            })
+    }
+
+    fn observe(method: &str, ctx: &RpcContext, streaming: &'static str) -> CallObserver {
+        CallObserver::start(
+            Side::Client,
+            method,
+            Some(streaming),
+            CallInfo {
+                request_id: Some(ctx.trace().trace_id.clone()).filter(|id| !id.is_empty()),
+                peer: ctx.peer().map(|p| format!("{}:{}", p.addr, p.port)),
+                deadline: Some(ctx.remaining_time()),
+            },
+        )
     }
 
     /// Unary call: one request, one response.
@@ -102,13 +127,17 @@ impl Channel {
     where
         D: Fn(&[u8]) -> Result<Resp, DecodeError>,
     {
-        guard(ctx, async {
+        let obs = Self::observe(method, ctx, "unary");
+        obs.message_sent(request.len());
+        let result = guard(ctx, async {
             let call = self
-                .start(method, ctx, request, StreamingType::Unary)
+                .start(method, ctx, request, StreamingType::Unary, &obs)
                 .await?;
-            read_single(call.stream, &decode).await
+            read_single(call.stream, &decode, &obs).await
         })
-        .await
+        .await;
+        obs.finish_result(&result);
+        result
     }
 
     /// Server-streaming call: one request, a stream of responses.
@@ -123,12 +152,20 @@ impl Channel {
         Resp: Send + 'static,
         D: Fn(&[u8]) -> Result<Resp, DecodeError> + Send + 'static,
     {
-        let call = guard(
+        let obs = Self::observe(method, ctx, "server_streaming");
+        obs.message_sent(request.len());
+        let started = guard(
             ctx,
-            self.start(method, ctx, request, StreamingType::ServerStream),
+            self.start(method, ctx, request, StreamingType::ServerStream, &obs),
         )
-        .await?;
-        Ok(response_stream(call.stream, ctx.clone(), decode, None))
+        .await;
+        match started {
+            Ok(call) => Ok(response_stream(call.stream, ctx.clone(), decode, None, obs)),
+            Err(e) => {
+                obs.finish_result::<()>(&Err(e.clone()));
+                Err(e)
+            }
+        }
     }
 
     /// Client-streaming call: a stream of requests, one response.
@@ -146,19 +183,27 @@ impl Channel {
     where
         D: Fn(&[u8]) -> Result<Resp, DecodeError>,
     {
-        guard(ctx, async {
+        let obs = Self::observe(method, ctx, "client_streaming");
+        let result = guard(ctx, async {
             let call = self
-                .start(method, ctx, Vec::new(), StreamingType::ClientStream)
+                .start(method, ctx, Vec::new(), StreamingType::ClientStream, &obs)
                 .await?;
             let Call { mut sink, stream } = call;
             while let Some(msg) = requests.next().await {
-                sink.send(msg).await.map_err(wire::transport_error)?;
+                let len = msg.len();
+                sink.send(msg).await.map_err(|e| {
+                    obs.transport_error(&e);
+                    wire::transport_error(e)
+                })?;
+                obs.message_sent(len);
             }
             sink.close().await.map_err(wire::transport_error)?;
             drop(sink);
-            read_single(stream, &decode).await
+            read_single(stream, &decode, &obs).await
         })
-        .await
+        .await;
+        obs.finish_result(&result);
+        result
     }
 
     /// Bidirectional streaming call.
@@ -173,13 +218,22 @@ impl Channel {
         Resp: Send + 'static,
         D: Fn(&[u8]) -> Result<Resp, DecodeError> + Send + 'static,
     {
-        let call = guard(
+        let obs = Self::observe(method, ctx, "bidi_streaming");
+        let started = guard(
             ctx,
-            self.start(method, ctx, Vec::new(), StreamingType::Bidi),
+            self.start(method, ctx, Vec::new(), StreamingType::Bidi, &obs),
         )
-        .await?;
+        .await;
+        let call = match started {
+            Ok(call) => call,
+            Err(e) => {
+                obs.finish_result::<()>(&Err(e.clone()));
+                return Err(e);
+            }
+        };
         let Call { mut sink, stream } = call;
         let cancel = ctx.cancellation().clone();
+        let pump_obs = obs.clone();
         let pump = tokio::spawn(async move {
             loop {
                 let next = tokio::select! {
@@ -187,9 +241,12 @@ impl Channel {
                     _ = cancel.wait_cancelled() => None,
                 };
                 let Some(msg) = next else { break };
-                if sink.send(msg).await.is_err() {
+                let len = msg.len();
+                if let Err(e) = sink.send(msg).await {
+                    pump_obs.transport_error(&e);
                     return;
                 }
+                pump_obs.message_sent(len);
             }
             let _ = sink.close().await;
         });
@@ -198,6 +255,7 @@ impl Channel {
             ctx.clone(),
             decode,
             Some(AbortOnDrop(pump)),
+            obs,
         ))
     }
 }
@@ -206,17 +264,25 @@ impl Channel {
 async fn read_single<Resp>(
     mut stream: ResponseStream,
     decode: &impl Fn(&[u8]) -> Result<Resp, DecodeError>,
+    obs: &CallObserver,
 ) -> Result<Resp, RpcError> {
     let mut response = None;
     while let Some(item) = stream.next().await {
-        match item.map_err(wire::transport_error)? {
+        match item.map_err(|e| {
+            obs.transport_error(&e);
+            wire::transport_error(e)
+        })? {
             StreamItem::Message(bytes) => {
+                obs.message_received(bytes.len());
                 if response.is_some() {
                     return Err(
                         RpcError::internal("multiple responses to a single-response call").finish(),
                     );
                 }
-                response = Some(decode(&bytes).map_err(decode_error)?);
+                response = Some(decode(&bytes).map_err(|e| {
+                    obs.decode_failure();
+                    decode_error(e)
+                })?);
             }
             StreamItem::Trailer(trailers) => {
                 wire::parse_status(&trailers)?;
@@ -230,12 +296,14 @@ async fn read_single<Resp>(
 }
 
 /// Adapts a transport response stream into typed results, ending after the
-/// trailers (an error status becomes the final `Err` item).
+/// trailers (an error status becomes the final `Err` item). The observer is
+/// finished with the call's outcome when the stream ends.
 fn response_stream<Resp, D>(
     stream: ResponseStream,
     ctx: RpcContext,
     decode: D,
     pump: Option<AbortOnDrop>,
+    obs: CallObserver,
 ) -> BoxStream<'static, Result<Resp, RpcError>>
 where
     Resp: Send + 'static,
@@ -246,6 +314,7 @@ where
         ctx: RpcContext,
         decode: D,
         done: bool,
+        obs: CallObserver,
         _pump: Option<AbortOnDrop>,
     }
     let state = State {
@@ -253,6 +322,7 @@ where
         ctx,
         decode,
         done: false,
+        obs,
         _pump: pump,
     };
     futures::stream::unfold(state, |mut st| async move {
@@ -263,33 +333,47 @@ where
         let item = match next {
             Err(e) => {
                 st.done = true;
+                st.obs.finish(e.status(), e.message());
                 return Some((Err(e), st));
             }
             Ok(item) => item,
         };
         match item {
             Some(Ok(StreamItem::Message(bytes))) => {
+                st.obs.message_received(bytes.len());
                 let decoded = (st.decode)(&bytes).map_err(decode_error);
-                st.done = decoded.is_err();
+                if let Err(e) = &decoded {
+                    st.done = true;
+                    st.obs.decode_failure();
+                    st.obs.finish(e.status(), e.message());
+                }
                 Some((decoded, st))
             }
             Some(Ok(StreamItem::Trailer(trailers))) => {
                 st.done = true;
                 match wire::parse_status(&trailers) {
-                    Ok(()) => None,
-                    Err(e) => Some((Err(e), st)),
+                    Ok(()) => {
+                        st.obs.finish(Status::Ok, "");
+                        None
+                    }
+                    Err(e) => {
+                        st.obs.finish(e.status(), e.message());
+                        Some((Err(e), st))
+                    }
                 }
             }
             Some(Err(e)) => {
                 st.done = true;
-                Some((Err(wire::transport_error(e)), st))
+                st.obs.transport_error(&e);
+                let e = wire::transport_error(e);
+                st.obs.finish(e.status(), e.message());
+                Some((Err(e), st))
             }
             None => {
                 st.done = true;
-                Some((
-                    Err(RpcError::unavailable("connection ended without trailers").finish()),
-                    st,
-                ))
+                let e = RpcError::unavailable("connection ended without trailers").finish();
+                st.obs.finish(e.status(), e.message());
+                Some((Err(e), st))
             }
         }
     })

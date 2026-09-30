@@ -32,9 +32,12 @@ pub mod logging;
 pub mod metrics;
 pub mod tracing;
 
-pub use hooks::{global_metrics, set_global_metrics, GlobalHooks};
+pub use hooks::{
+    emit_log, global_logger, global_metrics, global_metrics_or_noop, set_global_logger,
+    set_global_metrics, GlobalHooks, Logger,
+};
 pub use logging::LogEvent;
 pub use metrics::{Labels, Metrics, NoopMetrics};
 pub use tracing::{
-    RPC_SCHEMA_FINGERPRINT, RPC_SERVICE, RPC_STATUS, RPC_METHOD, RPC_SYSTEM, RPC_SYSTEM_VALUE,
+    RPC_METHOD, RPC_SCHEMA_FINGERPRINT, RPC_SERVICE, RPC_STATUS, RPC_SYSTEM, RPC_SYSTEM_VALUE,
 };

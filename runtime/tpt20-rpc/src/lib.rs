@@ -22,6 +22,7 @@ pub mod deadline;
 pub mod error;
 pub mod extensions;
 pub mod metadata;
+pub(crate) mod observe;
 pub mod peer;
 pub mod retry;
 pub mod server;

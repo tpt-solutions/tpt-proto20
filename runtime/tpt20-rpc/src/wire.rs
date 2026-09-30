@@ -21,6 +21,10 @@ pub const STATUS_KEY: &str = "grpc-status";
 pub const MESSAGE_KEY: &str = "grpc-message";
 /// Request header carrying the remaining deadline.
 pub const TIMEOUT_KEY: &str = "grpc-timeout";
+/// W3C trace-context headers carrying the call's [`TraceContext`].
+pub const TRACEPARENT_KEY: &str = "traceparent";
+/// W3C `tracestate` header.
+pub const TRACESTATE_KEY: &str = "tracestate";
 
 /// Keys owned by the protocol; never surfaced as user metadata.
 const RESERVED: &[&str] = &[
@@ -31,6 +35,8 @@ const RESERVED: &[&str] = &[
     "te",
     "grpc-encoding",
     "grpc-accept-encoding",
+    TRACEPARENT_KEY,
+    TRACESTATE_KEY,
 ];
 
 /// Percent-encodes a status message (bytes outside printable ASCII and `%`).
@@ -104,6 +110,43 @@ pub fn decode_timeout(s: &str) -> Option<Duration> {
         "H" => Duration::from_secs(n * 3600),
         _ => return None,
     })
+}
+
+fn is_hex(s: &str, len: usize) -> bool {
+    s.len() == len && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Formats a W3C `traceparent` (`00-<trace-id>-<span-id>-<flags>`); `None`
+/// when the context is empty or its ids are not valid lowercase hex.
+pub fn encode_traceparent(t: &crate::trace::TraceContext) -> Option<String> {
+    if !is_hex(&t.trace_id, 32) || !is_hex(&t.span_id, 16) {
+        return None;
+    }
+    if t.trace_id.bytes().all(|b| b == b'0') || t.span_id.bytes().all(|b| b == b'0') {
+        return None;
+    }
+    Some(format!(
+        "00-{}-{}-{:02x}",
+        t.trace_id, t.span_id, t.trace_flags
+    ))
+}
+
+/// Parses a W3C `traceparent` header (version `00`); `None` if malformed.
+pub fn decode_traceparent(s: &str) -> Option<crate::trace::TraceContext> {
+    let mut parts = s.trim().split('-');
+    let (version, trace, span, flags) =
+        (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() || version != "00" || !is_hex(trace, 32) || !is_hex(span, 16) {
+        return None;
+    }
+    if trace.bytes().all(|b| b == b'0') || span.bytes().all(|b| b == b'0') || !is_hex(flags, 2) {
+        return None;
+    }
+    Some(crate::trace::TraceContext::new(
+        trace,
+        span,
+        u8::from_str_radix(flags, 16).ok()?,
+    ))
 }
 
 /// Converts RPC metadata to transport metadata (binary values → base64).
@@ -261,6 +304,38 @@ mod tests {
             from_wire_metadata(&bad).unwrap_err().status(),
             Status::InvalidArgument
         );
+    }
+
+    #[test]
+    fn traceparent_roundtrip_and_validation() {
+        let t = crate::trace::TraceContext::new(
+            "4bf92f3577b34da6a3ce929d0e0e4736",
+            "00f067aa0ba902b7",
+            1,
+        );
+        let header = encode_traceparent(&t).unwrap();
+        assert_eq!(
+            header,
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        );
+        assert_eq!(decode_traceparent(&header), Some(t));
+        // Empty/invalid contexts are not sent; malformed headers are ignored.
+        assert_eq!(encode_traceparent(&Default::default()), None);
+        assert_eq!(
+            encode_traceparent(&crate::trace::TraceContext::new("trace-123", "span-456", 1)),
+            None
+        );
+        for bad in [
+            "",
+            "garbage",
+            "01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-extra",
+        ] {
+            assert_eq!(decode_traceparent(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

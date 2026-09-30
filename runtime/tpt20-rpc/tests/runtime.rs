@@ -23,6 +23,17 @@ fn enc(v: &Vec<u8>) -> Vec<u8> {
     v.clone()
 }
 
+static HANDLERS_DROPPED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Counts the handler future being dropped (i.e. its work being cancelled).
+struct DropGuard;
+
+impl Drop for DropGuard {
+    fn drop(&mut self) {
+        HANDLERS_DROPPED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 struct Echo;
 
 #[async_trait]
@@ -113,6 +124,14 @@ impl Service for Echo {
             "Slow" => {
                 call.unary(dec, enc, |_ctx, _req: Vec<u8>| async move {
                     tokio::time::sleep(Duration::from_secs(10)).await;
+                    Ok(vec![])
+                })
+                .await
+            }
+            "Guarded" => {
+                call.unary(dec, enc, |_ctx, _req: Vec<u8>| async move {
+                    let _guard = DropGuard;
+                    tokio::time::sleep(Duration::from_secs(30)).await;
                     Ok(vec![])
                 })
                 .await
@@ -349,6 +368,43 @@ async fn behavior_over_in_process_transport() {
 async fn behavior_over_http2_transport() {
     let (ch, _addr) = http2_channel().await;
     suite(ch).await;
+}
+
+/// When the client gives up on a call, the server stops the handler instead
+/// of letting it run to completion for nobody.
+#[tokio::test]
+async fn client_cancellation_stops_the_server_handler() {
+    use std::sync::atomic::Ordering;
+    let (http2_ch, _addr) = http2_channel().await;
+    for (name, ch) in [
+        ("http2", http2_ch),
+        ("in-process", in_process_channel().await),
+    ] {
+        let before = HANDLERS_DROPPED.load(Ordering::SeqCst);
+        let ctx = RpcContext::new();
+        let token = ctx.cancellation().clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            token.cancel();
+        });
+        let e = ch
+            .unary("echo.Echo/Guarded", &ctx, vec![], dec)
+            .await
+            .unwrap_err();
+        assert_eq!(e.status(), Status::Cancelled, "{name}");
+        let mut stopped = false;
+        for _ in 0..100 {
+            if HANDLERS_DROPPED.load(Ordering::SeqCst) > before {
+                stopped = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            stopped,
+            "{name}: server handler kept running after the client cancelled"
+        );
+    }
 }
 
 #[tokio::test]

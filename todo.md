@@ -633,8 +633,8 @@ that the underlying features are missing — see per-item notes below.
 - [x] Benchmark: TLS overhead
 - [x] Benchmark: compression overhead (`rpc_compression` group)
 - [x] Profiling pass and optimization backlog based on results (`docs/performance.md`)
-- [ ] Confirm performance goals from spec §23 — assessed in `docs/performance.md`; all met or
-      explained except low-overhead observability (not yet measured)
+- [x] Confirm performance goals from spec §23 — assessed in `docs/performance.md`; all met
+      (low-overhead observability measured at ~2 %)
 
 ---
 

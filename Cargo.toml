@@ -11,6 +11,7 @@ members = [
     "runtime/tpt20-reflect",
     "runtime/tpt20-json",
     "runtime/tpt20-text",
+    "runtime/tpt20-observability",
     "runtime/tpt20-stdlib",
     "runtime/tpt20-rpc",
     "runtime/tpt20-transport",
