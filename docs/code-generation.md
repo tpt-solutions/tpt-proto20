@@ -196,15 +196,46 @@ pub enum OuterContact {
 
 matching spec §12.5's mutually-exclusive representation.
 
-## Services: not yet generated
+## Services
 
-Spec §12.6 calls for generated server traits, client stubs, and streaming
-interfaces per `service` block (e.g. `#[async_trait] trait UserService`).
-**This is not implemented** — `tpt20-codegen-rust` only generates message
-and enum code today. To build an RPC service today, hand-write the trait
-against [`tpt20-rpc`'s types](rpc-model.md) (`RpcContext`,
-`ServerStreamSink<T>`, etc.) using the generated message types as your
-request/response payloads.
+Each `service` block generates (unless `CodegenOptions::services` is off /
+`tpt20 gen rust --no-services`), using the [`tpt20-rpc`](rpc-model.md)
+runtime:
+
+```rust
+// Server side: implement the trait, wrap it, register it on a Server.
+#[__rpc::async_trait]
+pub trait UserService: Send + Sync + 'static {
+    async fn get_user(&self, ctx: &RpcContext, request: GetUserRequest) -> Result<User, RpcError>;
+    async fn watch_users(&self, ctx: &RpcContext, request: WatchUsersRequest)
+        -> Result<BoxStream<'static, Result<User, RpcError>>, RpcError>;
+    async fn upload_logs(&self, ctx: &RpcContext, requests: BoxStream<'static, Result<LogEntry, RpcError>>)
+        -> Result<UploadSummary, RpcError>;
+    async fn chat(&self, ctx: &RpcContext, requests: BoxStream<'static, Result<ChatMessage, RpcError>>)
+        -> Result<BoxStream<'static, Result<ChatMessage, RpcError>>, RpcError>;
+}
+pub struct UserServiceServer<S> { /* … */ }   // implements tpt20_rpc::Service
+pub struct UserServiceClient { /* … */ }      // wraps tpt20_rpc::Channel
+```
+
+```rust
+let server = Arc::new(Server::new().add_service(UserServiceServer::new(MyImpl)));
+tokio::spawn(server.clone().serve_in_process(rx));          // or serve_http2(&http2_server)
+
+let client = UserServiceClient::new(Channel::new(transport));
+let user = client.get_user(&RpcContext::new().with_timeout(Duration::from_secs(2)), &req).await?;
+```
+
+- Method names become `snake_case` (`GetHTTPStatus` → `get_http_status`); the
+  wire path is `<package>.<Service>/<Method>`.
+- `RpcContext` carries the call's **metadata** (text, and `-bin` binary
+  values as base64 on the wire), **deadline** (sent as `grpc-timeout`,
+  enforced by both client and server), and **cancellation** token.
+- Errors are `RpcError`s; the final status travels in the `grpc-status` /
+  `grpc-message` trailers. A call that ends without a status is an error.
+- Client-/bidi-streaming calls take any `Stream<Item = Req> + Send + 'static`.
+- Generated code needs the `tpt20-rpc` crate in addition to `tpt20-core` and
+  `tpt20-json`.
 
 ## What's generated vs. what's planned
 
@@ -217,7 +248,7 @@ request/response payloads.
 | Builders (opt-in) | ✅ generation; ⚠️ partial validation (see above) |
 | Enums with integer conversion, open/closed semantics | ✅ |
 | Oneofs as Rust enums | ✅ |
-| Service server traits / client stubs / streaming interfaces | ❌ not implemented |
+| Service server traits / client stubs / streaming interfaces | ✅ |
 
 ## Dynamic alternative: no codegen at all
 

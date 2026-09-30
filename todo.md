@@ -249,14 +249,6 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 5 — Rust Code Generation (`tpt20-codegen-rust`, spec §12)
 
-**Known regression (actively being worked on):** the `tests/rust-codegen-tests` integration
-crate currently fails to compile against generated output (21–29 errors: borrowed-view
-`Value`/`BorrowedValue` mismatches on oneof/enum fields, missing `unknown_fields` in struct
-initializers, `Option<String>` vs `Option<&str>` view-field mismatches, missing `AsRef` on
-generated nested-view structs). `tpt20-core`/`tpt20-codegen-rust`'s own unit tests still pass;
-the borrowed-view/oneof/map decode codegen paths are mid-rework — don't treat the checked
-items below as "fully verified by the integration suite" until that crate compiles again.
-
 - [x] Generate owned message structs from message schemas
 - [x] Generated methods per message:
   - [x] `encode(&self) -> Vec<u8>`
@@ -275,13 +267,13 @@ items below as "fully verified by the integration suite" until that crate compil
 - [x] Generate Rust enums for schema enums with integer conversion support
   - [x] Respect open/closed unknown-value semantics
 - [x] Generate Rust enums for oneofs (e.g. `enum ContactMethod { Email(String), ... }`)
-- [ ] Generate service code
-  - [ ] Server traits (`#[async_trait]`)
-  - [ ] Client stubs
-  - [ ] Streaming interfaces (server/client/bidi)
-  - [ ] Metadata helpers
-  - [ ] Deadline helpers
-  - [ ] Cancellation helpers
+- [x] Generate service code (`tpt20_rpc` runtime: `Channel`, `Server`, `Service`)
+  - [x] Server traits (`#[async_trait]`)
+  - [x] Client stubs
+  - [x] Streaming interfaces (server/client/bidi)
+  - [x] Metadata helpers (`RpcContext` metadata ↔ wire, binary `-bin` values)
+  - [x] Deadline helpers (`grpc-timeout`, client + server enforcement)
+  - [x] Cancellation helpers (`CancellationToken::wait_cancelled`, server cancel on disconnect/deadline)
 - [x] Wire `tpt20 gen rust --in schema --out src/generated` CLI command (stub now, full CLI
       in Phase 16)
 

@@ -13,7 +13,7 @@ pub const FINGERPRINT: &str = include_str!(concat!(env!("OUT_DIR"), "/fingerprin
 
 /// Generated module from the fixture schema.
 #[allow(unused)]
-mod generated {
+pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
 

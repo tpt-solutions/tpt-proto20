@@ -26,6 +26,8 @@ struct MsgCtx {
     map_ids: Vec<u32>,
 }
 
+mod services;
+
 pub(crate) struct Emitter<'a> {
     pkg: &'a ir::PackageIr,
     opts: &'a CodegenOptions,
@@ -59,6 +61,9 @@ impl<'a> Emitter<'a> {
         }
         if self.opts.builders && !self.pkg.messages.is_empty() {
             self.emit_build_error();
+        }
+        if self.opts.services && !self.pkg.services.is_empty() {
+            self.emit_services();
         }
         self.out
     }

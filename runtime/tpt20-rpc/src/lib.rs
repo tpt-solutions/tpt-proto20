@@ -62,4 +62,5 @@ mod tests {
 pub use async_trait::async_trait;
 pub use client::Channel;
 pub use futures;
+pub use futures::stream::BoxStream;
 pub use server::{ResponseSender, Server, ServerCall, Service};

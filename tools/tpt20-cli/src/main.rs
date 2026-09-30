@@ -329,6 +329,9 @@ enum GenBackend {
         /// Emit validated builders
         #[arg(long)]
         builders: bool,
+        /// Do not generate service traits/clients (skips the `tpt20-rpc` dependency)
+        #[arg(long)]
+        no_services: bool,
     },
 }
 
@@ -914,6 +917,7 @@ fn cmd_gen(backend: GenBackend) -> Result<(), CliError> {
             input,
             output,
             builders,
+            no_services,
         } => {
             let src = fs::read_to_string(&input)?;
             let compiled = tpt20_compiler::compile(&src, input.to_str())
@@ -921,6 +925,7 @@ fn cmd_gen(backend: GenBackend) -> Result<(), CliError> {
 
             let mut opts = tpt20_codegen_rust::CodegenOptions::default();
             opts.builders = builders;
+            opts.services = !no_services;
 
             let module = tpt20_codegen_rust::generate_module(&compiled.ir, &opts);
             fs::create_dir_all(&output)?;

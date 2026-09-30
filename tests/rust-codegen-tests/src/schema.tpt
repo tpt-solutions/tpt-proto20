@@ -48,3 +48,22 @@ message Outer {
   19: inner Outer_Child;
   20: zigzag sint64;
 }
+
+message PingRequest {
+  1: text string;
+  2: count int32;
+}
+
+message PingReply {
+  1: text string;
+  2: n int32;
+}
+
+service Pinger {
+  Ping(PingRequest) returns (PingReply);
+  Repeat(PingRequest) returns (stream PingReply);
+  Collect(stream PingRequest) returns (PingReply);
+  Chat(stream PingRequest) returns (stream PingReply);
+  Fail(PingRequest) returns (PingReply);
+  GetHTTPStatus(PingRequest) returns (PingReply);
+}

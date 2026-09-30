@@ -205,17 +205,26 @@ provide the production transport, with `Endpoint`/`TlsConfig` for connection
 setup (`Endpoint::http2()`, `.with_tls(..)`, `.with_pem_paths(..)`,
 `.require_client_cert(true)` for mTLS, `.with_max_message_bytes(..)`).
 
-**Known gaps against spec §17.1**, tracked in `todo.md` Phase 11 — check
-there before depending on any of these:
+The HTTP/2 transport delivers real trailers, surfaces stream resets as
+`TransportError::StreamReset` and GOAWAY as `TransportError::GoAway`, supports
+keepalive pings (`Endpoint::with_keepalive`), graceful server shutdown
+(`Http2Server::serve_with_shutdown` sends GOAWAY and lets in-flight calls
+finish), and TLS with ALPN (client and server; server-side client-CA
+verification). Client-certificate *presentation* and message compression are
+not implemented yet.
 
-- the `tls` feature currently **does not compile**: it targets a `rustls`
-  API newer than the pinned dependency version
-- the client fabricates empty trailers instead of reading the server's real
-  ones
-- `TransportError::StreamReset` and `TransportError::GoAway` are defined but
-  never produced
-- keepalive/ping is not actually configured on the `h2` builders despite doc
-  comments claiming it
+### RPC runtime (`Channel`, `Server`)
+
+`tpt20_rpc::Channel` runs calls (unary, server/client/bidi streaming) over any
+`Transport`; `tpt20_rpc::Server` routes `IncomingCall`s from any transport to
+registered `Service`s (`serve_in_process`, `serve_http2` with the `http2`
+feature). Generated service code (see [Code generation](code-generation.md#services))
+is a thin typed layer over these. Conventions: method path
+`<package>.<Service>/<Method>`; final status in the `grpc-status` /
+`grpc-message` (percent-encoded) trailers; deadline in `grpc-timeout`;
+binary metadata keys end in `-bin` and travel as base64. The server enforces
+the client's deadline, cancels the call context when the client disconnects,
+and always terminates a call with a status (handler panics become `INTERNAL`).
 
 QUIC/HTTP3 is an empty feature flag with no implementation yet.
 
