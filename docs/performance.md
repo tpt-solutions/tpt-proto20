@@ -50,11 +50,11 @@ orders of magnitude, not guarantees; re-run on your hardware).
 | Benchmark | Time |
 |---|---|
 | unary, in-process | 71 µs |
-| unary, HTTP/2 (h2c, connection per call) | 462 µs |
-| unary, HTTP/2 + TLS 1.3 + ALPN (handshake per call) | 1.29 ms |
-| server streaming of 100 messages, in-process / h2c | 206 µs / 823 µs |
-| 32 concurrent unary calls, in-process / h2c | 228 µs / 4.1 ms |
-| cancellation storm (100 slow calls, all cancelled), in-process | 3.3 ms |
+| unary, HTTP/2 (h2c, pooled connection) | 280 µs |
+| unary, HTTP/2 + TLS 1.3 + ALPN (pooled connection) | 281 µs |
+| server streaming of 100 messages, in-process / h2c | 181 µs / 609 µs |
+| 32 concurrent unary calls, in-process / h2c | 241 µs / 1.5 ms |
+| cancellation storm (100 slow calls, all cancelled), in-process | 721 µs |
 | deadline storm (100 slow calls, 1 ms deadline), in-process | 2.6 ms |
 | compression overhead | not measurable: message compression is not implemented yet |
 
@@ -73,8 +73,9 @@ orders of magnitude, not guarantees; re-run on your hardware).
 - **Efficient maps / repeated:** acceptable, but the weakest area (see
   backlog): map decode is ~4× slower per byte than packed numerics.
 - **Efficient streaming:** per-message overhead is ~1 µs in-process and
-  ~6 µs over HTTP/2 once a stream is open; the dominant RPC cost is
-  connection setup (next section).
+  ~4 µs over HTTP/2 once a stream is open. `Http2Transport` multiplexes all
+  calls over one pooled connection, so TLS costs a handshake once, not per
+  call (unary over TLS is now indistinguishable from plain h2c).
 - **Low-overhead observability:** the `tpt20-observability` hooks are not
   on the benchmarked paths, so this goal is **not yet measured** here.
 
@@ -82,12 +83,12 @@ orders of magnitude, not guarantees; re-run on your hardware).
 
 Ordered by expected payoff. None of these are correctness issues.
 
-1. **HTTP/2 connection reuse.** `Http2Transport` opens a TCP (and TLS)
-   connection per call: 460 µs plain, 1.3 ms with TLS versus 71 µs
-   in-process, and 32 concurrent calls cost 4 ms. A pooled, multiplexed
-   connection (one `h2` connection, one stream per call) should bring
-   per-call cost close to the ~6 µs/message streaming figure and make TLS
-   overhead a one-time cost. Largest single win.
+1. ~~HTTP/2 connection reuse~~ — **done.** The transport keeps one
+   multiplexed connection (per `Http2Transport` and its clones), opens a
+   stream per call, and transparently reconnects once if the cached connection
+   has died. Effect: unary h2c 462 → 280 µs, unary TLS 1.29 ms → 281 µs, 32
+   concurrent calls 4.1 → 1.5 ms. (The numbers above were re-measured after
+   the change.)
 2. **Canonical encoding.** `encode_canonical` is 6× slower than `encode` on
    repeated fields (36.7 µs vs 6.3 µs) and 3.4× on maps: it clones and sorts
    a `RawMessage`. Generated code already emits fields in id order, so the

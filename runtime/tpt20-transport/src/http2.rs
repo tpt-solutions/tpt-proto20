@@ -200,36 +200,51 @@ async fn read_frame(
 
 /// HTTP/2 client transport.
 ///
-/// Connects to an HTTP/2 server and allows making RPC calls. Each call uses a
-/// fresh connection; the initial request message is sent immediately and, for
+/// Connects to an HTTP/2 server and allows making RPC calls. All calls share
+/// one multiplexed connection (one HTTP/2 stream per call); the initial request message is sent immediately and, for
 /// client-streaming and bidirectional calls, further messages go through the
 /// returned call's sink.
 #[derive(Debug, Clone)]
 pub struct Http2Transport {
     endpoint: Endpoint,
+    /// Shared, lazily established multiplexed connection. Clones of the
+    /// transport share it; calls are separate HTTP/2 streams on it.
+    pool: Arc<tokio::sync::Mutex<Option<client::SendRequest<Bytes>>>>,
 }
 
 impl Http2Transport {
-    /// Creates a new HTTP/2 transport for the given endpoint.
+    /// Creates a new HTTP/2 transport for the given endpoint. The
+    /// connection is established on the first call and reused afterwards
+    /// (re-established transparently if it dies).
     pub fn new(endpoint: Endpoint) -> Self {
-        Http2Transport { endpoint }
+        Http2Transport {
+            endpoint,
+            pool: Arc::new(tokio::sync::Mutex::new(None)),
+        }
     }
 
     /// Returns the endpoint this transport connects to.
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
     }
-}
 
-#[async_trait]
-impl Transport for Http2Transport {
-    async fn start_call(
-        &self,
-        method: &str,
-        request: Vec<u8>,
-        metadata: &Metadata,
-        streaming_type: StreamingType,
-    ) -> Result<Call, TransportError> {
+    /// Returns a handle to the live connection, connecting if needed.
+    async fn connection(&self) -> Result<client::SendRequest<Bytes>, TransportError> {
+        let mut pool = self.pool.lock().await;
+        if let Some(existing) = pool.as_ref() {
+            return Ok(existing.clone());
+        }
+        let fresh = self.connect().await?;
+        *pool = Some(fresh.clone());
+        Ok(fresh)
+    }
+
+    /// Forgets the cached connection so the next call reconnects.
+    async fn discard(&self) {
+        *self.pool.lock().await = None;
+    }
+
+    async fn connect(&self) -> Result<client::SendRequest<Bytes>, TransportError> {
         let tcp = TcpStream::connect(&self.endpoint.address)
             .await
             .map_err(|e| TransportError::Io(e.to_string()))?;
@@ -257,15 +272,7 @@ impl Transport for Http2Transport {
                     .connect(server_name, tcp)
                     .await
                     .map_err(|e| TransportError::Tls(e.to_string()))?;
-                start_call_io(
-                    tls_stream,
-                    &self.endpoint,
-                    method,
-                    request,
-                    metadata,
-                    streaming_type,
-                )
-                .await
+                handshake(tls_stream, &self.endpoint).await
             }
             #[cfg(not(feature = "tls"))]
             {
@@ -274,47 +281,91 @@ impl Transport for Http2Transport {
                 ))
             }
         } else {
-            start_call_io(
-                tcp,
-                &self.endpoint,
-                method,
-                request,
-                metadata,
-                streaming_type,
-            )
-            .await
+            handshake(tcp, &self.endpoint).await
         }
     }
 }
 
-async fn start_call_io<IO>(
+#[async_trait]
+impl Transport for Http2Transport {
+    async fn start_call(
+        &self,
+        method: &str,
+        request: Vec<u8>,
+        metadata: &Metadata,
+        streaming_type: StreamingType,
+    ) -> Result<Call, TransportError> {
+        let max = self
+            .endpoint
+            .max_message_bytes
+            .unwrap_or(DEFAULT_MAX_MESSAGE_BYTES);
+        let initial = encode_message(&request, max)?;
+
+        let mut builder = req_builder(&self.endpoint, method)?;
+        {
+            let headers = builder
+                .headers_mut()
+                .ok_or_else(|| TransportError::Internal("request builder failed".into()))?;
+            metadata_to_headers(&self.endpoint.default_metadata, headers)?;
+            metadata_to_headers(metadata, headers)?;
+        }
+        let http_request = builder
+            .body(())
+            .map_err(|e| TransportError::Internal(e.to_string()))?;
+
+        // Opening the stream is retried once on a fresh connection: a cached
+        // connection may have been closed (GOAWAY, idle timeout, peer
+        // restart) since its last use. Nothing has been sent at that point,
+        // so the retry cannot duplicate a request.
+        let mut attempt = 0;
+        let (response, mut send_stream) = loop {
+            let sender = self.connection().await?;
+            let opened = async {
+                let mut ready = sender.ready().await?;
+                ready.send_request(http_request.clone(), false)
+            }
+            .await;
+            match opened {
+                Ok(pair) => break pair,
+                Err(e) if attempt == 0 => {
+                    let _ = e;
+                    attempt += 1;
+                    self.discard().await;
+                }
+                Err(e) => return Err(map_h2_error(e)),
+            }
+        };
+
+        // Unary and server-streaming calls carry exactly one request message.
+        let end_of_stream = matches!(
+            streaming_type,
+            StreamingType::Unary | StreamingType::ServerStream
+        );
+        write_all_end(&mut send_stream, initial, end_of_stream).await?;
+
+        Ok(Call {
+            sink: Box::pin(Http2ClientSink {
+                send: send_stream,
+                max,
+                ended: end_of_stream,
+            }),
+            stream: Box::pin(Http2ClientResponseStream {
+                state: RespState::Headers(Box::pin(response)),
+                frames: FrameBuffer::new(max),
+            }),
+        })
+    }
+}
+
+/// Performs the HTTP/2 handshake and spawns the connection driver (plus the
+/// keepalive task when configured).
+async fn handshake<IO>(
     io: IO,
     endpoint: &Endpoint,
-    method: &str,
-    request: Vec<u8>,
-    metadata: &Metadata,
-    streaming_type: StreamingType,
-) -> Result<Call, TransportError>
+) -> Result<client::SendRequest<Bytes>, TransportError>
 where
     IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let max = endpoint
-        .max_message_bytes
-        .unwrap_or(DEFAULT_MAX_MESSAGE_BYTES);
-    let initial = encode_message(&request, max)?;
-
-    let mut builder = req_builder(endpoint, method)?;
-    {
-        let headers = builder
-            .headers_mut()
-            .ok_or_else(|| TransportError::Internal("request builder failed".into()))?;
-        metadata_to_headers(&endpoint.default_metadata, headers)?;
-        metadata_to_headers(metadata, headers)?;
-    }
-    let http_request = builder
-        .body(())
-        .map_err(|e| TransportError::Internal(e.to_string()))?;
-
     let (send_request, mut connection) = client::Builder::new()
         .handshake::<_, Bytes>(io)
         .await
@@ -337,30 +388,7 @@ where
             }
         }
     });
-
-    let mut send_request = send_request.ready().await.map_err(map_h2_error)?;
-    let (response, mut send_stream) = send_request
-        .send_request(http_request, false)
-        .map_err(map_h2_error)?;
-
-    // Unary and server-streaming calls carry exactly one request message.
-    let end_of_stream = matches!(
-        streaming_type,
-        StreamingType::Unary | StreamingType::ServerStream
-    );
-    write_all_end(&mut send_stream, initial, end_of_stream).await?;
-
-    Ok(Call {
-        sink: Box::pin(Http2ClientSink {
-            send: send_stream,
-            max,
-            ended: end_of_stream,
-        }),
-        stream: Box::pin(Http2ClientResponseStream {
-            state: RespState::Headers(Box::pin(response)),
-            frames: FrameBuffer::new(max),
-        }),
-    })
+    Ok(send_request)
 }
 
 fn req_builder(
@@ -1398,6 +1426,81 @@ mod tests {
             .start_call("M", vec![], &Metadata::new(), StreamingType::Unary)
             .await
             .is_err());
+    }
+
+    /// TCP forwarder that counts accepted connections and can sever them all.
+    struct Proxy {
+        addr: String,
+        accepted: Arc<std::sync::atomic::AtomicUsize>,
+        sever: tokio::sync::watch::Sender<u64>,
+    }
+
+    async fn proxy_to(target: String) -> Proxy {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let (sever, sever_rx) = tokio::sync::watch::channel(0u64);
+        let counter = accepted.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut client, _)) = listener.accept().await else {
+                    return;
+                };
+                counter.fetch_add(1, Ordering::SeqCst);
+                let target = target.clone();
+                // Only severances after this connection was accepted count.
+                let mut sever_rx = sever_rx.clone();
+                sever_rx.borrow_and_update();
+                tokio::spawn(async move {
+                    let Ok(mut server) = TcpStream::connect(target).await else {
+                        return;
+                    };
+                    tokio::select! {
+                        _ = tokio::io::copy_bidirectional(&mut client, &mut server) => {}
+                        _ = sever_rx.changed() => {}
+                    }
+                });
+            }
+        });
+        Proxy {
+            addr,
+            accepted,
+            sever,
+        }
+    }
+
+    #[tokio::test]
+    async fn calls_share_one_connection_and_reconnect_after_it_dies() {
+        use std::sync::atomic::Ordering;
+        let (server_ep, _stop) = start(Endpoint::new("x"), echo).await;
+        let proxy = proxy_to(server_ep.address.clone()).await;
+        let transport = Http2Transport::new(Endpoint::new(proxy.addr.clone()));
+
+        let call_once = |t: Http2Transport| async move {
+            let call = t
+                .start_call("M", b"hi".to_vec(), &Metadata::new(), StreamingType::Unary)
+                .await?;
+            let items = collect(call).await;
+            items.into_iter().collect::<Result<Vec<_>, _>>()
+        };
+
+        // Sequential and concurrent calls (and clones of the transport) all
+        // ride on a single TCP connection.
+        for _ in 0..5 {
+            assert_eq!(call_once(transport.clone()).await.unwrap().len(), 2);
+        }
+        let concurrent: Vec<_> = (0..16).map(|_| call_once(transport.clone())).collect();
+        for r in futures::future::join_all(concurrent).await {
+            assert_eq!(r.unwrap().len(), 2);
+        }
+        assert_eq!(proxy.accepted.load(Ordering::SeqCst), 1);
+
+        // Kill the connection; the next call transparently reconnects.
+        proxy.sever.send(1).unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(call_once(transport.clone()).await.unwrap().len(), 2);
+        assert_eq!(proxy.accepted.load(Ordering::SeqCst), 2);
     }
 
     #[cfg(feature = "tls")]
