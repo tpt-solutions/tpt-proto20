@@ -57,6 +57,15 @@ fn parse_error_to_diagnostic(e: tpt20_language::ParseError, file: &str) -> Diagn
         ParseError::ExpectedNumber(at) => Diagnostic::error("E0016", "expected a numeric literal")
             .in_file(file)
             .at(at.line, at.column),
+        ParseError::NestingTooDeep(at) => Diagnostic::error(
+            "E0018",
+            format!(
+                "messages are nested deeper than {}",
+                tpt20_language::parser::MAX_NESTING_DEPTH
+            ),
+        )
+        .in_file(file)
+        .at(at.line, at.column),
         ParseError::Lex(unexpected) => {
             Diagnostic::error("E0017", format!("lexing error: {unexpected:?}")).in_file(file)
         }

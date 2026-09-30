@@ -53,10 +53,12 @@ see the unchecked items.
 - [x] limit-enforcement and malformed-input tests; fuzz targets for every
       decoder/parser (binary, JSON, text, schema, descriptor, dynamic, RPC
       framing, metadata)
-- [ ] malicious-schema test corpus (deeply nested / huge schemas through the
-      compiler) — partial
-- [ ] RPC abuse tests (connection floods, slow clients, oversized metadata) —
-      size limits are tested; flood/slow-client behavior is not
+- [x] malicious-schema test corpus (`compiler/tpt20-compiler/tests/hostile_schemas.rs`:
+      deep nesting, huge schemas, garbage input, run on a 512 KiB stack; the
+      parser caps message nesting at 64 — diagnostic E0018)
+- [x] RPC abuse tests (`http2::tests` in `tpt20-transport`: connection flood cap,
+      silent/garbage clients and handshake timeout, oversized metadata,
+      per-connection stream cap)
 
 ## 27.9 Documentation
 - [x] quickstart, schema language, wire format, RPC model, compatibility

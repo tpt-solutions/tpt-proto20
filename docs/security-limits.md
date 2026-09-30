@@ -129,3 +129,16 @@ the descriptor decoder, the dynamic message decoder, RPC framing, and
 metadata parsing. Security-limit conformance (decoder limits actually
 rejecting oversized/deep/malicious input) is covered by the native
 conformance suite.
+
+## HTTP/2 server connection limits
+
+`Endpoint` carries server-side abuse limits, all enforced by `Http2Server`:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `max_connections` | unlimited | connections past the cap are closed at accept |
+| `max_concurrent_streams` | 1024 | advertised to peers; excess streams queue/refuse |
+| `max_header_list_bytes` | 64 KiB | oversized metadata never reaches a handler |
+| `handshake_timeout` | 10 s | TLS + HTTP/2 handshake must finish in time |
+
+Idle established connections are reaped with `Endpoint::with_keepalive`.

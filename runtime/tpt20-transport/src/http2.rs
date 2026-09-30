@@ -748,6 +748,9 @@ struct ServerCfg {
     max: usize,
     codec: Codec,
     keepalive: Option<(Duration, Duration)>,
+    max_streams: u32,
+    max_header_list: u32,
+    handshake_timeout: Duration,
 }
 
 #[cfg(feature = "tls")]
@@ -835,7 +838,14 @@ impl Http2Server {
                 .endpoint
                 .keepalive_interval
                 .map(|i| (i, self.endpoint.keepalive_timeout)),
+            max_streams: self.endpoint.max_concurrent_streams,
+            max_header_list: self.endpoint.max_header_list_bytes,
+            handshake_timeout: self.endpoint.handshake_timeout,
         };
+        let slots = self
+            .endpoint
+            .max_connections
+            .map(|n| Arc::new(tokio::sync::Semaphore::new(n)));
         let (stop_tx, stop_rx) = watch::channel(false);
         tokio::pin!(shutdown);
         loop {
@@ -847,10 +857,19 @@ impl Http2Server {
                 accepted = listener.accept() => {
                     let (stream, _) = accepted.map_err(|e| TransportError::Io(e.to_string()))?;
                     let _ = stream.set_nodelay(true);
+                    // Over the connection cap: drop the socket right away.
+                    let permit = match &slots {
+                        Some(s) => match s.clone().try_acquire_owned() {
+                            Ok(p) => Some(p),
+                            Err(_) => continue,
+                        },
+                        None => None,
+                    };
                     let (acceptor, cfg, handler, stop_rx) =
                         (acceptor.clone(), cfg.clone(), handler.clone(), stop_rx.clone());
                     tokio::spawn(async move {
                         let _ = serve_tcp(stream, acceptor, cfg, handler, stop_rx).await;
+                        drop(permit);
                     });
                 }
             }
@@ -892,9 +911,9 @@ where
 {
     #[cfg(feature = "tls")]
     if let Some(acceptor) = acceptor {
-        let tls = acceptor
-            .accept(stream)
+        let tls = tokio::time::timeout(cfg.handshake_timeout, acceptor.accept(stream))
             .await
+            .map_err(|_| TransportError::Io("handshake timed out".into()))?
             .map_err(|e| TransportError::Tls(e.to_string()))?;
         return serve_io(tls, cfg, handler, stop).await;
     }
@@ -917,12 +936,18 @@ where
         + Clone
         + 'static,
 {
-    let mut conn = server::Builder::new()
-        .initial_window_size(STREAM_WINDOW)
-        .initial_connection_window_size(CONNECTION_WINDOW)
-        .handshake::<_, Bytes>(io)
-        .await
-        .map_err(map_h2_error)?;
+    let mut conn = tokio::time::timeout(
+        cfg.handshake_timeout,
+        server::Builder::new()
+            .initial_window_size(STREAM_WINDOW)
+            .initial_connection_window_size(CONNECTION_WINDOW)
+            .max_concurrent_streams(cfg.max_streams)
+            .max_header_list_size(cfg.max_header_list)
+            .handshake::<_, Bytes>(io),
+    )
+    .await
+    .map_err(|_| TransportError::Io("handshake timed out".into()))?
+    .map_err(map_h2_error)?;
     let mut ka: Pin<Box<dyn Future<Output = ()> + Send>> = match (cfg.keepalive, conn.ping_pong()) {
         (Some((interval, timeout)), Some(pings)) => Box::pin(keepalive(pings, interval, timeout)),
         _ => Box::pin(futures::future::pending()),
@@ -1798,5 +1823,138 @@ mod tests {
             .start_call("M", vec![], &Metadata::new(), StreamingType::Unary)
             .await;
         assert!(matches!(bad, Err(TransportError::Tls(_))));
+    }
+
+    // ---- abuse resistance -------------------------------------------------
+
+    async fn expect_eof(stream: &mut TcpStream, within: Duration) {
+        use tokio::io::AsyncReadExt;
+        let mut buf = [0u8; 1024];
+        let res = tokio::time::timeout(within, async {
+            loop {
+                match stream.read(&mut buf).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) => continue,
+                }
+            }
+        })
+        .await;
+        assert!(res.is_ok(), "server kept the connection open");
+    }
+
+    #[tokio::test]
+    async fn silent_client_is_dropped_after_handshake_timeout() {
+        let ep = Endpoint::new("x").with_handshake_timeout(Duration::from_millis(200));
+        let (ep, _stop) = start(ep, echo).await;
+        let mut sock = TcpStream::connect(&ep.address).await.unwrap();
+        // Never send the HTTP/2 preface.
+        expect_eof(&mut sock, Duration::from_secs(3)).await;
+        // The server still serves honest clients.
+        assert_eq!(echo_call(ep, b"hi".to_vec()).await.unwrap(), b"resp:hi");
+    }
+
+    #[tokio::test]
+    async fn garbage_preface_is_dropped() {
+        use tokio::io::AsyncWriteExt;
+        let (ep, _stop) = start(Endpoint::new("x"), echo).await;
+        let mut sock = TcpStream::connect(&ep.address).await.unwrap();
+        sock.write_all(&vec![0xffu8; 4096]).await.unwrap();
+        expect_eof(&mut sock, Duration::from_secs(3)).await;
+        assert_eq!(echo_call(ep, b"hi".to_vec()).await.unwrap(), b"resp:hi");
+    }
+
+    #[tokio::test]
+    async fn connection_flood_is_capped_and_slots_are_released() {
+        let ep = Endpoint::new("x")
+            .with_max_connections(2)
+            .with_handshake_timeout(Duration::from_millis(300));
+        let (ep, _stop) = start(ep, echo).await;
+        let mut held = [
+            TcpStream::connect(&ep.address).await.unwrap(),
+            TcpStream::connect(&ep.address).await.unwrap(),
+        ];
+        // Give the server time to accept both.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Everything beyond the cap is closed immediately.
+        for _ in 0..20 {
+            let mut extra = TcpStream::connect(&ep.address).await.unwrap();
+            expect_eof(&mut extra, Duration::from_secs(2)).await;
+        }
+        // Slow handshakes time out, freeing the slots for honest clients.
+        expect_eof(&mut held[0], Duration::from_secs(3)).await;
+        expect_eof(&mut held[1], Duration::from_secs(3)).await;
+        assert_eq!(echo_call(ep, b"ok".to_vec()).await.unwrap(), b"resp:ok");
+    }
+
+    #[tokio::test]
+    async fn oversized_metadata_never_reaches_the_handler() {
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let h = hits.clone();
+        let ep = Endpoint::new("x").with_max_header_list_bytes(2048);
+        let (ep, _stop) = start(ep, move |call| {
+            h.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            echo(call)
+        })
+        .await;
+        let mut md = Metadata::new();
+        md.insert("x-big", "a".repeat(64 * 1024));
+        let outcome = async {
+            let call = Http2Transport::new(ep.clone())
+                .start_call("M", b"x".to_vec(), &md, StreamingType::Unary)
+                .await?;
+            for item in collect(call).await {
+                item?;
+            }
+            Ok::<_, TransportError>(())
+        }
+        .await;
+        assert!(outcome.is_err(), "oversized metadata was accepted");
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(echo_call(ep, b"ok".to_vec()).await.unwrap(), b"resp:ok");
+    }
+
+    #[tokio::test]
+    async fn concurrent_streams_are_capped_per_connection() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let running = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let (r, p) = (running.clone(), peak.clone());
+        let ep = Endpoint::new("x").with_max_concurrent_streams(2);
+        let (ep, _stop) = start(ep, move |call| {
+            let (r, p) = (r.clone(), p.clone());
+            Box::pin(async move {
+                let now = r.fetch_add(1, Ordering::SeqCst) + 1;
+                p.fetch_max(now, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                r.fetch_sub(1, Ordering::SeqCst);
+                echo(call).await
+            })
+        })
+        .await;
+        let transport = Arc::new(Http2Transport::new(ep));
+        // Warm-up: makes sure the server's SETTINGS reached the client, which
+        // then queues streams beyond the cap instead of opening them.
+        let warm = transport
+            .start_call("M", vec![0], &Metadata::new(), StreamingType::Unary)
+            .await
+            .unwrap();
+        collect(warm).await;
+        let mut tasks = Vec::new();
+        for i in 0..8u8 {
+            let t = transport.clone();
+            tasks.push(tokio::spawn(async move {
+                let call = t
+                    .start_call("M", vec![i], &Metadata::new(), StreamingType::Unary)
+                    .await?;
+                for item in collect(call).await {
+                    item?;
+                }
+                Ok::<_, TransportError>(())
+            }));
+        }
+        for t in tasks {
+            t.await.unwrap().unwrap();
+        }
+        assert!(peak.load(Ordering::SeqCst) <= 2);
     }
 }

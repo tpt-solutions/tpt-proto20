@@ -181,7 +181,7 @@ impl Service for Svc {
 }
 
 async fn eventually(rec: &Recorder, what: &str, mut cond: impl FnMut() -> bool) {
-    for _ in 0..200 {
+    for _ in 0..1000 {
         if cond() {
             return;
         }

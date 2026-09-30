@@ -108,6 +108,16 @@ pub struct Endpoint {
     pub compression: Option<crate::Compression>,
     /// Messages shorter than this are never compressed.
     pub compression_min_bytes: usize,
+    /// Server: maximum simultaneously open connections (None = unlimited).
+    /// Connections beyond the limit are closed immediately.
+    pub max_connections: Option<usize>,
+    /// Server: maximum concurrent streams per connection.
+    pub max_concurrent_streams: u32,
+    /// Server: maximum size of a request's header list (metadata) in bytes.
+    pub max_header_list_bytes: u32,
+    /// Server: time allowed for the TLS + HTTP/2 handshake before the
+    /// connection is dropped.
+    pub handshake_timeout: std::time::Duration,
 }
 
 impl Endpoint {
@@ -122,6 +132,10 @@ impl Endpoint {
             keepalive_timeout: std::time::Duration::from_secs(20),
             compression: None,
             compression_min_bytes: 1024,
+            max_connections: None,
+            max_concurrent_streams: 1024,
+            max_header_list_bytes: 64 * 1024,
+            handshake_timeout: std::time::Duration::from_secs(10),
         }
     }
 
@@ -169,6 +183,30 @@ impl Endpoint {
     pub fn with_compression(mut self, algorithm: crate::Compression, min_bytes: usize) -> Self {
         self.compression = Some(algorithm);
         self.compression_min_bytes = min_bytes;
+        self
+    }
+
+    /// Server: caps simultaneously open connections.
+    pub fn with_max_connections(mut self, max: usize) -> Self {
+        self.max_connections = Some(max);
+        self
+    }
+
+    /// Server: caps concurrent streams per connection.
+    pub fn with_max_concurrent_streams(mut self, max: u32) -> Self {
+        self.max_concurrent_streams = max;
+        self
+    }
+
+    /// Server: caps the size of a request's metadata (header list).
+    pub fn with_max_header_list_bytes(mut self, max: u32) -> Self {
+        self.max_header_list_bytes = max;
+        self
+    }
+
+    /// Server: sets how long a new connection may take to finish its handshake.
+    pub fn with_handshake_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.handshake_timeout = timeout;
         self
     }
 
