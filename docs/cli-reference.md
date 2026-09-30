@@ -86,8 +86,16 @@ tpt20 gen rust --in <schema.tpt> --out <dir> [--builders]
 Compiles the schema and writes `<dir>/<package_file_stem>.rs` (e.g. package
 `user.v1` → `user_v1.rs`) using `tpt20-codegen-rust`. See
 [Code generation](code-generation.md) for what the output contains.
-`--builders` enables generated builder types. Other codegen backends
-(`compiler/tpt20-codegen-backends/`) are not yet exposed through `gen`.
+`--builders` enables generated builder types.
+
+## `gen go` / `gen java` / `gen python`
+
+```sh
+tpt20 gen <go|java|python> --in <schema.tpt> --out <dir> [--package-name NAME]
+```
+
+Writes message code plus a minimal runtime for the language (messages and
+binary wire format only; see [Polyglot code generation](polyglot.md)).
 
 ## `descriptors`
 

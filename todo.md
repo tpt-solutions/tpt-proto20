@@ -695,13 +695,13 @@ above for the underlying status.
 *Not required for v1. Rust is the reference implementation; this phase is deferred until
 the core system (Phases 0–20) is complete and stable.*
 
-- [ ] Multi-language codegen framework driven by the neutral IR
-- [ ] Go code generator (where feasible)
-- [ ] Go minimal runtime (where feasible)
-- [ ] Java code generator (where feasible)
-- [ ] Java minimal runtime (where feasible)
-- [ ] Python code generator (where feasible)
-- [ ] Python minimal runtime (where feasible)
+- [x] Multi-language codegen framework driven by the neutral IR (`tpt20-codegen-backends`: shared resolved model, `Backend` trait, `tpt20 gen go|java|python`)
+- [x] Go code generator (messages; services pending)
+- [x] Go minimal runtime (wire format + limits)
+- [x] Java code generator (messages; services pending)
+- [x] Java minimal runtime (wire format + limits)
+- [x] Python code generator (messages; services pending)
+- [x] Python minimal runtime (wire format + limits)
 - [ ] Cross-language interop tests: Go clients/servers
 - [ ] Cross-language interop tests: Java clients/servers
 - [ ] Cross-language interop tests: Python clients/servers

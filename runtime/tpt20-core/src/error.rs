@@ -47,6 +47,10 @@ pub enum DecodeError {
     #[error("maximum map entries exceeded")]
     MapEntriesExceeded,
 
+    /// A tag carried a field id that does not fit in 32 bits.
+    #[error("field id out of range")]
+    FieldIdOutOfRange,
+
     /// A scalar value (e.g. fixed32/64) was encoded with a wrong-length payload.
     #[error("malformed fixed-width scalar")]
     MalformedScalar,

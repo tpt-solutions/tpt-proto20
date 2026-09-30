@@ -1704,6 +1704,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "toml",
+ "tpt20-codegen-backends",
  "tpt20-codegen-rust",
  "tpt20-compat-protobuf",
  "tpt20-compiler",
@@ -1722,6 +1723,10 @@ dependencies = [
 [[package]]
 name = "tpt20-codegen-backends"
 version = "0.1.0"
+dependencies = [
+ "thiserror 1.0.69",
+ "tpt20-ir",
+]
 
 [[package]]
 name = "tpt20-codegen-rust"
@@ -1740,6 +1745,7 @@ dependencies = [
  "prost",
  "serde_json",
  "tokio",
+ "tpt20-codegen-backends",
  "tpt20-codegen-rust",
  "tpt20-compat-protobuf",
  "tpt20-compiler",

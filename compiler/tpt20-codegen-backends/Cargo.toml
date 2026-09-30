@@ -7,3 +7,5 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+thiserror.workspace = true
+tpt20-ir = { path = "../tpt20-ir" }

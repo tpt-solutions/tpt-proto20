@@ -370,6 +370,26 @@ enum GenBackend {
         #[arg(long)]
         no_services: bool,
     },
+    /// Generate Go code (messages + minimal runtime; Go 1.21+)
+    Go(PolyglotArgs),
+    /// Generate Java code (messages + minimal runtime; Java 11+)
+    Java(PolyglotArgs),
+    /// Generate Python code (messages + minimal runtime; Python 3.8+)
+    Python(PolyglotArgs),
+}
+
+/// Options shared by the non-Rust backends.
+#[derive(clap::Args, Debug)]
+struct PolyglotArgs {
+    /// Input schema file
+    #[arg(short, long = "in")]
+    input: PathBuf,
+    /// Output directory
+    #[arg(short, long = "out")]
+    output: PathBuf,
+    /// Package/module name (default: derived from the schema package)
+    #[arg(long)]
+    package_name: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1015,7 +1035,34 @@ fn cmd_gen(backend: GenBackend) -> Result<(), CliError> {
             println!("generated {}", dest.display());
             Ok(())
         }
+        GenBackend::Go(args) => gen_polyglot("go", args),
+        GenBackend::Java(args) => gen_polyglot("java", args),
+        GenBackend::Python(args) => gen_polyglot("python", args),
     }
+}
+
+fn gen_polyglot(name: &str, args: PolyglotArgs) -> Result<(), CliError> {
+    let src = fs::read_to_string(&args.input)?;
+    let compiled = tpt20_compiler::compile(&src, args.input.to_str())
+        .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
+    let backend = tpt20_codegen_backends::backend(name)
+        .ok_or_else(|| CliError::Usage(format!("unknown backend `{name}`")))?;
+    let options = tpt20_codegen_backends::BackendOptions {
+        package_name: args.package_name,
+        ..Default::default()
+    };
+    let files = backend
+        .generate(&compiled.ir, &options)
+        .map_err(|e| CliError::Usage(e.to_string()))?;
+    for file in files {
+        let dest = args.output.join(&file.path);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&dest, file.contents)?;
+        println!("generated {}", dest.display());
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

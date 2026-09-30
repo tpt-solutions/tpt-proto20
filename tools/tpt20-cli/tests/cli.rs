@@ -592,3 +592,37 @@ fn conformance_reports_failing_cases_with_exit_code_1() {
     assert!(stdout(&o).contains("PASS bad/good"));
     assert!(stdout(&o).contains("1 passed, 3 failed"), "{}", stdout(&o));
 }
+
+#[test]
+fn gen_python_go_java_write_code_and_runtime() {
+    let dir = std::env::temp_dir().join(format!("tpt20-cli-gen-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let schema = dir.join("demo.tpt");
+    std::fs::write(
+        &schema,
+        "package demo.v1;\nmessage Ping { 1: text string; 2: n int32; }\n",
+    )
+    .unwrap();
+    for (lang, expected) in [
+        ("python", vec!["demo_v1.py", "tpt20_runtime.py"]),
+        ("go", vec!["go.mod", "demo_v1.go", "tpt20_runtime.go"]),
+        (
+            "java",
+            vec!["demo_v1/Ping.java", "demo_v1/Tpt20Runtime.java"],
+        ),
+    ] {
+        let out = dir.join(lang);
+        let status = std::process::Command::new(env!("CARGO_BIN_EXE_tpt20"))
+            .args(["gen", lang, "--in"])
+            .arg(&schema)
+            .arg("--out")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "{lang}: {status:?}");
+        for f in expected {
+            assert!(out.join(f).is_file(), "{lang}: missing {f}");
+        }
+    }
+}
