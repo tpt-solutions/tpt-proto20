@@ -141,12 +141,27 @@ type Codec = Option<(Compression, usize)>;
 
 /// Frames `payload`, compressing it when a codec is set, the message is at
 /// least the codec's minimum size, and compression actually shrinks it.
+/// Payloads at least twice this long are probed before compressing: if the
+/// first `PROBE_BYTES` do not shrink, the whole message is sent as is.
+const PROBE_BYTES: usize = 4096;
+
+/// True when a prefix of `payload` compresses well enough to be worth
+/// compressing the whole message. Short payloads are not probed.
+fn worth_compressing(alg: Compression, payload: &[u8]) -> bool {
+    if payload.len() < 2 * PROBE_BYTES {
+        return true;
+    }
+    let probe = compress(alg, &payload[..PROBE_BYTES]);
+    // Require at least a 5% saving on the sample.
+    probe.len() * 100 < PROBE_BYTES * 95
+}
+
 fn encode_message(payload: &[u8], max: usize, codec: Codec) -> Result<Bytes, TransportError> {
     if payload.len() > max {
         return Err(TransportError::SizeLimitExceeded { limit: max });
     }
     if let Some((alg, min)) = codec {
-        if payload.len() >= min {
+        if payload.len() >= min && worth_compressing(alg, payload) {
             let packed = compress(alg, payload);
             if packed.len() < payload.len() {
                 return Ok(Bytes::from(Frame::encode_with(
@@ -1922,6 +1937,35 @@ mod tests {
         let with_identity = trust_only.with_client_identity_pem(client_cert, client_key);
         let ok = echo_call(ep.with_tls(with_identity), b"mtls".to_vec()).await;
         assert_eq!(ok.unwrap(), b"resp:mtls");
+    }
+
+    fn frame_is_compressed(framed: &Bytes) -> bool {
+        // Flags byte is the first byte of the 5-byte frame header.
+        FrameFlags::from_raw(framed[0]).unwrap().is_compressed()
+    }
+
+    #[test]
+    fn incompressible_payloads_skip_compression_after_a_probe() {
+        let mut x = 0x1234_5678_9abc_def0u64;
+        let noise: Vec<u8> = (0..64 * 1024)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                x as u8
+            })
+            .collect();
+        let codec = Some((Compression::Gzip, 0));
+        assert!(!worth_compressing(Compression::Gzip, &noise));
+        let framed = encode_message(&noise, 1 << 20, codec).unwrap();
+        assert!(!frame_is_compressed(&framed));
+
+        let text = b"the quick brown fox ".repeat(4096);
+        assert!(worth_compressing(Compression::Gzip, &text));
+        let framed = encode_message(&text, 1 << 20, codec).unwrap();
+        assert!(frame_is_compressed(&framed));
+        // Short payloads are never probed, only compared after compressing.
+        assert!(worth_compressing(Compression::Gzip, &noise[..1000]));
     }
 
     // ---- abuse resistance -------------------------------------------------

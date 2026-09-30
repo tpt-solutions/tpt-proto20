@@ -11,6 +11,7 @@ use crate::wire;
 use futures::stream::BoxStream;
 use futures::{SinkExt, StreamExt};
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tpt20_core::DecodeError;
 use tpt20_transport::{Call, ResponseStream, StreamItem, StreamingType, Transport};
@@ -315,12 +316,16 @@ where
         decode: D,
         done: bool,
         obs: CallObserver,
+        /// One timer for the whole stream instead of one per message.
+        timer: Pin<Box<tokio::time::Sleep>>,
         _pump: Option<AbortOnDrop>,
     }
+    let timer = Box::pin(tokio::time::sleep(ctx.remaining_time()));
     let state = State {
         stream,
         ctx,
         decode,
+        timer,
         done: false,
         obs,
         _pump: pump,
@@ -329,7 +334,15 @@ where
         if st.done {
             return None;
         }
-        let next = guard(&st.ctx, async { Ok(st.stream.next().await) }).await;
+        let next = tokio::select! {
+            item = st.stream.next() => Ok(item),
+            _ = &mut st.timer => {
+                Err(RpcError::deadline_exceeded("deadline exceeded").finish())
+            }
+            _ = st.ctx.cancellation().wait_cancelled() => {
+                Err(RpcError::cancelled("call cancelled").finish())
+            }
+        };
         let item = match next {
             Err(e) => {
                 st.done = true;

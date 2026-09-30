@@ -100,27 +100,35 @@ Ordered by expected payoff. None of these are correctness issues.
    Canonical encode: repeated 36.7 → 11.8 µs (3.1×), maps 93 → 54 µs (1.7×),
    small 251 → 183 ns. The order is unchanged (`field_id, wire_class,
    payload`), so canonical bytes are identical to before.
-3. **Unknown-field preservation** (partly done). The generated decoder now
-   moves unknown fields out of the decoded `RawMessage` instead of cloning
-   them (100 pairs: 23.7 → 18.3 µs). The remaining gap to the discard path
-   (3.3 µs) is one allocation per length-delimited unknown field; storing
-   unknowns as spans of one shared buffer would remove it but changes the
-   public `unknown_fields` type.
+3. **Unknown-field preservation** (partly done; remainder deliberately
+   deferred). The generated decoder moves unknown fields out of the decoded
+   `RawMessage` instead of cloning them (100 pairs: 23.7 → 18.3 µs). The
+   remaining gap to the discard path (3.3 µs) is one allocation per
+   length-delimited unknown field, made by the core filtered decoder before the
+   generated code sees the field. Removing it means teaching `tpt20-core`'s
+   decoder to hand out unknown fields as spans of the input, and changing the
+   representation behind the (doc-hidden) `unknown_fields` member of every
+   generated message. That only pays for messages that carry many unknown
+   length-delimited fields, so it is not worth a cross-crate representation
+   change; revisit if a real workload (proxies that forward newer-schema
+   messages) shows it in a profile.
 4. ~~Map decode~~ — **done.** Entries are parsed with the borrowed decoder
    (no per-entry `RawMessage`/payload copies): maps ×100 decode 58 → 42 µs.
-5. **Per-call timers in the RPC runtime.** Every call arms a `tokio` sleep for
-   the deadline in both `Channel` and `Server`; in-process unary is 71 µs
-   mostly from task/timer/mutex overhead rather than encoding (~0.3 µs).
-   Sharing one timer wheel entry per call and avoiding the `Mutex` around the
-   response sender on the unary fast path are the obvious cuts.
-6. **Compression** — implemented (gzip/deflate, `flate2`). On loopback, where
-   bandwidth is free, compressing a 64 KiB text body costs ~60–100 µs of CPU
-   (472 → 535 µs) — it pays off only on a real network; incompressible data
-   costs ~4× because both directions try to compress and then discard the
-   result. A cheap entropy probe (compress a 4 KiB prefix first) or
-   remembering per-stream that recent messages did not shrink would avoid
-   that; until then leave compression off (or raise `compression_min_bytes`)
-   for incompressible payloads.
+5. ~~Per-call timers in the RPC runtime~~ — **investigated, done.** Streaming
+   responses now share one timer per stream instead of arming one per message.
+   The hypothesis that the in-process unary cost (71 µs) came from timers and
+   the response-sender mutex did not hold: a `try_lock` fast path changed
+   nothing, and running the same benchmark on a current-thread runtime gives
+   **5.3 µs** per unary call. The 71 µs is cross-thread wakeup latency of the
+   multi-thread scheduler (client task → server task → client task), not
+   runtime overhead; nothing in `tpt20-rpc` is left to cut there.
+6. ~~Compression of incompressible data~~ — **done.** Payloads of at least
+   8 KiB are probed: the first 4 KiB are compressed, and if they do not shrink
+   by at least 5 % the message is sent uncompressed without compressing the
+   rest. Shorter payloads are compressed and kept only if smaller, as before.
+   A compressible tail behind an incompressible prefix is not compressed — an
+   accepted trade-off. (On loopback, compressing compressible data still costs
+   CPU for no bandwidth gain; it pays off on a real network.)
 7. ~~Flow control~~ — **done.** The 64 KiB default HTTP/2 window forced a
    WINDOW_UPDATE round trip for larger messages; both `h2` builders now
    advertise 2 MiB stream / 8 MiB connection windows (64 KiB echo

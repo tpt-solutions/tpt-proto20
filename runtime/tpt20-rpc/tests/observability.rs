@@ -284,8 +284,11 @@ async fn calls_are_measured_logged_and_traced() {
         .unwrap_err();
     assert_eq!(e.status(), Status::DeadlineExceeded);
     assert_eq!(rec.sum("deadline", &["client", "Slow"]), 1);
-    eventually(rec, "server deadline", || {
-        rec.sum("deadline", &["server", "Slow"]) == 1
+    // Client and server deadlines expire together; whichever side wins the
+    // race, the server must record exactly one abnormal end for the call
+    // (its own deadline, or the client going away first).
+    eventually(rec, "server deadline or client-gone", || {
+        rec.sum("deadline", &["server", "Slow"]) + rec.sum("cancelled", &["server", "Slow"]) == 1
     })
     .await;
 
