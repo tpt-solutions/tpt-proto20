@@ -553,11 +553,11 @@ diagram in spec §5 and the repo layout in spec §26.
   - [x] Streaming call support
 - [x] CLI command: `tpt20 health` (`tpt20.health.v1.Health/Check`)
 - [x] CLI command: `tpt20 reflect`
-- [x] CLI command: `tpt20 registry publish` (local-filesystem registry only)
-- [ ] `tpt20-registry` service/storage design
+- [x] CLI command: `tpt20 registry publish` / `list` / `get` (local-filesystem registry)
+- [x] `tpt20-registry` service/storage design (local filesystem)
   - [x] Schema storage keyed by fingerprint/version
-  - [x] Publish workflow
-  - [ ] Lookup/fetch workflow (no lookup/fetch code path exists at all yet)
+  - [x] Publish workflow (immutable versions, `--force` override)
+  - [x] Lookup/fetch workflow (`registry list` / `registry get`, integrity-verified)
 
 ---
 

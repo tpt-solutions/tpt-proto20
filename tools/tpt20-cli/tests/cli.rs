@@ -317,3 +317,114 @@ fn health_and_call_over_tls_with_custom_ca() {
     let o = tpt20(&["health", &format!("https://{addr}")]);
     assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
 }
+
+#[test]
+fn registry_publish_list_get_roundtrip_and_immutability() {
+    let dir = tmp("marker", b"");
+    let reg = dir.parent().unwrap().join("registry");
+    let reg = reg.to_str().unwrap();
+    let v1 = tmp("a.tpt", b"package reg.v1;\nmessage A { 1: id int64; }\n");
+    let v1b = tmp(
+        "b.tpt",
+        b"package reg.v1;\nmessage A { 1: id int64; 2: name string; }\n",
+    );
+
+    let o = tpt20(&[
+        "registry",
+        "publish",
+        v1.to_str().unwrap(),
+        "-r",
+        reg,
+        "-v",
+        "1.0.0",
+    ]);
+    assert!(o.status.success(), "{}", stderr(&o));
+
+    // Re-publishing identical content is a no-op.
+    let o = tpt20(&[
+        "registry",
+        "publish",
+        v1.to_str().unwrap(),
+        "-r",
+        reg,
+        "-v",
+        "1.0.0",
+    ]);
+    assert!(o.status.success());
+    assert!(stdout(&o).contains("already published"));
+
+    // Different content under the same label is refused...
+    let o = tpt20(&[
+        "registry",
+        "publish",
+        v1b.to_str().unwrap(),
+        "-r",
+        reg,
+        "-v",
+        "1.0.0",
+    ]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(stderr(&o).contains("immutable"), "{}", stderr(&o));
+    // ...unless forced; a new label is always fine.
+    let o = tpt20(&[
+        "registry",
+        "publish",
+        v1b.to_str().unwrap(),
+        "-r",
+        reg,
+        "-v",
+        "1.1.0",
+    ]);
+    assert!(o.status.success(), "{}", stderr(&o));
+
+    let o = tpt20(&["registry", "list", "-r", reg]);
+    let out = stdout(&o);
+    assert!(out.contains("1.0.0") && out.contains("1.1.0"), "{out}");
+    assert!(!out.contains("\tnow"), "{out}");
+
+    // get by label → valid descriptor JSON; binary format also works.
+    let o = tpt20(&["registry", "get", "1.1.0", "-r", reg]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stdout(&o).contains("\"name\""), "{}", stdout(&o));
+    let o = tpt20(&["registry", "get", "1.0.0", "-r", reg, "-f", "binary"]);
+    assert!(o.status.success() && !o.stdout.is_empty());
+
+    // get by fingerprint prefix (from `list`'s 16-char column)
+    let listing = stdout(&tpt20(&["registry", "list", "-r", reg]));
+    let fp = listing
+        .lines()
+        .find(|l| l.starts_with("1.0.0"))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .unwrap()
+        .to_string();
+    let o = tpt20(&["registry", "get", &fp, "-r", reg]);
+    assert!(o.status.success(), "{}", stderr(&o));
+
+    // unknown versions and unsafe labels are errors
+    let o = tpt20(&["registry", "get", "9.9.9", "-r", reg]);
+    assert_eq!(o.status.code(), Some(1));
+    let o = tpt20(&[
+        "registry",
+        "publish",
+        v1.to_str().unwrap(),
+        "-r",
+        reg,
+        "-v",
+        "../escape",
+    ]);
+    assert_eq!(o.status.code(), Some(2));
+
+    // tampering with a stored descriptor is detected on fetch
+    let stored = std::path::Path::new(reg)
+        .join("1.0.0")
+        .join("descriptor.json");
+    let original = fs::read_to_string(&stored).unwrap();
+    let tampered = original
+        .replace("\"name\": \"id\"", "\"name\": \"idx\"")
+        .replace("\"name\":\"id\"", "\"name\":\"idx\"");
+    assert_ne!(tampered, original, "tamper must change the descriptor");
+    fs::write(&stored, tampered).unwrap();
+    let o = tpt20(&["registry", "get", "1.0.0", "-r", reg]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(stderr(&o).contains("fingerprint"), "{}", stderr(&o));
+}

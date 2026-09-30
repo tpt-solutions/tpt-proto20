@@ -347,6 +347,31 @@ enum RegistryCommands {
         /// Version label (defaults to package name)
         #[arg(short, long)]
         version: Option<String>,
+        /// Overwrite an already published version whose contents differ
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// List published versions
+    List {
+        /// Registry root directory (defaults to ~/.tpt20/registry)
+        #[arg(short, long)]
+        registry: Option<PathBuf>,
+    },
+
+    /// Fetch a published descriptor by version label or fingerprint
+    Get {
+        /// Version label, or (a prefix of at least 8 characters of) a fingerprint
+        version: String,
+        /// Registry root directory (defaults to ~/.tpt20/registry)
+        #[arg(short, long)]
+        registry: Option<PathBuf>,
+        /// Output format: json or binary
+        #[arg(short, long, default_value = "json")]
+        format: DescriptorFormat,
+        /// Output file (defaults to stdout)
+        #[arg(short, long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -1683,22 +1708,41 @@ fn cmd_reflect(file: PathBuf, message: Option<String>) -> Result<(), CliError> {
 // registry
 // ---------------------------------------------------------------------------
 
+fn registry_root(registry: Option<PathBuf>) -> PathBuf {
+    registry.unwrap_or_else(|| {
+        home::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".tpt20")
+            .join("registry")
+    })
+}
+
+/// Version labels become directory names; keep them to a safe charset so a
+/// label can never escape the registry root.
+fn validate_version_label(v: &str) -> Result<(), CliError> {
+    let ok = !v.is_empty()
+        && v != "."
+        && v != ".."
+        && v.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+'));
+    if ok {
+        Ok(())
+    } else {
+        Err(CliError::Usage(format!(
+            "invalid version label `{v}` (allowed: letters, digits, `.`, `_`, `-`, `+`)"
+        )))
+    }
+}
+
 fn cmd_registry(command: RegistryCommands) -> Result<(), CliError> {
     match command {
         RegistryCommands::Publish {
             file,
             registry,
             version,
+            force,
         } => {
-            let registry = registry.unwrap_or_else(|| {
-                home::home_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join(".tpt20")
-                    .join("registry")
-            });
-
-            fs::create_dir_all(&registry)?;
-
+            let registry = registry_root(registry);
             let src = fs::read_to_string(&file)?;
             let compiled = tpt20_compiler::compile(&src, file.to_str())
                 .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
@@ -1710,20 +1754,88 @@ fn cmd_registry(command: RegistryCommands) -> Result<(), CliError> {
                     .clone()
                     .unwrap_or_else(|| "default".to_string())
             });
-
-            let descriptor_json = compiled.descriptor.to_json()?;
-            let version_dir = registry.join(&version);
-            fs::create_dir_all(&version_dir)?;
-
-            let descriptor_path = version_dir.join("descriptor.json");
-            fs::write(&descriptor_path, descriptor_json)?;
+            validate_version_label(&version)?;
 
             let mut manifest = LocalManifest::load_or_default(&registry);
+            if let Some(existing) = manifest.versions.iter().find(|v| v.version == version) {
+                if existing.fingerprint == compiled.fingerprint {
+                    println!(
+                        "{version} is already published with this fingerprint ({})",
+                        registry.display()
+                    );
+                    return Ok(());
+                }
+                if !force {
+                    return Err(CliError::Registry(format!(
+                        "version `{version}` is already published with a different fingerprint \
+                         ({}); published versions are immutable — choose a new --version or pass --force",
+                        existing.fingerprint
+                    )));
+                }
+            }
+
+            fs::create_dir_all(&registry)?;
+            let version_dir = registry.join(&version);
+            fs::create_dir_all(&version_dir)?;
+            fs::write(
+                version_dir.join("descriptor.json"),
+                compiled.descriptor.to_json()?,
+            )?;
+
             manifest.record_version(&version, &compiled.fingerprint, "strict");
             manifest.save(&registry)?;
 
             println!("published {} to registry ({})", version, registry.display());
             Ok(())
+        }
+        RegistryCommands::List { registry } => {
+            let registry = registry_root(registry);
+            let manifest = LocalManifest::load_or_default(&registry);
+            if manifest.versions.is_empty() {
+                println!("no versions published in {}", registry.display());
+                return Ok(());
+            }
+            println!(
+                "{:<24} {:<18} {:<8} PUBLISHED",
+                "VERSION", "FINGERPRINT", "POLICY"
+            );
+            for v in &manifest.versions {
+                let fp: String = v.fingerprint.chars().take(16).collect();
+                println!(
+                    "{:<24} {:<18} {:<8} {}",
+                    v.version, fp, v.policy, v.published_at
+                );
+            }
+            Ok(())
+        }
+        RegistryCommands::Get {
+            version,
+            registry,
+            format,
+            out,
+        } => {
+            let registry = registry_root(registry);
+            let manifest = LocalManifest::load_or_default(&registry);
+            let record = manifest.find(&version)?;
+            validate_version_label(&record.version)?;
+            let path = registry.join(&record.version).join("descriptor.json");
+            let json = fs::read_to_string(&path)
+                .map_err(|e| CliError::Registry(format!("cannot read {}: {e}", path.display())))?;
+            let mut descriptor = tpt20_descriptor::Descriptor::from_json(&json)?;
+            // Verify integrity: the stored descriptor must still hash to the
+            // fingerprint recorded at publish time.
+            let actual = descriptor.compute_fingerprint();
+            if actual != record.fingerprint {
+                return Err(CliError::Registry(format!(
+                    "descriptor for `{}` does not match its recorded fingerprint \
+                     (recorded {}, actual {actual}); the registry entry was modified",
+                    record.version, record.fingerprint
+                )));
+            }
+            match format {
+                DescriptorFormat::Json => write_output_str(&descriptor.to_json()?, out),
+                DescriptorFormat::Binary => write_output(&descriptor.to_binary()?, out),
+            }
         }
     }
 }
@@ -1775,13 +1887,73 @@ impl LocalManifest {
     }
 
     fn record_version(&mut self, version: &str, fingerprint: &str, policy: &str) {
+        // A forced re-publish replaces the earlier record of that label.
+        self.versions.retain(|v| v.version != version);
         self.versions.push(VersionRecord {
             version: version.to_string(),
             fingerprint: fingerprint.to_string(),
             policy: policy.to_string(),
-            published_at: "now".to_string(),
+            published_at: utc_now_iso8601(),
         });
     }
+
+    /// Finds a record by exact version label, else by fingerprint prefix
+    /// (at least 8 characters, and unambiguous).
+    fn find(&self, query: &str) -> Result<&VersionRecord, CliError> {
+        if let Some(v) = self.versions.iter().find(|v| v.version == query) {
+            return Ok(v);
+        }
+        if query.len() >= 8 {
+            let matches: Vec<&VersionRecord> = self
+                .versions
+                .iter()
+                .filter(|v| v.fingerprint.starts_with(query))
+                .collect();
+            match matches.as_slice() {
+                [one] => return Ok(one),
+                [] => {}
+                _ => {
+                    return Err(CliError::Registry(format!(
+                        "fingerprint prefix `{query}` is ambiguous"
+                    )))
+                }
+            }
+        }
+        Err(CliError::Registry(format!(
+            "no published version or fingerprint matches `{query}`"
+        )))
+    }
+}
+
+/// Current UTC time as `YYYY-MM-DDTHH:MM:SSZ` (no date-time dependency).
+fn utc_now_iso8601() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format_unix_utc(secs)
+}
+
+fn format_unix_utc(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    // Civil-from-days (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1791,6 +1963,24 @@ impl LocalManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unix_time_formats_as_utc() {
+        assert_eq!(format_unix_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(format_unix_utc(951_782_400), "2000-02-29T00:00:00Z");
+        assert_eq!(format_unix_utc(1_709_210_096), "2024-02-29T12:34:56Z");
+        assert_eq!(format_unix_utc(4_102_444_799), "2099-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn version_labels_cannot_escape_the_registry() {
+        for bad in ["", ".", "..", "../x", "a/b", "a\\b", "sp ace"] {
+            assert!(validate_version_label(bad).is_err(), "{bad:?}");
+        }
+        for ok in ["user.v1", "v1.2.3-rc+build_4"] {
+            assert!(validate_version_label(ok).is_ok(), "{ok:?}");
+        }
+    }
 
     #[test]
     fn format_preserves_semantics() {

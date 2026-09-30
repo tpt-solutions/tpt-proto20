@@ -243,22 +243,33 @@ list: name, ID, type (including `repeated T` / `map<K, V>` shape), and
 presence (`implicit`/`explicit`). This is the schema-aware inspection tool —
 prefer it over `decode` when you need field names and types, not just IDs.
 
-## `registry publish`
+## `registry`
 
 ```sh
-tpt20 registry publish <file> [--registry DIR] [--version LABEL]
+tpt20 registry publish <file> [--registry DIR] [--version LABEL] [--force]
+tpt20 registry list [--registry DIR]
+tpt20 registry get <version|fingerprint-prefix> [--registry DIR]
+                   [--format json|binary] [--out FILE]
 ```
 
-Compiles the schema and writes its descriptor (`descriptor.json`) into
-`<registry>/<version>/` (default registry root: `~/.tpt20/registry`; default
-version label: the schema's package name), then records the version,
-fingerprint, and a `"strict"` compatibility policy in a local
-`manifest.json`-style file alongside it.
+A local-filesystem registry (default root `~/.tpt20/registry`):
 
-> **No corresponding lookup/fetch command exists yet.** `registry publish`
-> writes files a human or script can read directly from the registry
-> directory, but there is no `tpt20 registry get`/`list` to query them back
-> through the CLI (`todo.md` Phase 16).
+- `publish` compiles the schema and writes its descriptor
+  (`<registry>/<version>/descriptor.json`) plus a manifest entry (version,
+  fingerprint, `"strict"` policy, UTC publish time). The version label
+  defaults to the package name and may only contain letters, digits and
+  `. _ - +`. **Published versions are immutable:** re-publishing the same
+  content is a no-op; different content under an existing label is an error
+  unless `--force` is given.
+- `list` prints versions with (truncated) fingerprints, policy and publish
+  time.
+- `get` fetches a descriptor by version label or by a fingerprint prefix
+  (≥ 8 characters, unambiguous) and prints it as JSON or writes the binary
+  form. It **verifies integrity**: the stored descriptor is re-fingerprinted
+  and must match the manifest, otherwise the command fails.
+
+The `"strict"` compatibility policy is recorded but not enforced at publish
+time yet (`tpt20 diff` checks two schema files directly).
 
 ## Exit codes
 
@@ -279,4 +290,4 @@ fingerprint, and a `"strict"` compatibility policy in a local
 | `conformance` | Stub — does not run the real suite |
 | `call` | Fully functional over HTTP/2 (TLS, metadata, deadline, streaming); no compression |
 | `health` | Fully functional (`tpt20.health.v1.Health/Check`) |
-| `registry publish` | Functional (local filesystem only, no lookup/fetch) |
+| `registry publish` / `list` / `get` | Functional (local filesystem; immutable versions, integrity-checked fetch) |
