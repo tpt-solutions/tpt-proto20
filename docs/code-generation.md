@@ -261,3 +261,12 @@ admin tool that only has a descriptor at runtime — `DynamicMessage` in
 `tpt20-core`/`tpt20-reflect` decodes and manipulates messages purely from
 their descriptor, with the same wire format and limits. See the reflection
 examples referenced from [Security limits](security-limits.md) and spec §13.
+
+## Recursive messages
+
+A message that refers to itself (directly, through a repeated/map field, or
+through other messages or oneofs) is supported. Singular message fields and
+oneof message payloads that sit on a cycle are emitted as `Option<Box<T>>` /
+`Box<T>` so the generated types have finite size; repeated and map fields
+already heap-allocate and are unchanged. Borrowed views follow the same rule.
+Nesting is bounded at decode time by `DecoderLimits::max_depth`.

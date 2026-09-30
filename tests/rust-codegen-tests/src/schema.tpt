@@ -71,3 +71,24 @@ service Pinger {
   Fail(PingRequest) returns (PingReply);
   GetHTTPStatus(PingRequest) returns (PingReply);
 }
+
+message Tree {
+  1: value int64;
+  2: left Tree;
+  3: right Tree;
+  4: children repeated Tree;
+  5: by_name map<string, Tree>;
+}
+
+message Pair {
+  1: l Expr;
+  2: r Expr;
+}
+
+message Expr {
+  oneof kind {
+    1: lit int64;
+    2: neg Expr;
+    3: add Pair;
+  }
+}

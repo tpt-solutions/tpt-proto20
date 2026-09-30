@@ -33,16 +33,54 @@ pub(crate) struct Emitter<'a> {
     opts: &'a CodegenOptions,
     model: Model,
     out: String,
+    /// `(owner message, field id)` of singular message fields (and oneof
+    /// message members) that are part of a type cycle and must be boxed.
+    boxed: std::collections::HashSet<(String, u32)>,
+    /// Flat name of the message currently being emitted.
+    cur_owner: String,
+    /// Messages whose borrowed view really borrows from the input (a string
+    /// or bytes value somewhere in it, directly or via nested views). Views
+    /// outside this set carry the lifetime only through a marker field.
+    borrowing: std::collections::HashSet<String>,
 }
 
 impl<'a> Emitter<'a> {
     pub(crate) fn new(pkg: &'a ir::PackageIr, opts: &'a CodegenOptions) -> Emitter<'a> {
         let model = Model::build(pkg);
+        let boxed = compute_boxed(pkg, &model);
+        let borrowing = compute_borrowing(pkg, &model);
         Emitter {
             pkg,
             opts,
             model,
             out: String::new(),
+            boxed,
+            cur_owner: String::new(),
+            borrowing,
+        }
+    }
+
+    /// Whether the singular message field `id` of the current message needs
+    /// `Box` indirection (recursive types would otherwise have infinite size).
+    fn is_boxed(&self, id: u32) -> bool {
+        self.boxed.contains(&(self.cur_owner.clone(), id))
+    }
+
+    /// `Box<ty>` when field `id` of the current message is boxed, else `ty`.
+    fn boxed_ty(&self, id: u32, ty: &str) -> String {
+        if self.is_boxed(id) {
+            format!("Box<{ty}>")
+        } else {
+            ty.to_string()
+        }
+    }
+
+    /// `Box::new(expr)` when field `id` of the current message is boxed.
+    fn boxed_expr(&self, id: u32, expr: &str) -> String {
+        if self.is_boxed(id) {
+            format!("Box::new({expr})")
+        } else {
+            expr.to_string()
         }
     }
 
@@ -277,6 +315,11 @@ impl std::error::Error for BuildError {}
             } else {
                 self.owned_type(scope, &t.path)
             };
+            let vty = if self.resolve_ref(scope, &t.path).1 == TypeKind::Message {
+                self.boxed_ty(mf.id, &vty)
+            } else {
+                vty
+            };
             s.push_str(&format!(
                 "    /// Field id {}.\n    {variant}({vty}),\n",
                 mf.id
@@ -473,6 +516,7 @@ impl Default for {flat} {{
     fn emit_message(&mut self, scope: &[String], msg: &ir::MessageIr) {
         let ctx = self.msg_ctx(scope, msg);
         let inner_scope = ctx.scope.clone();
+        self.cur_owner = ctx.flat.clone();
 
         // ---- Owned struct -------------------------------------------------
         let mut s = String::new();
@@ -542,7 +586,7 @@ impl Default for {flat} {{
                 let kind = self.resolve_ref(scope, &t.path).1;
                 let base = self.owned_type(scope, &t.path);
                 match kind {
-                    TypeKind::Message => format!("Option<{base}>"),
+                    TypeKind::Message => format!("Option<{}>", self.boxed_ty(f.id, &base)),
                     _ => match f.presence {
                         ir::Presence::Explicit => format!("Option<{base}>"),
                         ir::Presence::Implicit => base,
@@ -941,8 +985,10 @@ r#"        for (k, v) in &self.{fname} {{
                     TypeKind::Message => {
                         let ty = self.owned_type(scope, &t.path);
                         let method = format!("{ty}::decode_inner");
+                        let value =
+                            self.boxed_expr(f.id, &format!("{method}(sub, limits, depth + 1)?"));
                         format!(
-   "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    {target}.{fname} = Some({method}(sub, limits, depth + 1)?);\n                }}\n",
+   "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    {target}.{fname} = Some({value});\n                }}\n",
                                f.id,
                                class_name(crate::WireClass::Len),
                            )
@@ -1209,8 +1255,9 @@ r#"        for (k, v) in &self.{fname} {{
                 } else {
                     "__scalar::decode_bytes(&field.value)"
                 };
+                let value = self.boxed_expr(mf.id, &format!("{method}(sub, limits, depth + 1)?"));
                 format!(
-   "                ({}, {}) => {{\n                    let sub = {bytes_dec}?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({method}(sub, limits, depth + 1)?));\n                }}\n",
+   "                ({}, {}) => {{\n                    let sub = {bytes_dec}?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({value}));\n                }}\n",
                      mf.id,
                      class_name(crate::WireClass::Len),
                      bytes_dec = bytes_dec,
@@ -1237,7 +1284,7 @@ r#"        for (k, v) in &self.{fname} {{
         let lt = "<'a>";
         let mut s = String::new();
         let mut body = String::new();
-        let mut borrows = false;
+        let borrows = self.borrowing.contains(&ctx.flat);
 
         // Oneof view enums are emitted first so the parent knows whether they
         // carry the lifetime.
@@ -1251,6 +1298,11 @@ r#"        for (k, v) in &self.{fname} {{
                 let variant = naming::sanitize_ident(&naming::pascal(&mf.name));
                 let t = mf.label.unwrap_type();
                 let vty = self.view_value_type(scope, &t.path);
+                let vty = if self.resolve_ref(scope, &t.path).1 == TypeKind::Message {
+                    self.boxed_ty(mf.id, &vty)
+                } else {
+                    vty
+                };
                 has_lt |= vty.contains("'a");
                 variants.push_str(&format!(
                     "    /// Field id {}.\n    {variant}({vty}),\n",
@@ -1268,12 +1320,10 @@ r#"        for (k, v) in &self.{fname} {{
         for f in &msg.fields {
             let fname = naming::field_ident(&f.name);
             let ty = self.view_field_type(scope, f);
-            borrows |= ty.contains("'a");
             body.push_str(&format!("    pub {fname}: {ty},\n"));
         }
-        for (o, (oty, has_lt)) in msg.oneofs.iter().zip(&oneof_types) {
+        for (o, (oty, _)) in msg.oneofs.iter().zip(&oneof_types) {
             let oname = naming::field_ident(&o.name);
-            borrows |= *has_lt;
             body.push_str(&format!("    pub {oname}: Option<{oty}>,\n"));
         }
         if !borrows {
@@ -1385,8 +1435,10 @@ r#"        for (k, v) in &self.{fname} {{
                 }
                 TypeKind::Message => {
                     let vty = self.view_value_type(scope, &t.path).replace("<'a>", "");
+                    let value = self
+                        .boxed_expr(id, &format!("{vty}::decode_inner(sub, limits, depth + 1)?"));
                     format!(
-"                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes_borrowed(&field.value)?;\n                    out_msg.{fname} = Some({vty}::decode_inner(sub, limits, depth + 1)?);\n                }}\n"
+"                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes_borrowed(&field.value)?;\n                    out_msg.{fname} = Some({value});\n                }}\n"
                     )
                 }
             },
@@ -1497,9 +1549,9 @@ r#"        for (k, v) in &self.{fname} {{
         match &f.label {
             ir::FieldLabelIr::Singular(t) => {
                 let vt = self.view_value_type(scope, &t.path);
-                if self.resolve_ref(scope, &t.path).1 == TypeKind::Message
-                    || f.presence == ir::Presence::Explicit
-                {
+                if self.resolve_ref(scope, &t.path).1 == TypeKind::Message {
+                    format!("Option<{}>", self.boxed_ty(f.id, &vt))
+                } else if f.presence == ir::Presence::Explicit {
                     format!("Option<{vt}>")
                 } else {
                     vt
@@ -1719,8 +1771,10 @@ r#"        for (k, v) in &self.{fname} {{
                         }
                         TypeKind::Message => {
                             let ty = self.owned_type(scope, &t.path);
+                            let value =
+                                self.boxed_expr(f.id, &format!("{ty}::from_json_value(jv)?"));
                             b.push_str(&format!(
-"        if let Some(jv) = __json::get_field(obj, {names}) {{\n            out_msg.{fname} = Some({ty}::from_json_value(jv)?);\n        }}\n"
+"        if let Some(jv) = __json::get_field(obj, {names}) {{\n            out_msg.{fname} = Some({value});\n        }}\n"
                             ));
                         }
                     }
@@ -1765,9 +1819,12 @@ r#"        for (k, v) in &self.{fname} {{
                     TypeKind::Enum { .. } => {
                         format!("{}::from_json(jv)?", self.resolve_ref(scope, &t.path).0)
                     }
-                    TypeKind::Message => format!(
-                        "{}::from_json_value(jv)?",
-                        self.resolve_ref(scope, &t.path).0
+                    TypeKind::Message => self.boxed_expr(
+                        mf.id,
+                        &format!(
+                            "{}::from_json_value(jv)?",
+                            self.resolve_ref(scope, &t.path).0
+                        ),
                     ),
                 };
                 b.push_str(&format!(
@@ -1826,8 +1883,9 @@ r#"        for (k, v) in &self.{fname} {{
                 FieldLabelIr::Singular(t) => match self.resolve_ref(scope, &t.path).1 {
                     TypeKind::Message => {
                         let ty = self.owned_type(scope, &t.path);
+                        let value = self.boxed_expr(f.id, "v");
                         s.push_str(&format!(
-"    /// Sets `{fname}`.\n    pub fn {fname}(mut self, v: {ty}) -> Self {{\n        self.{fname} = Some(v);\n        self\n    }}\n"
+"    /// Sets `{fname}`.\n    pub fn {fname}(mut self, v: {ty}) -> Self {{\n        self.{fname} = Some({value});\n        self\n    }}\n"
                         ));
                     }
                     TypeKind::Enum { .. } => {
@@ -2014,6 +2072,137 @@ fn result_expr(mapper: &str) -> String {
     match mapper.strip_suffix('?') {
         Some(fallible) => fallible.to_string(),
         None => format!("Ok::<_, __json::JsonError>({mapper})"),
+    }
+}
+
+/// Finds the inline (by-value) message edges that close a type cycle. Only
+/// singular message fields and oneof message members are inline: repeated
+/// fields and maps already live on the heap.
+fn compute_boxed(pkg: &ir::PackageIr, model: &Model) -> std::collections::HashSet<(String, u32)> {
+    use std::collections::{HashMap, HashSet};
+    // owner flat name -> [(field id, target flat name)]
+    let mut edges: HashMap<String, Vec<(u32, String)>> = HashMap::new();
+
+    fn walk(
+        msg: &ir::MessageIr,
+        scope: &[String],
+        model: &Model,
+        edges: &mut HashMap<String, Vec<(u32, String)>>,
+    ) {
+        let owner = naming::flat_type_name(scope, &msg.name);
+        let mut list = Vec::new();
+        let singular = msg.fields.iter().filter_map(|f| match &f.label {
+            ir::FieldLabelIr::Singular(t) => Some((f.id, t)),
+            _ => None,
+        });
+        let oneof = msg.oneofs.iter().flat_map(|o| {
+            o.fields.iter().filter_map(|f| match &f.label {
+                ir::FieldLabelIr::Singular(t) => Some((f.id, t)),
+                _ => None,
+            })
+        });
+        for (id, t) in singular.chain(oneof) {
+            if let Some((target, TypeKind::Message)) = model.resolve(scope, &t.path) {
+                list.push((id, target.to_string()));
+            }
+        }
+        edges.insert(owner, list);
+        let mut inner = scope.to_vec();
+        inner.push(msg.name.clone());
+        for nested in &msg.messages {
+            walk(nested, &inner, model, edges);
+        }
+    }
+    for m in &pkg.messages {
+        walk(m, &[], model, &mut edges);
+    }
+
+    let reaches = |from: &str, to: &str| -> bool {
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut stack = vec![from];
+        while let Some(n) = stack.pop() {
+            if n == to {
+                return true;
+            }
+            if !seen.insert(n) {
+                continue;
+            }
+            for (_, next) in edges.get(n).into_iter().flatten() {
+                stack.push(next.as_str());
+            }
+        }
+        false
+    };
+    let mut boxed = HashSet::new();
+    for (owner, list) in &edges {
+        for (id, target) in list {
+            if reaches(target, owner) {
+                boxed.insert((owner.clone(), *id));
+            }
+        }
+    }
+    boxed
+}
+
+/// Fixpoint of "this message's view borrows string/bytes data".
+fn compute_borrowing(pkg: &ir::PackageIr, model: &Model) -> std::collections::HashSet<String> {
+    use std::collections::HashSet;
+    // owner flat name -> (borrows directly, referenced message flat names)
+    let mut info: Vec<(String, bool, Vec<String>)> = Vec::new();
+
+    fn walk(
+        msg: &ir::MessageIr,
+        scope: &[String],
+        model: &Model,
+        info: &mut Vec<(String, bool, Vec<String>)>,
+    ) {
+        let owner = naming::flat_type_name(scope, &msg.name);
+        let (mut direct, mut refs) = (false, Vec::new());
+        let mut visit = |t: &ir::TypeRefIr| {
+            if model::is_scalar_path(&t.path) {
+                direct |= matches!(t.path[0].as_str(), "string" | "bytes");
+            } else if let Some((target, TypeKind::Message)) = model.resolve(scope, &t.path) {
+                refs.push(target.to_string());
+            }
+        };
+        let fields = msg
+            .fields
+            .iter()
+            .chain(msg.oneofs.iter().flat_map(|o| o.fields.iter()));
+        for f in fields {
+            match &f.label {
+                ir::FieldLabelIr::Singular(t) | ir::FieldLabelIr::Repeated(t) => visit(t),
+                ir::FieldLabelIr::Map { key, value } => {
+                    visit(key);
+                    visit(value);
+                }
+            }
+        }
+        info.push((owner, direct, refs));
+        let mut inner = scope.to_vec();
+        inner.push(msg.name.clone());
+        for nested in &msg.messages {
+            walk(nested, &inner, model, info);
+        }
+    }
+    for m in &pkg.messages {
+        walk(m, &[], model, &mut info);
+    }
+    let mut set: HashSet<String> = info
+        .iter()
+        .filter(|(_, direct, _)| *direct)
+        .map(|(n, _, _)| n.clone())
+        .collect();
+    loop {
+        let before = set.len();
+        for (name, _, refs) in &info {
+            if refs.iter().any(|r| set.contains(r)) {
+                set.insert(name.clone());
+            }
+        }
+        if set.len() == before {
+            return set;
+        }
     }
 }
 

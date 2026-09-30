@@ -369,3 +369,109 @@ fn builders_validate_annotations() {
         Outer::decode(&Outer::decode(&built.encode()).unwrap().encode()).unwrap()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Recursive message types (boxed indirection)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod recursive {
+    use super::generated::{Expr, ExprKind, Pair, Tree};
+
+    fn leaf(v: i64) -> Tree {
+        Tree {
+            value: v,
+            ..Default::default()
+        }
+    }
+
+    fn sample_tree() -> Tree {
+        Tree {
+            value: 1,
+            left: Some(Box::new(Tree {
+                value: 2,
+                left: Some(Box::new(leaf(4))),
+                ..Default::default()
+            })),
+            right: Some(Box::new(leaf(3))),
+            children: vec![leaf(5), leaf(6)],
+            by_name: [("x".to_string(), leaf(7))].into_iter().collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn self_referential_message_roundtrips_on_the_wire() {
+        let t = sample_tree();
+        let back = Tree::decode(&t.encode()).unwrap();
+        assert_eq!(back, t);
+        assert_eq!(back.left.as_ref().unwrap().left.as_ref().unwrap().value, 4);
+        assert_eq!(back.by_name["x"].value, 7);
+        // Canonical output is stable too.
+        assert_eq!(Tree::decode(&t.encode_canonical()).unwrap(), t);
+    }
+
+    #[test]
+    fn self_referential_message_roundtrips_through_json() {
+        let t = sample_tree();
+        let json = t.to_json().unwrap();
+        assert_eq!(Tree::from_json(&json).unwrap(), t);
+    }
+
+    #[test]
+    fn self_referential_message_has_a_borrowed_view_and_builder() {
+        let t = sample_tree();
+        let bytes = t.encode();
+        let view = Tree::decode_borrowed(&bytes).unwrap();
+        assert_eq!(view.value, 1);
+        assert_eq!(view.left.as_ref().unwrap().left.as_ref().unwrap().value, 4);
+        assert_eq!(view.children.len(), 2);
+
+        let built = Tree::builder().value(9).left(leaf(8)).build().unwrap();
+        assert_eq!(built.left.as_ref().unwrap().value, 8);
+    }
+
+    #[test]
+    fn deep_chains_survive_within_the_depth_limit() {
+        let mut t = leaf(0);
+        for i in 1..=50 {
+            t = Tree {
+                value: i,
+                left: Some(Box::new(t)),
+                ..Default::default()
+            };
+        }
+        assert_eq!(Tree::decode(&t.encode()).unwrap(), t);
+        // Beyond the decoder's depth limit decoding fails instead of overflowing.
+        let limits = tpt20_core::DecoderLimits {
+            max_depth: 10,
+            ..Default::default()
+        };
+        assert!(Tree::decode_with_limits(&t.encode(), &limits).is_err());
+    }
+
+    #[test]
+    fn mutually_recursive_oneofs_work() {
+        let e = Expr {
+            kind: Some(ExprKind::Add(Box::new(Pair {
+                l: Some(Box::new(Expr {
+                    kind: Some(ExprKind::Lit(2)),
+                    ..Default::default()
+                })),
+                r: Some(Box::new(Expr {
+                    kind: Some(ExprKind::Neg(Box::new(Expr {
+                        kind: Some(ExprKind::Lit(3)),
+                        ..Default::default()
+                    }))),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }))),
+            ..Default::default()
+        };
+        assert_eq!(Expr::decode(&e.encode()).unwrap(), e);
+        assert_eq!(Expr::from_json(&e.to_json().unwrap()).unwrap(), e);
+        let bytes = e.encode();
+        assert!(Expr::decode_borrowed(&bytes).is_ok());
+    }
+}
