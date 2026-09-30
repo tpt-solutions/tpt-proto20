@@ -36,7 +36,12 @@ message Big {
   2: name string;
 }
 
+message Blob {
+  1: data bytes;
+}
+
 service Bench {
+  Echo(Blob) returns (Blob);
   Unary(Small) returns (Small);
   Stream(Small) returns (stream Small);
   Slow(Small) returns (Small);

@@ -9,7 +9,7 @@ use tokio::runtime::Runtime;
 use tpt20_benches::generated::*;
 use tpt20_rpc::{async_trait, BoxStream, Channel, RpcContext, RpcError, Server};
 use tpt20_transport::http2::{Http2Server, Http2Transport};
-use tpt20_transport::{Endpoint, InProcessServer, TlsConfig};
+use tpt20_transport::{Compression, Endpoint, InProcessServer, TlsConfig};
 
 struct Impl;
 
@@ -31,6 +31,10 @@ impl Bench for Impl {
             })
         }))
         .boxed())
+    }
+
+    async fn echo(&self, _ctx: &RpcContext, request: Blob) -> Result<Blob, RpcError> {
+        Ok(request)
     }
 
     async fn slow(&self, _ctx: &RpcContext, request: Small) -> Result<Small, RpcError> {
@@ -59,11 +63,23 @@ fn in_process(rt: &Runtime) -> BenchClient {
 }
 
 fn http2(rt: &Runtime, tls: Option<&rcgen::CertifiedKey>) -> BenchClient {
+    http2_with(rt, tls, None)
+}
+
+fn http2_with(
+    rt: &Runtime,
+    tls: Option<&rcgen::CertifiedKey>,
+    compression: Option<Compression>,
+) -> BenchClient {
     let (addr, client_ep) = rt.block_on(async {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let mut server_ep = Endpoint::new(format!("localhost:{port}"));
-        let mut client_ep = Endpoint::new(format!("localhost:{port}"));
+        let with = |ep: Endpoint| match compression {
+            Some(c) => ep.with_compression(c, 256),
+            None => ep,
+        };
+        let mut server_ep = with(Endpoint::new(format!("localhost:{port}")));
+        let mut client_ep = with(Endpoint::new(format!("localhost:{port}")));
         if let Some(cert) = tls {
             let mut cfg = TlsConfig::http2();
             cfg.cert_pem = Some(cert.cert.pem().into_bytes());
@@ -185,5 +201,49 @@ fn concurrency(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, unary_and_streaming, concurrency);
+fn compression(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let ctx = RpcContext::new();
+    let mut g = c.benchmark_group("rpc_compression");
+    g.sample_size(20);
+    g.measurement_time(Duration::from_secs(3));
+
+    // Text-like (compressible) and pseudo-random (incompressible) 64 KiB bodies.
+    let text: Vec<u8> = "the quick brown fox jumps over the lazy dog. "
+        .bytes()
+        .cycle()
+        .take(64 * 1024)
+        .collect();
+    let mut x = 0x9E37_79B9_7F4A_7C15u64;
+    let noise: Vec<u8> = (0..64 * 1024)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 32) as u8
+        })
+        .collect();
+
+    for (label, algorithm) in [
+        ("none", None),
+        ("gzip", Some(Compression::Gzip)),
+        ("deflate", Some(Compression::Deflate)),
+    ] {
+        let client = http2_with(&rt, None, algorithm);
+        for (kind, body) in [("text_64KiB", &text), ("random_64KiB", &noise)] {
+            let blob = Blob {
+                data: body.clone(),
+                ..Default::default()
+            };
+            g.throughput(criterion::Throughput::Bytes(body.len() as u64));
+            g.bench_function(format!("echo_{kind}/{label}"), |b| {
+                b.to_async(&rt)
+                    .iter(|| async { client.echo(&ctx, &blob).await.unwrap() })
+            });
+        }
+    }
+    g.finish();
+}
+
+criterion_group!(benches, unary_and_streaming, concurrency, compression);
 criterion_main!(benches);

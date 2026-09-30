@@ -16,6 +16,7 @@
 //! - `tls` — TLS with ALPN (requires `tokio-rustls` and `rustls-pemfile`)
 //! - `quic` — QUIC/HTTP3 transport (requires `quinn`)
 
+pub mod compression;
 pub mod endpoint;
 pub mod error;
 pub mod frame;
@@ -25,6 +26,7 @@ pub mod in_process;
 pub mod metadata;
 pub mod traits;
 
+pub use compression::Compression;
 pub use endpoint::{Endpoint, TlsConfig};
 pub use error::TransportError;
 pub use frame::{decode_frame, encode_frame, Frame, FrameFlags, FramedMessage};

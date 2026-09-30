@@ -103,6 +103,11 @@ pub struct Endpoint {
     /// How long to wait for a keepalive ping acknowledgement before the
     /// connection is considered dead.
     pub keepalive_timeout: std::time::Duration,
+    /// Compression applied to outgoing messages (None = off). Incoming
+    /// compressed messages are always accepted.
+    pub compression: Option<crate::Compression>,
+    /// Messages shorter than this are never compressed.
+    pub compression_min_bytes: usize,
 }
 
 impl Endpoint {
@@ -115,6 +120,8 @@ impl Endpoint {
             max_message_bytes: None,
             keepalive_interval: None,
             keepalive_timeout: std::time::Duration::from_secs(20),
+            compression: None,
+            compression_min_bytes: 1024,
         }
     }
 
@@ -154,6 +161,14 @@ impl Endpoint {
     ) -> Self {
         self.keepalive_interval = Some(interval);
         self.keepalive_timeout = timeout;
+        self
+    }
+
+    /// Compresses outgoing messages of at least `min_bytes` with `algorithm`
+    /// (negotiated with the peer via `grpc-encoding` / `grpc-accept-encoding`).
+    pub fn with_compression(mut self, algorithm: crate::Compression, min_bytes: usize) -> Self {
+        self.compression = Some(algorithm);
+        self.compression_min_bytes = min_bytes;
         self
     }
 

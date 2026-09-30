@@ -261,7 +261,7 @@ fn call_client_streaming_sends_every_array_element() {
 }
 
 #[test]
-fn call_enforces_deadline_and_rejects_unsupported_options() {
+fn call_enforces_deadline_supports_compression_and_reports_errors() {
     let addr = start_server(Endpoint::new("x"), "127.0.0.1");
     let input = tmp("req.json", br#"{"1": 1}"#);
     let inp = input.to_str().unwrap();
@@ -269,9 +269,31 @@ fn call_enforces_deadline_and_rejects_unsupported_options() {
     assert_eq!(o.status.code(), Some(1));
     assert!(stderr(&o).contains("deadline"), "{}", stderr(&o));
 
-    let o = tpt20(&["call", &addr, "X", "-i", inp, "--compression", "gzip"]);
-    assert_eq!(o.status.code(), Some(2));
-    assert!(stderr(&o).contains("compression"), "{}", stderr(&o));
+    // Compression is negotiated with the server, which here has none
+    // configured: the call still works (request compressed, reply plain).
+    let big = tmp(
+        "big.json",
+        format!("{{\"1\": \"{}\"}}", "x".repeat(5000)).as_bytes(),
+    );
+    for alg in ["gzip", "deflate"] {
+        let o = tpt20(&[
+            "call",
+            &addr,
+            "X",
+            "-i",
+            big.to_str().unwrap(),
+            "--compression",
+            alg,
+        ]);
+        assert!(o.status.success(), "{alg}: {}", stderr(&o));
+        assert!(stdout(&o).contains("# message 1"), "{}", stdout(&o));
+    }
+    let o = tpt20(&["call", &addr, "X", "-i", inp, "--compression", "zstd"]);
+    assert_eq!(
+        o.status.code(),
+        Some(2),
+        "unknown algorithms are usage errors"
+    );
 
     // Nothing listening: a real connection error, exit 1.
     let o = tpt20(&["call", "127.0.0.1:1", "X", "-i", inp]);

@@ -56,7 +56,8 @@ orders of magnitude, not guarantees; re-run on your hardware).
 | 32 concurrent unary calls, in-process / h2c | 241 µs / 1.5 ms |
 | cancellation storm (100 slow calls, all cancelled), in-process | 721 µs |
 | deadline storm (100 slow calls, 1 ms deadline), in-process | 2.6 ms |
-| compression overhead | not measurable: message compression is not implemented yet |
+| 64 KiB echo over h2c, text body: none / gzip / deflate | 472 µs / 535 µs / 572 µs |
+| 64 KiB echo over h2c, incompressible body: none / gzip / deflate | 513 µs / 1.94 ms / ~2 ms |
 
 ## Reading the numbers against the spec §23 goals
 
@@ -108,5 +109,15 @@ Ordered by expected payoff. None of these are correctness issues.
    mostly from task/timer/mutex overhead rather than encoding (~0.3 µs).
    Sharing one timer wheel entry per call and avoiding the `Mutex` around the
    response sender on the unary fast path are the obvious cuts.
-6. **Compression.** Not implemented; once added it needs its own benchmark
-   (spec §23 lists compression overhead).
+6. **Compression** — implemented (gzip/deflate, `flate2`). On loopback, where
+   bandwidth is free, compressing a 64 KiB text body costs ~60–100 µs of CPU
+   (472 → 535 µs) — it pays off only on a real network; incompressible data
+   costs ~4× because both directions try to compress and then discard the
+   result. A cheap entropy probe (compress a 4 KiB prefix first) or
+   remembering per-stream that recent messages did not shrink would avoid
+   that; until then leave compression off (or raise `compression_min_bytes`)
+   for incompressible payloads.
+7. ~~Flow control~~ — **done.** The 64 KiB default HTTP/2 window forced a
+   WINDOW_UPDATE round trip for larger messages; both `h2` builders now
+   advertise 2 MiB stream / 8 MiB connection windows (64 KiB echo
+   753 → 472 µs; small calls unchanged).

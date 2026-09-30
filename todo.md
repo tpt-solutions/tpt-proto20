@@ -549,7 +549,7 @@ diagram in spec §5 and the repo layout in spec §26.
   - [x] Metadata support
   - [x] Deadline support (client-side)
   - [x] TLS configuration support (`--tls-cert` CA)
-  - [ ] Compression configuration support (rejected until the transport implements it)
+  - [x] Compression configuration support (`--compression gzip|deflate`)
   - [x] Streaming call support
 - [x] CLI command: `tpt20 health` (`tpt20.health.v1.Health/Check`)
 - [x] CLI command: `tpt20 reflect`
@@ -631,7 +631,7 @@ that the underlying features are missing — see per-item notes below.
 - [x] Benchmark: cancellation storms
 - [x] Benchmark: deadline storms
 - [x] Benchmark: TLS overhead
-- [ ] Benchmark: compression overhead (blocked: message compression is not implemented)
+- [x] Benchmark: compression overhead (`rpc_compression` group)
 - [x] Profiling pass and optimization backlog based on results (`docs/performance.md`)
 - [ ] Confirm performance goals from spec §23 — assessed in `docs/performance.md`; all met or
       explained except low-overhead observability (not yet measured)

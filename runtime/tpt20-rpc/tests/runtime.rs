@@ -9,6 +9,7 @@ use std::time::Duration;
 use tpt20_core::DecodeError;
 use tpt20_rpc::{async_trait, Channel, RpcContext, RpcError, Server, ServerCall, Service, Status};
 use tpt20_transport::http2::{Http2Server, Http2Transport};
+use tpt20_transport::Compression;
 use tpt20_transport::{
     Endpoint, InProcessServer, Metadata as WireMetadata, StreamingType, Transport,
 };
@@ -150,9 +151,17 @@ async fn in_process_channel() -> Channel {
 }
 
 async fn http2_channel() -> (Channel, WireEndpoint) {
+    http2_channel_with(None).await
+}
+
+async fn http2_channel_with(compression: Option<Compression>) -> (Channel, WireEndpoint) {
+    let with = |ep: Endpoint| match compression {
+        Some(c) => ep.with_compression(c, 0),
+        None => ep,
+    };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
-    let http2 = Http2Server::new(Endpoint::new(addr.clone()));
+    let http2 = Http2Server::new(with(Endpoint::new(addr.clone())));
     let srv = server();
     tokio::spawn(async move {
         let _ = http2
@@ -170,7 +179,7 @@ async fn http2_channel() -> (Channel, WireEndpoint) {
             .await;
     });
     (
-        Channel::new(Http2Transport::new(Endpoint::new(addr.clone()))),
+        Channel::new(Http2Transport::new(with(Endpoint::new(addr.clone())))),
         WireEndpoint(addr),
     )
 }
@@ -340,6 +349,14 @@ async fn behavior_over_in_process_transport() {
 async fn behavior_over_http2_transport() {
     let (ch, _addr) = http2_channel().await;
     suite(ch).await;
+}
+
+#[tokio::test]
+async fn behavior_over_compressed_http2() {
+    for alg in [Compression::Gzip, Compression::Deflate] {
+        let (ch, _addr) = http2_channel_with(Some(alg)).await;
+        suite(ch).await;
+    }
 }
 
 #[tokio::test]

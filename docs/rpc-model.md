@@ -210,8 +210,17 @@ The HTTP/2 transport delivers real trailers, surfaces stream resets as
 keepalive pings (`Endpoint::with_keepalive`), graceful server shutdown
 (`Http2Server::serve_with_shutdown` sends GOAWAY and lets in-flight calls
 finish), and TLS with ALPN (client and server; server-side client-CA
-verification). Client-certificate *presentation* and message compression are
-not implemented yet.
+verification). Client-certificate *presentation* is not implemented yet.
+
+**Compression.** `Endpoint::with_compression(Compression::Gzip | Deflate,
+min_bytes)` compresses outgoing messages of at least `min_bytes` (only when
+that makes them smaller; the frame's compressed flag marks which). It is
+negotiated like gRPC: the sender names its codec in `grpc-encoding`, every
+client advertises `grpc-accept-encoding: gzip,deflate,identity`, and a server
+compresses its responses only with a codec the client accepts. Incoming
+compressed messages are always accepted and decompressed under the receiver's
+message-size limit (a small message cannot inflate past it). An unsupported
+`grpc-encoding` resets the stream.
 
 ### RPC runtime (`Channel`, `Server`)
 

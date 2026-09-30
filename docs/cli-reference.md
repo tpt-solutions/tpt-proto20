@@ -217,8 +217,10 @@ x-status: ok
 - Responses print in text format when `--schema` and `--response-type` are
   given, otherwise as a schema-free `id: value` listing.
 - `--deadline-ms` is enforced client-side (exit 1 when exceeded).
-- `--compression` other than `none` is rejected with a usage error (exit 2):
-  the transport does not implement compression yet.
+- `--compression gzip|deflate` compresses request messages (each one that gets
+  smaller); the server answers compressed if it is configured to and the
+  client advertised support, which `call` always does. Any other algorithm is
+  a usage error (exit 2).
 - Unary and server-streaming calls require exactly one request message.
 
 ## `health`
@@ -288,6 +290,6 @@ time yet (`tpt20 diff` checks two schema files directly).
 | `text-to-binary` / `binary-to-text` | Fully functional, schema-driven text format |
 | `import-proto` | Functional; emits IR JSON, not `.tpt` source |
 | `conformance` | Stub — does not run the real suite |
-| `call` | Fully functional over HTTP/2 (TLS, metadata, deadline, streaming); no compression |
+| `call` | Fully functional over HTTP/2 (TLS, metadata, deadline, streaming, compression) |
 | `health` | Fully functional (`tpt20.health.v1.Health/Check`) |
 | `registry publish` / `list` / `get` | Functional (local filesystem; immutable versions, integrity-checked fetch) |

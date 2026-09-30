@@ -27,7 +27,7 @@ see the unchecked items.
 ## 27.5 RPC
 - [x] unary, server/client/bidi streaming, deadlines, cancellation, metadata,
       rich errors, TLS, health checking (`tpt20 health` convention)
-- [ ] **compression** — frame flag exists; no compression codec or negotiation
+- [x] compression (gzip/deflate over HTTP/2, negotiated, bounded decompression)
 - [ ] **reflection** — the gRPC reflection service is not wired to the real
       wire protocol (`compat/tpt20-compat-grpc`); native RPC reflection service
       does not exist (schema reflection is offline via `tpt20-reflect`)

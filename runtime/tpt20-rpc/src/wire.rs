@@ -23,7 +23,15 @@ pub const MESSAGE_KEY: &str = "grpc-message";
 pub const TIMEOUT_KEY: &str = "grpc-timeout";
 
 /// Keys owned by the protocol; never surfaced as user metadata.
-const RESERVED: &[&str] = &[STATUS_KEY, MESSAGE_KEY, TIMEOUT_KEY, "content-type", "te"];
+const RESERVED: &[&str] = &[
+    STATUS_KEY,
+    MESSAGE_KEY,
+    TIMEOUT_KEY,
+    "content-type",
+    "te",
+    "grpc-encoding",
+    "grpc-accept-encoding",
+];
 
 /// Percent-encodes a status message (bytes outside printable ASCII and `%`).
 pub fn percent_encode(s: &str) -> String {
@@ -236,6 +244,8 @@ mod tests {
         let mut wire = to_wire_metadata(&md);
         wire.insert(TIMEOUT_KEY, "5S");
         wire.insert("content-type", "application/tpt20");
+        wire.insert("grpc-encoding", "gzip");
+        wire.insert("grpc-accept-encoding", "gzip,deflate");
         let back = from_wire_metadata(&wire).unwrap();
         assert_eq!(back.get_first_text("x-user"), Some("ada"));
         assert_eq!(
@@ -243,6 +253,7 @@ mod tests {
             Some(&crate::metadata::MetadataValue::binary(vec![0u8, 255, 7]))
         );
         assert!(back.get(TIMEOUT_KEY).is_none() && back.get("content-type").is_none());
+        assert!(back.get("grpc-encoding").is_none() && back.get("grpc-accept-encoding").is_none());
 
         let mut bad = WireMetadata::new();
         bad.insert("x-bad-bin", "!!!");

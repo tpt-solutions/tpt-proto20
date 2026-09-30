@@ -280,7 +280,8 @@ enum Commands {
         /// CA certificate (PEM) to trust; enables TLS
         #[arg(long)]
         tls_cert: Option<PathBuf>,
-        /// Compression algorithm: none (others are not supported yet)
+        /// Compression for request messages: none, gzip, deflate (the server may
+        /// answer compressed when it supports it)
         #[arg(long, default_value = "none")]
         compression: CompressionArg,
     },
@@ -1466,12 +1467,6 @@ async fn perform_call(
 }
 
 async fn cmd_call(opts: CallOpts) -> Result<(), CliError> {
-    if !matches!(opts.compression, CompressionArg::None) {
-        return Err(CliError::Usage(
-            "compression is not supported by the HTTP/2 transport yet; use --compression none"
-                .into(),
-        ));
-    }
     let descriptor = match &opts.schema {
         Some(p) => Some(load_descriptor(p)?),
         None => None,
@@ -1502,7 +1497,14 @@ async fn cmd_call(opts: CallOpts) -> Result<(), CliError> {
         }
     };
 
-    let endpoint = build_endpoint(&opts.endpoint, opts.tls_cert.as_deref())?;
+    let mut endpoint = build_endpoint(&opts.endpoint, opts.tls_cert.as_deref())?;
+    endpoint.compression = match opts.compression {
+        CompressionArg::None => None,
+        CompressionArg::Gzip => Some(tpt20_transport::Compression::Gzip),
+        CompressionArg::Deflate => Some(tpt20_transport::Compression::Deflate),
+    };
+    // A debugger: compress every message that gets smaller.
+    endpoint.compression_min_bytes = 0;
     let outputs = perform_call(
         endpoint,
         &opts.method,

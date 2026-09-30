@@ -17,6 +17,7 @@
 //! HTTP/2 DATA frames. Frames are reassembled across DATA boundaries, so their
 //! alignment with DATA frames is irrelevant.
 
+use crate::compression::{compress, decompress, Compression};
 use crate::error::TransportError;
 use crate::frame::{Frame, FrameFlags, FramedMessage};
 use crate::metadata::Metadata;
@@ -40,6 +41,11 @@ use tokio::sync::{mpsc, oneshot, watch};
 pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 
 const CONTENT_TYPE: &str = "application/tpt20";
+
+/// Receive windows advertised to the peer. The HTTP/2 default (64 KiB) makes
+/// every message larger than that wait for a WINDOW_UPDATE round trip.
+const STREAM_WINDOW: u32 = 2 * 1024 * 1024;
+const CONNECTION_WINDOW: u32 = 8 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -130,14 +136,58 @@ impl FrameBuffer {
     }
 }
 
-fn encode_message(payload: &[u8], max: usize) -> Result<Bytes, TransportError> {
+/// A codec to apply to outgoing messages: algorithm and minimum size.
+type Codec = Option<(Compression, usize)>;
+
+/// Frames `payload`, compressing it when a codec is set, the message is at
+/// least the codec's minimum size, and compression actually shrinks it.
+fn encode_message(payload: &[u8], max: usize, codec: Codec) -> Result<Bytes, TransportError> {
     if payload.len() > max {
         return Err(TransportError::SizeLimitExceeded { limit: max });
+    }
+    if let Some((alg, min)) = codec {
+        if payload.len() >= min {
+            let packed = compress(alg, payload);
+            if packed.len() < payload.len() {
+                return Ok(Bytes::from(Frame::encode_with(
+                    &packed,
+                    FrameFlags::empty().set_compressed(true),
+                )));
+            }
+        }
     }
     Ok(Bytes::from(Frame::encode_with(
         payload,
         FrameFlags::empty(),
     )))
+}
+
+/// Returns the plain payload of a received frame, decompressing (bounded by
+/// `max`) when the frame is flagged compressed.
+fn frame_payload(
+    frame: FramedMessage,
+    encoding: Option<Compression>,
+    max: usize,
+) -> Result<Vec<u8>, TransportError> {
+    if !frame.flags.is_compressed() {
+        return Ok(frame.payload);
+    }
+    let alg = encoding.ok_or_else(|| {
+        TransportError::Compression("compressed message without a supported grpc-encoding".into())
+    })?;
+    decompress(alg, &frame.payload, max)
+}
+
+/// Reads the codec the peer announced in `grpc-encoding`. `identity` (or no
+/// header) is `Ok(None)`; an unknown codec is an error.
+fn announced_encoding(headers: &HeaderMap) -> Result<Option<Compression>, TransportError> {
+    match headers.get("grpc-encoding").and_then(|v| v.to_str().ok()) {
+        None => Ok(None),
+        Some(v) if v.trim().eq_ignore_ascii_case("identity") => Ok(None),
+        Some(v) => Compression::from_name(v)
+            .map(Some)
+            .ok_or_else(|| TransportError::Compression(format!("unsupported grpc-encoding `{v}`"))),
+    }
 }
 
 /// Periodically pings the peer; returns when a ping fails or times out.
@@ -298,7 +348,11 @@ impl Transport for Http2Transport {
             .endpoint
             .max_message_bytes
             .unwrap_or(DEFAULT_MAX_MESSAGE_BYTES);
-        let initial = encode_message(&request, max)?;
+        let codec: Codec = self
+            .endpoint
+            .compression
+            .map(|c| (c, self.endpoint.compression_min_bytes));
+        let initial = encode_message(&request, max, codec)?;
 
         let mut builder = req_builder(&self.endpoint, method)?;
         {
@@ -307,6 +361,9 @@ impl Transport for Http2Transport {
                 .ok_or_else(|| TransportError::Internal("request builder failed".into()))?;
             metadata_to_headers(&self.endpoint.default_metadata, headers)?;
             metadata_to_headers(metadata, headers)?;
+            if let Some((alg, _)) = codec {
+                headers.insert("grpc-encoding", HeaderValue::from_static(alg.name()));
+            }
         }
         let http_request = builder
             .body(())
@@ -346,11 +403,14 @@ impl Transport for Http2Transport {
             sink: Box::pin(Http2ClientSink {
                 send: send_stream,
                 max,
+                codec,
                 ended: end_of_stream,
             }),
             stream: Box::pin(Http2ClientResponseStream {
                 state: RespState::Headers(Box::pin(response)),
                 frames: FrameBuffer::new(max),
+                encoding: None,
+                max,
             }),
         })
     }
@@ -366,6 +426,8 @@ where
     IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let (send_request, mut connection) = client::Builder::new()
+        .initial_window_size(STREAM_WINDOW)
+        .initial_connection_window_size(CONNECTION_WINDOW)
         .handshake::<_, Bytes>(io)
         .await
         .map_err(map_h2_error)?;
@@ -399,7 +461,8 @@ fn req_builder(
         .method("POST")
         .uri(format!("{scheme}://{}/{method}", endpoint.address))
         .header("content-type", CONTENT_TYPE)
-        .header("te", "trailers"))
+        .header("te", "trailers")
+        .header("grpc-accept-encoding", Compression::accept_header()))
 }
 
 /// Writes the initial message, optionally ending the stream with it.
@@ -418,6 +481,7 @@ async fn write_all_end(
 struct Http2ClientSink {
     send: SendStream<Bytes>,
     max: usize,
+    codec: Codec,
     ended: bool,
 }
 
@@ -441,7 +505,7 @@ impl Sink<Vec<u8>> for Http2ClientSink {
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
-        let frame = encode_message(&item, self.max)?;
+        let frame = encode_message(&item, self.max, self.codec)?;
         self.send.send_data(frame, false).map_err(map_h2_error)
     }
 
@@ -473,6 +537,9 @@ enum RespState {
 struct Http2ClientResponseStream {
     state: RespState,
     frames: FrameBuffer,
+    /// Codec the server announced for its messages.
+    encoding: Option<Compression>,
+    max: usize,
 }
 
 impl Stream for Http2ClientResponseStream {
@@ -496,6 +563,13 @@ impl Stream for Http2ClientResponseStream {
                                 response.status()
                             )))));
                         }
+                        match announced_encoding(response.headers()) {
+                            Ok(enc) => this.encoding = enc,
+                            Err(e) => {
+                                this.state = RespState::Done;
+                                return Poll::Ready(Some(Err(e)));
+                            }
+                        }
                         this.state = RespState::Body(response.into_body());
                     }
                 },
@@ -506,13 +580,13 @@ impl Stream for Http2ClientResponseStream {
                             return Poll::Ready(Some(Err(e)));
                         }
                         Ok(Some(frame)) => {
-                            if frame.flags.is_compressed() {
-                                this.state = RespState::Done;
-                                return Poll::Ready(Some(Err(TransportError::Compression(
-                                    "compressed payload not yet supported".into(),
-                                ))));
-                            }
-                            return Poll::Ready(Some(Ok(StreamItem::Message(frame.payload))));
+                            return match frame_payload(frame, this.encoding, this.max) {
+                                Ok(payload) => Poll::Ready(Some(Ok(StreamItem::Message(payload)))),
+                                Err(e) => {
+                                    this.state = RespState::Done;
+                                    Poll::Ready(Some(Err(e)))
+                                }
+                            };
                         }
                         Ok(None) => {}
                     }
@@ -672,6 +746,7 @@ pub struct Http2Server {
 #[derive(Clone)]
 struct ServerCfg {
     max: usize,
+    codec: Codec,
     keepalive: Option<(Duration, Duration)>,
 }
 
@@ -752,6 +827,10 @@ impl Http2Server {
                 .endpoint
                 .max_message_bytes
                 .unwrap_or(DEFAULT_MAX_MESSAGE_BYTES),
+            codec: self
+                .endpoint
+                .compression
+                .map(|c| (c, self.endpoint.compression_min_bytes)),
             keepalive: self
                 .endpoint
                 .keepalive_interval
@@ -839,6 +918,8 @@ where
         + 'static,
 {
     let mut conn = server::Builder::new()
+        .initial_window_size(STREAM_WINDOW)
+        .initial_connection_window_size(CONNECTION_WINDOW)
         .handshake::<_, Bytes>(io)
         .await
         .map_err(map_h2_error)?;
@@ -854,8 +935,7 @@ where
                 Some(Err(e)) => return Err(map_h2_error(e)),
                 Some(Ok((request, respond))) => {
                     let handler = handler.clone();
-                    let max = cfg.max;
-                    tokio::spawn(handle_stream(request, respond, handler, max));
+                    tokio::spawn(handle_stream(request, respond, handler, cfg.clone()));
                 }
             },
             _ = &mut ka => return Err(TransportError::ConnectionClosed),
@@ -873,7 +953,7 @@ async fn handle_stream<F>(
     request: Request<RecvStream>,
     mut respond: server::SendResponse<Bytes>,
     handler: F,
-    max: usize,
+    cfg: ServerCfg,
 ) where
     F: Fn(IncomingHttp2Call) -> futures::future::BoxFuture<'static, Result<(), TransportError>>
         + Send
@@ -881,18 +961,43 @@ async fn handle_stream<F>(
         + Clone
         + 'static,
 {
+    let max = cfg.max;
     let method = request.uri().path().trim_start_matches('/').to_string();
     let metadata = headers_to_metadata(request.headers());
+
+    // Codec of the request messages, and the codec we may answer with: our
+    // configured one, if the client said it can read it.
+    let request_encoding = match announced_encoding(request.headers()) {
+        Ok(enc) => enc,
+        Err(_) => {
+            respond.send_reset(Reason::PROTOCOL_ERROR);
+            return;
+        }
+    };
+    let accepted = request
+        .headers()
+        .get("grpc-accept-encoding")
+        .and_then(|v| v.to_str().ok())
+        .map(Compression::parse_accept)
+        .unwrap_or_default();
+    let response_codec: Codec = cfg.codec.filter(|(alg, _)| accepted.contains(alg));
+
     let mut body = request.into_body();
     let mut frames = FrameBuffer::new(max);
 
     let first = match read_frame(&mut body, &mut frames).await {
-        Ok(Some(f)) if !f.flags.is_compressed() => f.payload,
+        Ok(Some(f)) => match frame_payload(f, request_encoding, max) {
+            Ok(payload) => payload,
+            Err(TransportError::SizeLimitExceeded { .. }) => {
+                respond.send_reset(Reason::ENHANCE_YOUR_CALM);
+                return;
+            }
+            Err(_) => {
+                respond.send_reset(Reason::PROTOCOL_ERROR);
+                return;
+            }
+        },
         Ok(None) => Vec::new(),
-        Ok(Some(_)) => {
-            respond.send_reset(Reason::PROTOCOL_ERROR);
-            return;
-        }
         Err(TransportError::SizeLimitExceeded { .. }) => {
             respond.send_reset(Reason::ENHANCE_YOUR_CALM);
             return;
@@ -903,11 +1008,14 @@ async fn handle_stream<F>(
         }
     };
 
-    let response = match Response::builder()
+    let mut response = Response::builder()
         .status(200)
         .header("content-type", CONTENT_TYPE)
-        .body(())
-    {
+        .header("grpc-accept-encoding", Compression::accept_header());
+    if let Some((alg, _)) = response_codec {
+        response = response.header("grpc-encoding", alg.name());
+    }
+    let response = match response.body(()) {
         Ok(r) => r,
         Err(_) => return,
     };
@@ -923,12 +1031,20 @@ async fn handle_stream<F>(
     // Remaining request messages (client streaming / bidi).
     tokio::spawn(async move {
         while let Ok(Some(frame)) = read_frame(&mut body, &mut frames).await {
-            if frame.flags.is_compressed() || request_tx.send(frame.payload).await.is_err() {
+            let Ok(payload) = frame_payload(frame, request_encoding, max) else {
+                break;
+            };
+            if request_tx.send(payload).await.is_err() {
                 break;
             }
         }
     });
-    tokio::spawn(write_response(send, response_rx, trailers_rx));
+    tokio::spawn(write_response(
+        send,
+        response_rx,
+        trailers_rx,
+        response_codec,
+    ));
 
     let call = IncomingHttp2Call {
         method,
@@ -945,17 +1061,17 @@ async fn write_response(
     mut send: SendStream<Bytes>,
     mut messages: mpsc::Receiver<Result<FramedMessage, TransportError>>,
     trailers: oneshot::Receiver<Metadata>,
+    codec: Codec,
 ) {
     while let Some(item) = messages.recv().await {
         match item {
             Ok(message) => {
-                let frame = Bytes::from(
-                    Frame {
-                        flags: message.flags,
-                        payload: message.payload,
-                    }
-                    .encode(),
-                );
+                // Handlers send plain payloads; compression (when negotiated)
+                // happens here, at the wire boundary.
+                let Ok(frame) = encode_message(&message.payload, usize::MAX, codec) else {
+                    send.send_reset(Reason::INTERNAL_ERROR);
+                    return;
+                };
                 if write_all(&mut send, frame).await.is_err() {
                     return;
                 }
@@ -1427,11 +1543,29 @@ mod tests {
             .is_err());
     }
 
-    /// TCP forwarder that counts accepted connections and can sever them all.
+    /// TCP forwarder that counts accepted connections and forwarded bytes and
+    /// can sever every connection.
     struct Proxy {
         addr: String,
         accepted: Arc<std::sync::atomic::AtomicUsize>,
+        bytes: Arc<std::sync::atomic::AtomicUsize>,
         sever: tokio::sync::watch::Sender<u64>,
+    }
+
+    async fn relay<R, W>(mut from: R, mut to: W, counter: Arc<std::sync::atomic::AtomicUsize>)
+    where
+        R: tokio::io::AsyncRead + Unpin,
+        W: tokio::io::AsyncWrite + Unpin,
+    {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut buf = vec![0u8; 16 * 1024];
+        while let Ok(n) = from.read(&mut buf).await {
+            if n == 0 || to.write_all(&buf[..n]).await.is_err() {
+                break;
+            }
+            counter.fetch_add(n, std::sync::atomic::Ordering::SeqCst);
+        }
+        let _ = to.shutdown().await;
     }
 
     async fn proxy_to(target: String) -> Proxy {
@@ -1439,11 +1573,12 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
         let accepted = Arc::new(AtomicUsize::new(0));
+        let bytes = Arc::new(AtomicUsize::new(0));
         let (sever, sever_rx) = tokio::sync::watch::channel(0u64);
-        let counter = accepted.clone();
+        let (counter, byte_counter) = (accepted.clone(), bytes.clone());
         tokio::spawn(async move {
             loop {
-                let Ok((mut client, _)) = listener.accept().await else {
+                let Ok((client, _)) = listener.accept().await else {
                     return;
                 };
                 counter.fetch_add(1, Ordering::SeqCst);
@@ -1451,12 +1586,20 @@ mod tests {
                 // Only severances after this connection was accepted count.
                 let mut sever_rx = sever_rx.clone();
                 sever_rx.borrow_and_update();
+                let byte_counter = byte_counter.clone();
                 tokio::spawn(async move {
-                    let Ok(mut server) = TcpStream::connect(target).await else {
+                    let Ok(server) = TcpStream::connect(target).await else {
                         return;
                     };
+                    let (cr, cw) = client.into_split();
+                    let (sr, sw) = server.into_split();
                     tokio::select! {
-                        _ = tokio::io::copy_bidirectional(&mut client, &mut server) => {}
+                        _ = async {
+                            tokio::join!(
+                                relay(cr, sw, byte_counter.clone()),
+                                relay(sr, cw, byte_counter.clone())
+                            )
+                        } => {}
                         _ = sever_rx.changed() => {}
                     }
                 });
@@ -1465,6 +1608,7 @@ mod tests {
         Proxy {
             addr,
             accepted,
+            bytes,
             sever,
         }
     }
@@ -1500,6 +1644,107 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(call_once(transport.clone()).await.unwrap().len(), 2);
         assert_eq!(proxy.accepted.load(Ordering::SeqCst), 2);
+    }
+
+    async fn echo_call(ep: Endpoint, payload: Vec<u8>) -> Result<Vec<u8>, TransportError> {
+        let call = Http2Transport::new(ep)
+            .start_call("M", payload, &Metadata::new(), StreamingType::Unary)
+            .await?;
+        for item in collect(call).await {
+            if let StreamItem::Message(m) = item? {
+                return Ok(m);
+            }
+        }
+        Err(TransportError::Internal("no message".into()))
+    }
+
+    #[tokio::test]
+    async fn compression_shrinks_the_wire_in_both_directions() {
+        use std::sync::atomic::Ordering;
+        for alg in Compression::ALL {
+            let (server_ep, _stop) =
+                start(Endpoint::new("x").with_compression(alg, 64), echo).await;
+            let proxy = proxy_to(server_ep.address.clone()).await;
+            let client_ep = Endpoint::new(proxy.addr.clone()).with_compression(alg, 64);
+            let payload = vec![b'z'; 200_000];
+            let reply = echo_call(client_ep, payload.clone()).await.unwrap();
+            assert_eq!(&reply[..5], b"resp:");
+            assert_eq!(&reply[5..], &payload[..]);
+            // 200 KB each way uncompressed; compressed it is a few hundred bytes.
+            let wire = proxy.bytes.load(Ordering::SeqCst);
+            assert!(wire < 20_000, "{alg:?}: {wire} bytes on the wire");
+        }
+    }
+
+    #[tokio::test]
+    async fn compression_is_negotiated_per_direction() {
+        use std::sync::atomic::Ordering;
+        let payload = vec![b'q'; 100_000];
+
+        // Client compresses, server does not: request shrinks, response is
+        // plain, everything still decodes.
+        let (server_ep, _s1) = start(Endpoint::new("x"), echo).await;
+        let proxy = proxy_to(server_ep.address.clone()).await;
+        let client_ep = Endpoint::new(proxy.addr.clone()).with_compression(Compression::Gzip, 64);
+        let reply = echo_call(client_ep, payload.clone()).await.unwrap();
+        assert_eq!(reply.len(), payload.len() + 5);
+        let wire = proxy.bytes.load(Ordering::SeqCst);
+        assert!((100_000..150_000).contains(&wire), "{wire}");
+
+        // Server compresses, client does not: the client's accept-encoding
+        // lets the server compress the response.
+        let (server_ep, _s2) = start(
+            Endpoint::new("x").with_compression(Compression::Deflate, 64),
+            echo,
+        )
+        .await;
+        let proxy = proxy_to(server_ep.address.clone()).await;
+        let reply = echo_call(Endpoint::new(proxy.addr.clone()), payload.clone())
+            .await
+            .unwrap();
+        assert_eq!(reply.len(), payload.len() + 5);
+        let wire = proxy.bytes.load(Ordering::SeqCst);
+        assert!((100_000..150_000).contains(&wire), "{wire}");
+    }
+
+    #[tokio::test]
+    async fn small_messages_are_not_compressed() {
+        use std::sync::atomic::Ordering;
+        let (server_ep, _stop) = start(
+            Endpoint::new("x").with_compression(Compression::Gzip, 1024),
+            echo,
+        )
+        .await;
+        let proxy = proxy_to(server_ep.address.clone()).await;
+        let client_ep = Endpoint::new(proxy.addr.clone()).with_compression(Compression::Gzip, 1024);
+        let reply = echo_call(client_ep, vec![b'a'; 100]).await.unwrap();
+        assert_eq!(reply.len(), 105);
+        assert!(proxy.bytes.load(Ordering::SeqCst) > 0);
+    }
+
+    #[tokio::test]
+    async fn compressed_messages_stay_under_the_receivers_size_limit() {
+        // The server allows 1 MiB; a tiny gzip stream that expands to 5 MB
+        // must be refused rather than inflated.
+        let (server_ep, _stop) =
+            start(Endpoint::new("x").with_max_message_bytes(1 << 20), echo).await;
+        let client_ep = Endpoint::new(server_ep.address.clone())
+            .with_max_message_bytes(16 << 20)
+            .with_compression(Compression::Gzip, 64);
+        let result = echo_call(client_ep, vec![0u8; 5_000_000]).await;
+        assert!(result.is_err(), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn unsupported_request_encoding_is_rejected() {
+        let (server_ep, _stop) = start(Endpoint::new("x"), echo).await;
+        let client_ep =
+            Endpoint::new(server_ep.address.clone()).with_metadata("grpc-encoding", "zstd");
+        assert!(echo_call(client_ep, b"hi".to_vec()).await.is_err());
+        // `identity` is always fine.
+        let ok_ep =
+            Endpoint::new(server_ep.address.clone()).with_metadata("grpc-encoding", "identity");
+        assert!(echo_call(ok_ep, b"hi".to_vec()).await.is_ok());
     }
 
     #[cfg(feature = "tls")]
