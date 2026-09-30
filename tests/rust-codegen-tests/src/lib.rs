@@ -98,6 +98,7 @@ fn oneof_last_wins_on_wire() {
         contact: Some(OuterContact::Addr(Address {
             street: "second".into(),
             city: None,
+            ..Default::default()
         })),
         ..Default::default()
     };
@@ -149,6 +150,7 @@ fn canonical_output_is_order_independent() {
         contact: Some(OuterContact::Addr(Address {
             street: String::new(),
             city: None,
+            ..Default::default()
         })),
         ..Default::default()
     };
@@ -298,14 +300,14 @@ fn builders_validate_annotations() {
     use generated::BuildError;
 
     // @max_len(8) on username.
-    let ok = OuterBuilder::new()
+    let ok = Outer::builder()
         .username("short")
         .age(30)
         .build()
         .unwrap();
     assert_eq!(ok.username, "short");
 
-    let err = OuterBuilder::new()
+    let err = Outer::builder()
         .username("way-too-long-for-max-len-8")
         .build()
         .unwrap_err();
@@ -318,7 +320,7 @@ fn builders_validate_annotations() {
     );
 
     // @range(0, 150) on age.
-    let err = OuterBuilder::new().age(-1).build().unwrap_err();
+    let err = Outer::builder().age(-1).build().unwrap_err();
     assert_eq!(
         err,
         BuildError::OutOfRange {
@@ -327,7 +329,7 @@ fn builders_validate_annotations() {
     );
 
     // Full builder path roundtrips like the struct literal path.
-    let built = OuterBuilder::new()
+    let built = Outer::builder()
         .id(7)
         .name("b")
         .tags(["t1".to_string(), "t2".to_string()])

@@ -345,7 +345,7 @@ pub fn decode_float64_borrowed(value: &BorrowedValue) -> Result<f64, DecodeError
 }
 
 /// Decodes a length-delimited value as raw bytes from a borrowed value.
-pub fn decode_bytes_borrowed<'a>(value: &'a BorrowedValue<'a>) -> Result<&'a [u8], DecodeError> {
+pub fn decode_bytes_borrowed<'a>(value: &BorrowedValue<'a>) -> Result<&'a [u8], DecodeError> {
     match value {
         BorrowedValue::Len(b) => Ok(b),
         _ => Err(DecodeError::Internal("expected length-delimited")),
@@ -353,7 +353,7 @@ pub fn decode_bytes_borrowed<'a>(value: &'a BorrowedValue<'a>) -> Result<&'a [u8
 }
 
 /// Decodes a length-delimited value as a UTF-8 string from a borrowed value.
-pub fn decode_string_borrowed<'a>(value: &'a BorrowedValue<'a>) -> Result<&'a str, DecodeError> {
+pub fn decode_string_borrowed<'a>(value: &BorrowedValue<'a>) -> Result<&'a str, DecodeError> {
     match value {
         BorrowedValue::Len(b) => std::str::from_utf8(b).map_err(|_| DecodeError::InvalidUtf8),
         _ => Err(DecodeError::Internal("expected length-delimited")),
@@ -363,7 +363,7 @@ pub fn decode_string_borrowed<'a>(value: &'a BorrowedValue<'a>) -> Result<&'a st
 /// Decodes a length-delimited value as a UTF-8 string, enforcing
 /// `max_string_bytes` (spec §18.1), from a borrowed value.
 pub fn decode_string_limited_borrowed<'a>(
-    value: &'a BorrowedValue<'a>,
+    value: &BorrowedValue<'a>,
     limits: &crate::limits::DecoderLimits,
 ) -> Result<&'a str, DecodeError> {
     let s = decode_string_borrowed(value)?;

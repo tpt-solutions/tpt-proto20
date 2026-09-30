@@ -72,12 +72,16 @@ impl Transport for Http2Transport {
                     TransportError::Tls("TLS endpoint missing TlsConfig".into())
                 })?;
                 let connector = self.make_tls_connector(tls_config)?;
-                let server_name = self
+                let host = self
                     .endpoint
                     .address
-                    .split(':')
-                    .next()
-                    .unwrap_or("localhost");
+                    .rsplit_once(':')
+                    .map(|(h, _)| h)
+                    .unwrap_or(&self.endpoint.address)
+                    .trim_matches(|c| c == '[' || c == ']')
+                    .to_string();
+                let server_name = rustls::pki_types::ServerName::try_from(host)
+                    .map_err(|e| TransportError::Tls(e.to_string()))?;
                 let tls_stream = connector
                     .connect(server_name, tcp)
                     .await
@@ -179,42 +183,98 @@ impl Transport for Http2Transport {
 impl Http2Transport {
     fn make_tls_connector(
         &self,
-        _tls_config: &crate::TlsConfig,
+        tls_config: &crate::TlsConfig,
     ) -> Result<tokio_rustls::TlsConnector, TransportError> {
         use rustls::ClientConfig;
         use std::sync::Arc;
 
-        let mut root_store = rustls::RootCertStore::empty();
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let builder = ClientConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .map_err(|e| TransportError::Tls(e.to_string()))?;
 
-        if let Some(ref cert_pem) = _tls_config.cert_pem {
-            let mut reader = cert_pem.as_slice();
-            let certs: Result<Vec<_>, _> = rustls_pemfile::certs(&mut reader).collect();
-            for cert in certs.map_err(|e| TransportError::Tls(e.to_string()))? {
-                root_store.add(cert).map_err(|e| TransportError::Tls(e.to_string()))?;
+        let mut client_config = if tls_config.accept_invalid_certs {
+            builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(AcceptAnyServerCert(provider)))
+                .with_no_client_auth()
+        } else {
+            let mut root_store = rustls::RootCertStore::empty();
+            let mut pem: Option<Vec<u8>> = tls_config.cert_pem.clone();
+            if pem.is_none() {
+                if let Some(path) = &tls_config.cert_path {
+                    pem = Some(
+                        std::fs::read(path).map_err(|e| TransportError::Tls(e.to_string()))?,
+                    );
+                }
             }
-        }
-
-        let client_config = ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(std::sync::Arc::new(
-                if _tls_config.accept_invalid_certs {
-                    rustls::client::WebPkiVerifier::without_provider()
-                        .map_err(|e| TransportError::Tls(e.to_string()))?
-                } else {
-                    let provider = rustls::crypto::ring::default_provider()
+            if let Some(pem) = pem {
+                let mut reader = pem.as_slice();
+                for cert in rustls_pemfile::certs(&mut reader) {
+                    let cert = cert.map_err(|e| TransportError::Tls(e.to_string()))?;
+                    root_store
+                        .add(cert)
                         .map_err(|e| TransportError::Tls(e.to_string()))?;
-                    std::sync::Arc::new(rustls::client::WebPkiVerifier::new(
-                        root_store,
-                        None,
-                        provider,
-                    ))
-                },
-            ))
-            .with_no_client_auth();
+                }
+            }
+            builder
+                .with_root_certificates(root_store)
+                .with_no_client_auth()
+        };
+        client_config.alpn_protocols = tls_config.alpn_protocols.clone();
 
-        Ok(tokio_rustls::TlsConnector::from(std::sync::Arc::new(
-            client_config,
-        )))
+        Ok(tokio_rustls::TlsConnector::from(Arc::new(client_config)))
+    }
+}
+
+/// Certificate verifier that accepts any server certificate (development only).
+#[cfg(all(feature = "http2", feature = "tls"))]
+#[derive(Debug)]
+struct AcceptAnyServerCert(std::sync::Arc<rustls::crypto::CryptoProvider>);
+
+#[cfg(all(feature = "http2", feature = "tls"))]
+impl rustls::client::danger::ServerCertVerifier for AcceptAnyServerCert {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.0.signature_verification_algorithms.supported_schemes()
     }
 }
 

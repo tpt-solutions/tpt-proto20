@@ -24,8 +24,8 @@ h2 = { version = "0.4", optional = true }
 default = ["in_process"]
 in_process = []
 http2 = ["dep:h2", "dep:http"]
-tls = ["http2"]
-rustls = ["tls", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pemfile"]
+tls = ["http2", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pemfile"]
+rustls = ["tls"]
 quic = []
 
 [dependencies.rustls]
@@ -35,7 +35,9 @@ features = ["logging", "tls12", "ring", "std"]
 optional = true
 
 [dependencies.tokio-rustls]
-version = "0.24"
+version = "0.26"
+default-features = false
+features = ["ring", "tls12"]
 optional = true
 
 [dependencies.rustls-pemfile]
