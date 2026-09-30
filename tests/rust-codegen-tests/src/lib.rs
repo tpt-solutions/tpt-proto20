@@ -577,3 +577,290 @@ mod json_options {
         assert!(Outer::from_json_with(r#"{"home":{"zip":"1"}}"#, &strict).is_err());
     }
 }
+
+/// Differential tests: `prost` (an independent protobuf implementation) and
+/// the tpt20 protobuf adapter + generated code must agree on the bytes.
+#[cfg(test)]
+mod protobuf_differential {
+    use super::generated::{Diff, DiffInner, DiffPick};
+    use prost::Message;
+    use std::collections::HashMap;
+    use tpt20_compat_protobuf::schema_wire::{native_to_protobuf, protobuf_to_native};
+    use tpt20_core::DecoderLimits;
+
+    fn package() -> &'static tpt20_ir::PackageIr {
+        static PKG: std::sync::OnceLock<tpt20_ir::PackageIr> = std::sync::OnceLock::new();
+        PKG.get_or_init(|| {
+            tpt20_compiler::pipeline::compile(include_str!("schema.tpt"), None)
+                .map_err(|d| format!("{d:?}"))
+                .unwrap()
+                .ir
+        })
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct PInner {
+        #[prost(string, tag = "1")]
+        x: String,
+        #[prost(int32, tag = "2")]
+        y: i32,
+    }
+
+    #[derive(Clone, PartialEq, prost::Oneof)]
+    enum PPick {
+        #[prost(int32, tag = "23")]
+        Pa(i32),
+        #[prost(string, tag = "24")]
+        Pb(String),
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct PDiff {
+        #[prost(int32, tag = "1")]
+        a: i32,
+        #[prost(int64, tag = "2")]
+        b: i64,
+        #[prost(uint32, tag = "3")]
+        c: u32,
+        #[prost(uint64, tag = "4")]
+        d: u64,
+        #[prost(sint32, tag = "5")]
+        e: i32,
+        #[prost(sint64, tag = "6")]
+        f: i64,
+        #[prost(bool, tag = "7")]
+        g: bool,
+        #[prost(fixed32, tag = "8")]
+        h: u32,
+        #[prost(fixed64, tag = "9")]
+        i: u64,
+        #[prost(sfixed32, tag = "10")]
+        j: i32,
+        #[prost(sfixed64, tag = "11")]
+        k: i64,
+        #[prost(float, tag = "12")]
+        l: f32,
+        #[prost(double, tag = "13")]
+        m: f64,
+        #[prost(string, tag = "14")]
+        s: String,
+        #[prost(bytes = "vec", tag = "15")]
+        by: Vec<u8>,
+        #[prost(int32, repeated, tag = "16")]
+        rp: Vec<i32>,
+        #[prost(string, repeated, tag = "17")]
+        rs: Vec<String>,
+        #[prost(sint64, repeated, tag = "18")]
+        rz: Vec<i64>,
+        #[prost(double, repeated, tag = "19")]
+        rd: Vec<f64>,
+        #[prost(map = "string, int64", tag = "20")]
+        m1: HashMap<String, i64>,
+        #[prost(message, optional, tag = "21")]
+        nested: Option<PInner>,
+        #[prost(int32, optional, tag = "22")]
+        opt: Option<i32>,
+        #[prost(map = "string, message", tag = "25")]
+        mm: HashMap<String, PInner>,
+        #[prost(message, repeated, tag = "26")]
+        rn: Vec<PInner>,
+        #[prost(oneof = "PPick", tags = "23, 24")]
+        pick: Option<PPick>,
+    }
+
+    /// Small deterministic generator (xorshift64*).
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+        fn pick<T: Copy>(&mut self, xs: &[T]) -> T {
+            xs[(self.next() % xs.len() as u64) as usize]
+        }
+        fn text(&mut self) -> String {
+            let n = self.next() % 6;
+            (0..n)
+                .map(|_| self.pick(&['a', 'é', '漢', '🦀', 'z', ' ']))
+                .collect()
+        }
+    }
+
+    fn random(rng: &mut Rng) -> PDiff {
+        let i32s = [0, 1, -1, i32::MAX, i32::MIN, 127, 128, -129];
+        let i64s = [0, 1, -1, i64::MAX, i64::MIN, 1 << 35, -(1 << 35)];
+        let mut d = PDiff {
+            a: if rng.next() % 2 == 0 {
+                rng.pick(&i32s)
+            } else {
+                0
+            },
+            b: if rng.next() % 2 == 0 {
+                rng.pick(&i64s)
+            } else {
+                0
+            },
+            c: if rng.next() % 2 == 0 {
+                rng.next() as u32
+            } else {
+                0
+            },
+            d: if rng.next() % 2 == 0 { rng.next() } else { 0 },
+            e: rng.pick(&i32s),
+            f: rng.pick(&i64s),
+            g: rng.next() % 2 == 0,
+            h: rng.next() as u32,
+            i: rng.next(),
+            j: rng.pick(&i32s),
+            k: rng.pick(&i64s),
+            l: rng.pick(&[0.0, 1.5, -2.25, f32::MAX, f32::MIN_POSITIVE]),
+            m: rng.pick(&[0.0, 1.5, -2.25, f64::MAX, f64::MIN_POSITIVE]),
+            s: rng.text(),
+            by: (0..rng.next() % 5).map(|_| rng.next() as u8).collect(),
+            ..Default::default()
+        };
+        for _ in 0..rng.next() % 4 {
+            d.rp.push(rng.pick(&i32s));
+            d.rs.push(rng.text());
+            d.rz.push(rng.pick(&i64s));
+            d.rd.push(rng.pick(&[0.5, -1e300]));
+        }
+        for _ in 0..rng.next() % 3 {
+            d.m1.insert(rng.text(), rng.pick(&i64s));
+        }
+        for _ in 0..rng.next() % 3 {
+            let inner = PInner {
+                x: rng.text(),
+                y: rng.pick(&i32s),
+            };
+            d.mm.insert(rng.text(), inner.clone());
+            d.rn.push(inner);
+        }
+        if rng.next() % 2 == 0 {
+            d.nested = Some(PInner {
+                x: rng.text(),
+                y: rng.pick(&i32s),
+            });
+        }
+        if rng.next() % 2 == 0 {
+            d.opt = Some(rng.pick(&i32s));
+        }
+        d.pick = match rng.next() % 3 {
+            0 => Some(PPick::Pa(rng.pick(&i32s))),
+            1 => Some(PPick::Pb(rng.text())),
+            _ => None,
+        };
+        d
+    }
+
+    fn to_native(p: &PDiff) -> Diff {
+        Diff {
+            a: p.a,
+            b: p.b,
+            c: p.c,
+            d: p.d,
+            e: p.e,
+            f: p.f,
+            g: p.g,
+            h: p.h,
+            i: p.i,
+            j: p.j,
+            k: p.k,
+            l: p.l,
+            m: p.m,
+            s: p.s.clone(),
+            by: p.by.clone(),
+            rp: p.rp.clone(),
+            rs: p.rs.clone(),
+            rz: p.rz.clone(),
+            rd: p.rd.clone(),
+            m1: p.m1.clone().into_iter().collect(),
+            nested: p.nested.as_ref().map(|n| DiffInner {
+                x: n.x.clone(),
+                y: n.y,
+                ..Default::default()
+            }),
+            mm: p
+                .mm
+                .iter()
+                .map(|(k, n)| {
+                    (
+                        k.clone(),
+                        DiffInner {
+                            x: n.x.clone(),
+                            y: n.y,
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect(),
+            rn: p
+                .rn
+                .iter()
+                .map(|n| DiffInner {
+                    x: n.x.clone(),
+                    y: n.y,
+                    ..Default::default()
+                })
+                .collect(),
+            opt: p.opt,
+            pick: p.pick.as_ref().map(|k| match k {
+                PPick::Pa(v) => DiffPick::Pa(*v),
+                PPick::Pb(v) => DiffPick::Pb(v.clone()),
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// prost bytes -> adapter -> native bytes -> generated decode.
+    fn prost_to_native(bytes: &[u8]) -> Diff {
+        let native = protobuf_to_native(bytes, package(), "Diff", &DecoderLimits::default())
+            .expect("adapter converts protobuf bytes");
+        Diff::decode(&native).expect("generated code decodes adapted bytes")
+    }
+
+    /// generated encode -> adapter -> protobuf bytes.
+    fn native_to_proto(d: &Diff) -> Vec<u8> {
+        native_to_protobuf(&d.encode(), package(), "Diff", &DecoderLimits::default())
+            .expect("adapter converts native bytes")
+    }
+
+    #[test]
+    fn prost_bytes_decode_through_the_adapter() {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        for n in 0..500 {
+            let p = random(&mut rng);
+            let got = prost_to_native(&p.encode_to_vec());
+            let mut want = to_native(&p);
+            // Native decode keeps no unknown fields here; compare the rest.
+            want.unknown_fields = got.unknown_fields.clone();
+            assert_eq!(got, want, "case {n}: {p:?}");
+        }
+    }
+
+    #[test]
+    fn native_bytes_decode_in_prost() {
+        let mut rng = Rng(0xD1B5_4A32_D192_ED03);
+        for n in 0..500 {
+            let p = random(&mut rng);
+            let bytes = native_to_proto(&to_native(&p));
+            let got = PDiff::decode(bytes.as_slice())
+                .unwrap_or_else(|e| panic!("case {n}: prost rejected adapter output: {e}"));
+            assert_eq!(got, p, "case {n}");
+        }
+    }
+
+    #[test]
+    fn protobuf_bytes_are_stable_under_reencoding() {
+        // prost's canonical bytes, run through the adapter twice, stay valid
+        // protobuf and decode to the same message.
+        let mut rng = Rng(42);
+        for _ in 0..200 {
+            let p = random(&mut rng);
+            let once = native_to_proto(&prost_to_native(&p.encode_to_vec()));
+            assert_eq!(PDiff::decode(once.as_slice()).unwrap(), p);
+        }
+    }
+}

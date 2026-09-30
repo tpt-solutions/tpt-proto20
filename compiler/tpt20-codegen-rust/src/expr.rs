@@ -17,7 +17,8 @@ pub fn enc_value(scalar: &str, v: &str) -> String {
         "int32" => format!("__core::Value::Varint(i64::from(*{v}) as u64)"),
         "sint32" => format!("__scalar::encode_sint(i64::from(*{v}))"),
         "sint64" => format!("__scalar::encode_sint(*{v})"),
-        "int64" | "uint64" => format!("__core::Value::Varint((*{v}) as u64)"),
+        "int64" => format!("__core::Value::Varint((*{v}) as u64)"),
+        "uint64" => format!("__core::Value::Varint(*{v})"),
         "uint32" => format!("__core::Value::Varint((*{v}) as u64)"),
         "fixed32" => format!("__core::Value::Fixed32(*{v})"),
         "sfixed32" => format!("__core::Value::Fixed32((*{v}) as u32)"),
@@ -64,7 +65,7 @@ pub fn dec_view(scalar: &str, v: &str, l: &str) -> String {
         "uint64" => format!("__scalar::decode_uint_borrowed({v})"),
         "sint32" => format!("__scalar::decode_sint_borrowed({v}).map(|x| x as i32)"),
         "sint64" => format!("__scalar::decode_sint_borrowed({v})"),
-        "fixed32" => format!("__scalar::decode_fixed32_borrowed({v}).map(|x| x as u32)"),
+        "fixed32" => format!("__scalar::decode_fixed32_borrowed({v})"),
         "sfixed32" => format!("__scalar::decode_fixed32_borrowed({v}).map(|x| x as i32)"),
         "fixed64" => format!("__scalar::decode_fixed64_borrowed({v})"),
         "sfixed64" => format!("__scalar::decode_fixed64_borrowed({v}).map(|x| x as i64)"),
@@ -106,10 +107,10 @@ pub fn to_wire_word(scalar: &str, v: &str) -> String {
         "uint64" => v.to_string(),
         "fixed32" => v.to_string(),
         "sfixed32" => format!("{v} as u32"),
-        "float32" => format!("{v}.to_bits()"),
+        "float32" => format!("({v}).to_bits()"),
         "fixed64" => v.to_string(),
         "sfixed64" => format!("{v} as u64"),
-        "float64" => format!("{v}.to_bits()"),
+        "float64" => format!("({v}).to_bits()"),
         other => unreachable!("not packable: {other}"),
     }
 }
@@ -155,9 +156,9 @@ pub fn json_to(scalar: &str, v: &str) -> String {
 pub fn json_from(scalar: &str, v: &str) -> String {
     match scalar {
         "bool" => format!("__json::as_bool({v})"),
-        "int32" | "sint32" => format!("__support::as_i32({v})"),
+        "int32" | "sint32" | "sfixed32" => format!("__support::as_i32({v})"),
         "int64" | "sint64" => format!("__json::as_i64({v})"),
-        "uint32" | "fixed32" | "sfixed32" => format!("__support::as_u32({v})"),
+        "uint32" | "fixed32" => format!("__support::as_u32({v})"),
         "uint64" | "fixed64" => format!("__json::as_u64({v})"),
         "sfixed64" => format!("__json::as_i64({v})"),
         "float32" => format!("__json::as_f64({v}).map(|x| x as f32)"),

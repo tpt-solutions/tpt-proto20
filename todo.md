@@ -499,11 +499,11 @@ diagram in spec §5 and the repo layout in spec §26.
 - [x] Protobuf wire adapter
   - [x] `decode_protobuf(bytes)` conceptual API
   - [x] `encode_protobuf()` conceptual API
-  - [ ] Round-trip fidelity testing against real protobuf messages (only self-consistency
-        tested so far — see next item)
-- [ ] Golden-vector / differential testing against an established protobuf implementation
-      (no `prost`/reference protobuf crate dependency yet; current "golden"/"differential"
-      tests only compare tpt20 against itself)
+  - [x] Round-trip fidelity testing against real protobuf messages (`prost`, see next item)
+- [x] Differential testing against an established protobuf implementation
+      (`tests/rust-codegen-tests`, `protobuf_differential`: 500 random messages per direction
+      covering every scalar kind, packed/unpacked repeated, maps incl. message values, nested
+      messages, oneofs, explicit presence; prost ↔ `schema_wire` adapter ↔ generated code)
 
 ---
 

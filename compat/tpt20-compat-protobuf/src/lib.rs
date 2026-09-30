@@ -30,6 +30,7 @@ pub mod lexer;
 pub mod lower;
 pub mod parser;
 pub mod proto_ast;
+pub mod schema_wire;
 pub mod wire;
 
 pub use error::{ProtoError, WireError};

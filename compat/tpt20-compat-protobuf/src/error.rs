@@ -80,4 +80,17 @@ pub enum WireError {
     /// An internal invariant was violated.
     #[error("internal error: {0}")]
     Internal(&'static str),
+
+    /// The schema given to a schema-aware conversion is unusable (unknown
+    /// message, unresolved type reference).
+    #[error("schema error: {0}")]
+    Schema(String),
+
+    /// Messages are nested deeper than the decoder limits allow.
+    #[error("message nesting too deep")]
+    TooDeep,
+
+    /// The native (tpt20) side of a conversion failed.
+    #[error("native wire error: {0}")]
+    Native(String),
 }

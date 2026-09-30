@@ -38,7 +38,7 @@ see the unchecked items.
 ## 27.6 Compatibility
 - [x] import protobuf schemas (proto2/proto3; no editions, extensions dropped)
 - [x] encode/decode protobuf-compatible binary (self-consistency tested)
-- [ ] differential testing against an established protobuf implementation
+- [x] differential testing against an established protobuf implementation (`prost`)
 - [x] expose/consume gRPC-compatible services over the network:
       `GrpcServer::serve`/`serve_listener` (feature `server`) answer stock
       gRPC HTTP/2 clients (tested with a plain `h2` client); `GrpcClient`

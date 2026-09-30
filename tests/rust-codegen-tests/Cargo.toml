@@ -21,6 +21,10 @@ tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
 tpt20-codegen-rust = { path = "../../compiler/tpt20-codegen-rust" }
 
 [dev-dependencies]
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
+tpt20-ir = { path = "../../compiler/tpt20-ir" }
+prost = "0.13"
+tpt20-compat-protobuf = { path = "../../compat/tpt20-compat-protobuf" }
 tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
 tpt20-rpc = { path = "../../runtime/tpt20-rpc", features = ["http2"] }
 tpt20-transport = { path = "../../runtime/tpt20-transport", features = ["http2"] }

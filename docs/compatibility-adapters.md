@@ -169,3 +169,14 @@ Extensions and imports are not supported.
 - Exposing or consuming a gRPC service → `tpt20-compat-grpc`, with the
   caveats above; today this is most usable for the mapping/framing
   primitives, not yet as a drop-in gRPC server or a trustworthy client.
+
+## Converting whole messages (schema-aware)
+
+`wire::decode_protobuf` / `encode_protobuf` translate only the tags of one
+message level; nested messages and map entries carry their own tags inside
+length-delimited payloads. To convert a complete message, use
+`schema_wire::protobuf_to_native(bytes, &package_ir, "Message", &limits)` and
+`schema_wire::native_to_protobuf(...)`, which walk the schema and convert every
+level (bounded by `DecoderLimits::max_depth`). Generated decoders accept map
+entries with an absent key or value (defaults apply), as protobuf writers omit
+default values.

@@ -692,6 +692,7 @@ impl Http2Transport {
     }
 }
 
+#[cfg(feature = "tls")]
 type ClientIdentity = (
     Vec<rustls::pki_types::CertificateDer<'static>>,
     rustls::pki_types::PrivateKeyDer<'static>,

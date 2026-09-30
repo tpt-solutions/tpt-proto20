@@ -92,3 +92,39 @@ message Expr {
     3: add Pair;
   }
 }
+
+message DiffInner {
+  1: x string;
+  2: y int32;
+}
+
+message Diff {
+  1: a int32;
+  2: b int64;
+  3: c uint32;
+  4: d uint64;
+  5: e sint32;
+  6: f sint64;
+  7: g bool;
+  8: h fixed32;
+  9: i fixed64;
+  10: j sfixed32;
+  11: k sfixed64;
+  12: l float32;
+  13: m float64;
+  14: s string;
+  15: by bytes;
+  16: rp repeated int32;
+  17: rs repeated string;
+  18: rz repeated sint64;
+  19: rd repeated float64;
+  20: m1 map<string, int64>;
+  21: nested DiffInner;
+  22: opt int32?;
+  25: mm map<string, DiffInner>;
+  26: rn repeated DiffInner;
+  oneof pick {
+    23: pa int32;
+    24: pb string;
+  }
+}

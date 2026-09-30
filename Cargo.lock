@@ -1585,11 +1585,14 @@ name = "tpt20-codegen-tests"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "prost",
  "tokio",
  "tpt20-codegen-rust",
+ "tpt20-compat-protobuf",
  "tpt20-compiler",
  "tpt20-core",
  "tpt20-descriptor",
+ "tpt20-ir",
  "tpt20-json",
  "tpt20-rpc",
  "tpt20-transport",

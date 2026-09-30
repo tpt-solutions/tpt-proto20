@@ -1159,12 +1159,10 @@ r#"        for (k, v) in &self.{fname} {{
                              _ => {{}}
                          }}
                      }}
-                      match (k, v) {{
-                          (Some(k), Some(v)) => {{
-                              out_msg.{fname}.{map_push}({map_args});
-                          }}
-                          _ => return Err(__core::DecodeError::MalformedMapEntry),
-                      }}
+                      // Absent key/value take their defaults (protobuf semantics).
+                      let k = k.unwrap_or_default();
+                      {vfill}
+                      out_msg.{fname}.{map_push}({map_args});
                       limits.check_map_entries(out_msg.{fname}.len())?;
                   }}
                 "#,
@@ -1172,6 +1170,7 @@ r#"        for (k, v) in &self.{fname} {{
             len = class_name(crate::WireClass::Len),
             kt = kt,
             vt = vt,
+            vfill = map_value_fill(vkind, &vexpr),
             kclass = class_name(kinfo.class),
             vclass = class_name(vclass.unwrap_or(crate::WireClass::Len)),
             map_push = if view { "push" } else { "insert" },
@@ -1530,15 +1529,16 @@ r#"        for (k, v) in &self.{fname} {{
                             _ => {{}}
                         }}
                     }}
-                    match (k, v) {{
-                        (Some(k), Some(v)) => out_msg.{fname}.push((k, v)),
-                        _ => return Err(__core::DecodeError::MalformedMapEntry),
-                    }}
+                    // Absent key/value take their defaults (protobuf semantics).
+                    let k = k.unwrap_or_default();
+                    {vfill}
+                    out_msg.{fname}.push((k, v));
                     limits.check_map_entries(out_msg.{fname}.len())?;
                 }}
 "#,
                     kclass = class_name(kinfo.class),
                     vclass = class_name(vclass),
+                    vfill = map_value_fill(vkind, &vexpr),
                 )
             }
         }
@@ -2160,6 +2160,18 @@ fn compute_boxed(pkg: &ir::PackageIr, model: &Model) -> std::collections::HashSe
     boxed
 }
 
+/// Statement binding `v` for a map entry whose value may be absent on the
+/// wire: the type's default, derived from the decode expression of a present
+/// value.
+fn map_value_fill(kind: TypeKind, vexpr: &str) -> String {
+    let default = match kind {
+        TypeKind::Scalar(_) => return "let v = v.unwrap_or_default();".to_string(),
+        TypeKind::Enum { .. } => vexpr.replace("__support::wire_i32_borrowed(&ef.value)?", "0"),
+        TypeKind::Message => vexpr.replace("__scalar::decode_bytes_borrowed(&ef.value)?", "&[]"),
+    };
+    format!("let v = match v {{ Some(v) => v, None => {default} }};")
+}
+
 /// Fixpoint of "this message's view borrows string/bytes data".
 fn compute_borrowing(pkg: &ir::PackageIr, model: &Model) -> std::collections::HashSet<String> {
     use std::collections::HashSet;
@@ -2222,9 +2234,36 @@ fn compute_borrowing(pkg: &ir::PackageIr, model: &Model) -> std::collections::Ha
     }
 }
 
+/// Rewrites `map(|x| some::path(x))` to `map(some::path)`.
+fn strip_redundant_closures(code: &str) -> String {
+    let mut out = String::with_capacity(code.len());
+    let mut rest = code;
+    while let Some(i) = rest.find("|x| ") {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i + 4..];
+        let path_len = tail
+            .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+            .unwrap_or(tail.len());
+        let path = &tail[..path_len];
+        let after = &tail[path_len..];
+        if !path.is_empty() && after.starts_with("(x))") {
+            out.push_str(path);
+            out.push(')');
+            rest = &after[4..];
+        } else {
+            out.push_str("|x| ");
+            rest = tail;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Nested types are flattened to `Outer_Inner` names; mark those items so
 /// consumers do not get `non_camel_case_types` warnings from generated code.
 fn allow_flat_type_names(code: &str) -> String {
+    // `|x| path(x)` closures trip clippy::redundant_closure in user crates.
+    let code = &strip_redundant_closures(code);
     let mut out = String::with_capacity(code.len() + 256);
     for line in code.lines() {
         let decl = line
