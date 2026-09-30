@@ -1294,8 +1294,13 @@ fn cmd_import_proto(input: PathBuf, output: Option<PathBuf>) -> Result<(), CliEr
         .map_err(|e| CliError::Parse(format!("lex error: {e}")))?;
     let proto = tpt20_compat_protobuf::parse_proto(tokens)
         .map_err(|e| CliError::Parse(format!("parse error: {e}")))?;
-    let ir = tpt20_compat_protobuf::lower(proto)
+    let (ir, report) = tpt20_compat_protobuf::lower_with_report(proto)
         .map_err(|e| CliError::Parse(format!("lower error: {e}")))?;
+    for dropped in &report.dropped_extensions {
+        eprintln!(
+            "warning: extension `{dropped}` extends a message that is not declared in this file; dropped"
+        );
+    }
 
     let json = serde_json::to_string_pretty(&ir).map_err(|e| CliError::Parse(e.to_string()))?;
     match output {

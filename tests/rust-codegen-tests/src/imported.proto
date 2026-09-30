@@ -1,0 +1,32 @@
+edition = "2023";
+package imp.v1;
+
+enum Kind {
+  KIND_UNSPECIFIED = 0;
+  KIND_A = 1;
+  KIND_B = 2;
+}
+
+message Note {
+  string text = 1;
+  int32 prio = 2 [features.field_presence = IMPLICIT];
+}
+
+message Item {
+  int32 id = 1;
+  string name = 2 [features.field_presence = IMPLICIT];
+  Kind kind = 3 [features.field_presence = IMPLICIT];
+  repeated string tags = 4;
+  map<string, Note> notes = 5;
+  Note main = 6;
+  oneof pick {
+    int64 num = 7;
+    string txt = 8;
+  }
+  extensions 100 to 199;
+}
+
+extend Item {
+  int32 weight = 100;
+  repeated Note extra = 101;
+}

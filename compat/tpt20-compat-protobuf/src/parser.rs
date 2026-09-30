@@ -12,14 +12,22 @@ pub fn parse(tokens: Vec<Token>) -> Result<ProtoFile, ProtoError> {
     p.parse_file()
 }
 
+/// Maximum message nesting accepted by the parser (bounds recursion).
+pub const MAX_NESTING_DEPTH: usize = 64;
+
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    depth: usize,
 }
 
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+        Parser {
+            tokens,
+            pos: 0,
+            depth: 0,
+        }
     }
 
     fn peek(&self) -> &TokenKind {
@@ -66,6 +74,11 @@ impl Parser {
     fn expect_ident(&mut self) -> Result<String, ProtoError> {
         match self.bump() {
             TokenKind::Ident(s) => Ok(s),
+            // Keywords are contextual in `.proto`: `max`, `stream`, `default`…
+            // are legal names.
+            other if other.keyword_text().is_some() => {
+                Ok(other.keyword_text().unwrap_or_default().to_string())
+            }
             other => Err(ProtoError::UnexpectedToken {
                 found: format!("{:?}", other),
                 line: self.span().line,
@@ -90,6 +103,17 @@ impl Parser {
                 TokenKind::Reserved => {
                     let r = self.parse_reserved()?;
                     file.reserved.push(r);
+                }
+                TokenKind::Ident(word)
+                    if word == "edition"
+                        && self.tokens.get(self.pos + 1).map(|t| &t.kind)
+                            == Some(&TokenKind::Eq) =>
+                {
+                    self.bump();
+                    self.bump();
+                    let e = self.expect_string_lit()?;
+                    self.expect(&TokenKind::Semi)?;
+                    file.edition = Some(e);
                 }
                 other => {
                     return Err(ProtoError::UnexpectedToken {
@@ -180,6 +204,29 @@ impl Parser {
                 self.bump();
                 Ok(OptionValue::Ident(s))
             }
+            TokenKind::LBrace => {
+                // Aggregate value `{ ... }`: skipped, kept only as a marker.
+                let mut depth = 0usize;
+                loop {
+                    match self.bump() {
+                        TokenKind::LBrace => depth += 1,
+                        TokenKind::RBrace => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        TokenKind::Eof => return Err(ProtoError::UnexpectedEof),
+                        _ => {}
+                    }
+                }
+                Ok(OptionValue::Ident("{...}".to_string()))
+            }
+            other if other.keyword_text().is_some() => {
+                let s = other.keyword_text().unwrap_or_default().to_string();
+                self.bump();
+                Ok(OptionValue::Ident(s))
+            }
             other => Err(ProtoError::UnexpectedToken {
                 found: format!("{:?}", other),
                 line: self.span().line,
@@ -191,11 +238,17 @@ impl Parser {
 
     fn parse_qualified_ident(&mut self) -> Result<String, ProtoError> {
         if self.eat(&TokenKind::LParen) {
-            let ident = self.expect_ident()?;
+            // Extension option name: `(pkg.opt)` optionally followed by `.sub.path`.
+            let mut ident = format!("({})", self.expect_ident()?);
             self.expect(&TokenKind::RParen)?;
+            while self.eat(&TokenKind::Dot) {
+                ident.push('.');
+                ident.push_str(&self.expect_ident()?);
+            }
             Ok(ident)
         } else {
-            let mut ident = self.expect_ident()?;
+            let lead = if self.eat(&TokenKind::Dot) { "." } else { "" };
+            let mut ident = format!("{lead}{}", self.expect_ident()?);
             while self.eat(&TokenKind::Dot) {
                 ident.push('.');
                 ident.push_str(&self.expect_ident()?);
@@ -205,6 +258,16 @@ impl Parser {
     }
 
     fn parse_message(&mut self, out: &mut Vec<Message>) -> Result<(), ProtoError> {
+        if self.depth >= MAX_NESTING_DEPTH {
+            return Err(ProtoError::Unsupported("message nesting too deep"));
+        }
+        self.depth += 1;
+        let result = self.parse_message_body(out);
+        self.depth -= 1;
+        result
+    }
+
+    fn parse_message_body(&mut self, out: &mut Vec<Message>) -> Result<(), ProtoError> {
         self.expect(&TokenKind::Message)?;
         let name = self.expect_ident()?;
         self.expect(&TokenKind::LBrace)?;
@@ -215,11 +278,22 @@ impl Parser {
             messages: Vec::new(),
             enums: Vec::new(),
             extensions: Vec::new(),
+            extension_ranges: Vec::new(),
             reserved: Vec::new(),
             options: Vec::new(),
         };
         while *self.peek() != TokenKind::RBrace && *self.peek() != TokenKind::Eof {
             match self.peek() {
+                TokenKind::Ident(word)
+                    if word == "extensions"
+                        && matches!(
+                            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                            Some(TokenKind::IntLit(_))
+                        ) =>
+                {
+                    self.bump();
+                    self.parse_extension_ranges(&mut msg.extension_ranges)?;
+                }
                 TokenKind::Option => self.parse_message_option(&mut msg)?,
                 TokenKind::Message => self.parse_message(&mut msg.messages)?,
                 TokenKind::Enum => self.parse_enum(&mut msg.enums)?,
@@ -233,7 +307,7 @@ impl Parser {
                     self.parse_field(&mut msg.fields, false)?
                 }
                 _ if is_type_keyword(self.peek()) => self.parse_field(&mut msg.fields, false)?,
-                TokenKind::Ident(_) => self.parse_field(&mut msg.fields, false)?,
+                TokenKind::Ident(_) | TokenKind::Dot => self.parse_field(&mut msg.fields, false)?,
                 other => {
                     return Err(ProtoError::UnexpectedToken {
                         found: format!("{:?}", other),
@@ -291,6 +365,9 @@ impl Parser {
             }
         };
         let options = self.parse_field_options()?;
+        if *self.peek() == TokenKind::LBrace {
+            return Err(ProtoError::Unsupported("proto2 groups"));
+        }
         self.expect(&TokenKind::Semi)?;
         out.push(Field {
             label,
@@ -376,8 +453,11 @@ impl Parser {
                     value: Box::new(value),
                 })
             }
-            TokenKind::Ident(_) => {
-                let mut path = vec![self.expect_ident()?];
+            TokenKind::Ident(_) | TokenKind::Dot => {
+                // A leading dot marks a fully qualified name; it is kept on the
+                // first component so lowering can tell absolute from relative.
+                let lead = if self.eat(&TokenKind::Dot) { "." } else { "" };
+                let mut path = vec![format!("{lead}{}", self.expect_ident()?)];
                 while self.eat(&TokenKind::Dot) {
                     path.push(self.expect_ident()?);
                 }
@@ -442,7 +522,7 @@ impl Parser {
                 _ if is_type_keyword(self.peek()) => {
                     self.parse_field(&mut oneof.fields, true)?;
                 }
-                TokenKind::Ident(_) => {
+                TokenKind::Ident(_) | TokenKind::Dot => {
                     self.parse_field(&mut oneof.fields, true)?;
                 }
                 other => {
@@ -469,6 +549,7 @@ impl Parser {
             values: Vec::new(),
             options: Vec::new(),
             allow_alias: false,
+            reserved: Vec::new(),
         };
         while *self.peek() != TokenKind::RBrace && *self.peek() != TokenKind::Eof {
             match self.peek() {
@@ -478,6 +559,9 @@ impl Parser {
                     self.expect(&TokenKind::Eq)?;
                     let value = self.parse_option_value()?;
                     self.expect(&TokenKind::Semi)?;
+                    if opt_name == "allow_alias" && value == OptionValue::Bool(true) {
+                        en.allow_alias = true;
+                    }
                     en.options.push(OptionDecl {
                         name: opt_name,
                         value,
@@ -485,7 +569,7 @@ impl Parser {
                 }
                 TokenKind::Reserved => {
                     let r = self.parse_reserved()?;
-                    let _ = r; // reserved in enums is parsed but not stored in simple IR
+                    en.reserved.push(r);
                 }
                 _ => {
                     let value_name = self.expect_ident()?;
@@ -523,8 +607,23 @@ impl Parser {
         let mut svc = Service {
             name,
             methods: Vec::new(),
+            options: Vec::new(),
         };
         while *self.peek() != TokenKind::RBrace && *self.peek() != TokenKind::Eof {
+            if self.eat(&TokenKind::Option) {
+                let opt_name = self.parse_qualified_ident()?;
+                self.expect(&TokenKind::Eq)?;
+                let value = self.parse_option_value()?;
+                self.expect(&TokenKind::Semi)?;
+                svc.options.push(OptionDecl {
+                    name: opt_name,
+                    value,
+                });
+                continue;
+            }
+            if self.eat(&TokenKind::Semi) {
+                continue;
+            }
             self.expect(&TokenKind::Rpc)?;
             let method_name = self.expect_ident()?;
             self.expect(&TokenKind::LParen)?;
@@ -536,8 +635,25 @@ impl Parser {
             let response_streaming = self.eat(&TokenKind::Stream);
             let response_type = self.parse_qualified_ident()?;
             self.expect(&TokenKind::RParen)?;
-            let options = self.parse_field_options()?;
-            self.expect(&TokenKind::Semi)?;
+            let mut options = self.parse_field_options()?;
+            if self.eat(&TokenKind::LBrace) {
+                // Method body: `{ option deprecated = true; }`
+                while *self.peek() != TokenKind::RBrace && *self.peek() != TokenKind::Eof {
+                    if self.eat(&TokenKind::Semi) {
+                        continue;
+                    }
+                    self.expect(&TokenKind::Option)?;
+                    let name = self.parse_qualified_ident()?;
+                    self.expect(&TokenKind::Eq)?;
+                    let value = self.parse_option_value()?;
+                    self.expect(&TokenKind::Semi)?;
+                    options.push(OptionDecl { name, value });
+                }
+                self.expect(&TokenKind::RBrace)?;
+                self.eat(&TokenKind::Semi);
+            } else {
+                self.expect(&TokenKind::Semi)?;
+            }
             svc.methods.push(Method {
                 name: method_name,
                 request_type: vec![request_type],
@@ -568,6 +684,37 @@ impl Parser {
         Ok(())
     }
 
+    /// `extensions 100 to 199, 300 to max;` (after the `extensions` word).
+    fn parse_extension_ranges(&mut self, out: &mut Vec<(u32, u32)>) -> Result<(), ProtoError> {
+        loop {
+            let start = self.expect_field_number()?;
+            let end = if self.eat(&TokenKind::To) {
+                self.expect_field_number()?
+            } else {
+                start
+            };
+            out.push((start, end));
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::Semi)
+    }
+
+    /// A field number, or `max`.
+    fn expect_field_number(&mut self) -> Result<u32, ProtoError> {
+        match self.bump() {
+            TokenKind::IntLit(n) if (0..=i64::from(u32::MAX)).contains(&n) => Ok(n as u32),
+            TokenKind::Max => Ok(MAX_FIELD_NUMBER),
+            other => Err(ProtoError::UnexpectedToken {
+                found: format!("{:?}", other),
+                line: self.span().line,
+                column: self.span().column,
+                expected: "field number",
+            }),
+        }
+    }
+
     fn parse_reserved(&mut self) -> Result<Reserved, ProtoError> {
         self.expect(&TokenKind::Reserved)?;
         let mut reserved = Reserved {
@@ -581,21 +728,10 @@ impl Parser {
             {
                 break;
             }
-            if let TokenKind::IntLit(n) = self.peek() {
-                let start = *n as u32;
-                self.bump();
+            if matches!(self.peek(), TokenKind::IntLit(_) | TokenKind::Max) {
+                let start = self.expect_field_number()?;
                 if self.eat(&TokenKind::To) {
-                    let end = match self.bump() {
-                        TokenKind::IntLit(n) => n as u32,
-                        other => {
-                            return Err(ProtoError::UnexpectedToken {
-                                found: format!("{:?}", other),
-                                line: self.span().line,
-                                column: self.span().column,
-                                expected: "reserved range end",
-                            });
-                        }
-                    };
+                    let end = self.expect_field_number()?;
                     reserved.ids.push(ReservedId::Range(start, end));
                 } else {
                     reserved.ids.push(ReservedId::Single(start));
@@ -631,6 +767,9 @@ impl Parser {
         }
     }
 }
+
+/// Largest legal protobuf field number (`max` in ranges).
+const MAX_FIELD_NUMBER: u32 = 536_870_911;
 
 fn is_type_keyword(tok: &TokenKind) -> bool {
     matches!(

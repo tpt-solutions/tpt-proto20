@@ -17,10 +17,13 @@ tpt20-json = { path = "../../runtime/tpt20-json" }
 tpt20-rpc = { path = "../../runtime/tpt20-rpc" }
 
 [build-dependencies]
+tpt20-compat-protobuf = { path = "../../compat/tpt20-compat-protobuf" }
+serde_json = "1"
 tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
 tpt20-codegen-rust = { path = "../../compiler/tpt20-codegen-rust" }
 
 [dev-dependencies]
+serde_json = "1"
 tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
 tpt20-ir = { path = "../../compiler/tpt20-ir" }
 prost = "0.13"

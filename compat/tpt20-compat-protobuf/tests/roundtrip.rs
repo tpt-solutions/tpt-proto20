@@ -296,12 +296,12 @@ message MyMessage {
 
     assert_eq!(ir.messages.len(), 1);
     assert_eq!(ir.messages[0].fields.len(), 1);
-    // map fields are lowered as FieldLabel::Singular with a map type ref
     match &ir.messages[0].fields[0].label {
-        tpt20_ir::FieldLabelIr::Singular(t) => {
-            assert!(t.path[0].starts_with("map<"));
+        tpt20_ir::FieldLabelIr::Map { key, value } => {
+            assert_eq!(key.path, vec!["string".to_string()]);
+            assert_eq!(value.path, vec!["int32".to_string()]);
         }
-        other => panic!("expected singular map type, got {:?}", other),
+        other => panic!("expected a map field, got {:?}", other),
     }
 }
 
@@ -372,8 +372,14 @@ extend Base {
 
     assert_eq!(ir.messages.len(), 1);
     assert_eq!(ir.messages[0].name, "Base");
-    assert_eq!(ir.messages[0].fields.len(), 1);
-    assert_eq!(ir.messages[0].fields[0].name, "base_field");
+    // The extension is merged into its extendee as an ordinary field.
+    let names: Vec<_> = ir.messages[0]
+        .fields
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["base_field", "ext_field"]);
+    assert_eq!(ir.messages[0].fields[1].id, 100);
 }
 
 #[test]

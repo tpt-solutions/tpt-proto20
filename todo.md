@@ -483,8 +483,8 @@ diagram in spec §5 and the repo layout in spec §26.
 - [ ] `.proto` schema import
   - [x] proto2 support
   - [x] proto3 support
-  - [ ] Editions support where feasible (doc comments claim it; no `edition = "..."`
-        lexing/parsing actually exists yet)
+  - [x] Editions support where feasible (`edition = "2023"|"2024"`; `features.field_presence`,
+        `features.enum_type` at file/message/enum/field level; groups rejected)
   - [x] Messages
   - [x] Enums
   - [x] Oneofs
@@ -493,8 +493,8 @@ diagram in spec §5 and the repo layout in spec §26.
   - [x] Options where meaningful
   - [x] Reserved fields (message-level; enum-level reserved is parsed but not yet
         stored/lowered)
-  - [ ] Extensions where feasible (`extend` blocks are parsed but dropped — never
-        lowered into IR)
+  - [x] Extensions where feasible (same-file `extend` merged into the extendee as regular
+        fields with range/id/name checks; external extendees dropped and reported)
   - [x] `tpt20 import-proto user.proto --out user.tpt` (CLI wiring in Phase 16)
 - [x] Protobuf wire adapter
   - [x] `decode_protobuf(bytes)` conceptual API

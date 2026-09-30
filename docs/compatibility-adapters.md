@@ -31,16 +31,31 @@ tpt20 import-proto user.proto --out user.tpt
 re-serializing `.tpt` source text — see
 [CLI reference § import-proto](cli-reference.md#import-proto).)
 
-Supported: proto2, proto3, messages, enums, oneofs, maps, services, options
-where meaningful, and message-level `reserved` fields.
+Supported: proto2, proto3, **editions 2023/2024**, messages, enums, oneofs,
+maps, services (including `rpc` bodies and service options), options where
+meaningful, `reserved` and `extensions` ranges, `allow_alias`, and protobuf
+name scoping (relative, package-qualified and `.absolute` type references).
+Keywords such as `max`, `stream` or `default` are accepted as names.
 
-Not yet supported:
+**Editions.** `edition = "2023";` (or `"2024"`) selects edition semantics:
+singular fields have explicit presence and enums are open unless overridden.
+`features.field_presence` (`EXPLICIT`/`IMPLICIT`/`LEGACY_REQUIRED`) and
+`features.enum_type` (`OPEN`/`CLOSED`) are honored at file, message, enum and
+field level. `features.message_encoding = DELIMITED` (groups) is rejected;
+other features do not change how schemas lower and are ignored.
 
-- **Editions** — doc comments describe editions support, but there is no
-  `edition = "..."` lexing/parsing implemented.
-- **`extend` blocks** — parsed but discarded; nothing is lowered into IR.
-- **Enum-level `reserved`** — parsed but not yet stored/lowered (message-level
-  `reserved` works).
+**Extensions.** An `extend` block whose extendee is declared in the same file
+is merged into that message as ordinary fields — same field number, same wire
+form, so real protobuf messages carrying the extension decode into those
+fields. Ids must fall inside the extendee's `extensions` ranges (if declared)
+and must not collide with existing fields or reservations, nor may names.
+Extensions of messages from other files (for example custom options on
+`google.protobuf.FieldOptions`) are dropped; `lower_with_report` returns them
+and `tpt20 import-proto` prints a warning.
+
+Not supported: proto2 `group`s, `default = …` values (dropped), types imported
+from other `.proto` files (references stay as written and fail semantic
+analysis), enum-level `reserved` (parsed, not lowered).
 
 ## Protobuf wire adapter
 

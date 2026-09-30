@@ -27,6 +27,18 @@ pub fn sanitize_ident(name: &str) -> String {
 }
 
 /// `email_addr` -> `EmailAddr` (PascalCase; used for oneof variants/types).
+/// Rust variant name for an enum value. `SCREAMING_SNAKE` names (no lowercase
+/// letters) are kept verbatim — `KIND_A` stays `KIND_A`, never the lossy
+/// `KINDA` — everything else is PascalCased.
+pub fn enum_variant(name: &str) -> String {
+    let screaming = !name.chars().any(|c| c.is_ascii_lowercase());
+    if screaming {
+        sanitize_ident(name)
+    } else {
+        sanitize_ident(&pascal(name))
+    }
+}
+
 pub fn pascal(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut upper_next = true;
@@ -150,5 +162,20 @@ mod tests {
         );
         assert_eq!(package_file_stem(Some("user.v1")), "user_v1");
         assert_eq!(package_file_stem(None), "generated");
+    }
+}
+
+#[cfg(test)]
+mod enum_variant_tests {
+    use super::enum_variant;
+
+    #[test]
+    fn screaming_snake_is_kept_and_distinct() {
+        assert_eq!(enum_variant("KIND_A"), "KIND_A");
+        assert_eq!(enum_variant("KINDA"), "KINDA");
+        assert_ne!(enum_variant("KIND_A"), enum_variant("KINDA"));
+        assert_eq!(enum_variant("SUSPENDED"), "SUSPENDED");
+        assert_eq!(enum_variant("active_now"), "ActiveNow");
+        assert_eq!(enum_variant("Already"), "Already");
     }
 }

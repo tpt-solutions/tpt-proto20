@@ -45,6 +45,11 @@ pub enum ProtoError {
     #[error("extension field id {0} conflicts with declared field")]
     ExtensionConflict(u32),
 
+    /// Two fields of one message share a name (for example an extension
+    /// merged into its extendee).
+    #[error("duplicate field name `{0}`")]
+    DuplicateField(String),
+
     /// A package or type name was empty.
     #[error("empty identifier")]
     EmptyIdentifier,

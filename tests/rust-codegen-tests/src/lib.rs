@@ -864,3 +864,149 @@ mod protobuf_differential {
         }
     }
 }
+
+/// Code generated from `imported.proto` (edition 2023 + extensions).
+#[cfg(test)]
+#[allow(unused)]
+mod imported {
+    include!(concat!(env!("OUT_DIR"), "/imported.rs"));
+}
+
+#[cfg(test)]
+mod imported_proto_differential {
+    use super::imported::{Item, ItemPick, Kind, Note};
+    use prost::Message;
+    use std::collections::HashMap;
+    use tpt20_compat_protobuf::schema_wire::{native_to_protobuf, protobuf_to_native};
+    use tpt20_core::DecoderLimits;
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct PNote {
+        #[prost(string, optional, tag = "1")]
+        text: Option<String>,
+        #[prost(int32, tag = "2")]
+        prio: i32,
+    }
+
+    #[derive(Clone, PartialEq, prost::Oneof)]
+    enum PPick {
+        #[prost(int64, tag = "7")]
+        Num(i64),
+        #[prost(string, tag = "8")]
+        Txt(String),
+    }
+
+    // Field 3 is an enum on the schema side; on the wire it is an int32.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct PItem {
+        #[prost(int32, optional, tag = "1")]
+        id: Option<i32>,
+        #[prost(string, tag = "2")]
+        name: String,
+        #[prost(int32, tag = "3")]
+        kind: i32,
+        #[prost(string, repeated, tag = "4")]
+        tags: Vec<String>,
+        #[prost(map = "string, message", tag = "5")]
+        notes: HashMap<String, PNote>,
+        #[prost(message, optional, tag = "6")]
+        main: Option<PNote>,
+        #[prost(oneof = "PPick", tags = "7, 8")]
+        pick: Option<PPick>,
+        // Extensions arrive as plain fields.
+        #[prost(int32, optional, tag = "100")]
+        weight: Option<i32>,
+        #[prost(message, repeated, tag = "101")]
+        extra: Vec<PNote>,
+    }
+
+    fn package() -> tpt20_ir::PackageIr {
+        serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/imported_ir.json"))).unwrap()
+    }
+
+    fn note(n: &PNote) -> Note {
+        Note {
+            text: n.text.clone(),
+            prio: n.prio,
+            ..Default::default()
+        }
+    }
+
+    fn to_native(p: &PItem) -> Item {
+        Item {
+            id: p.id,
+            name: p.name.clone(),
+            kind: Kind::from_i32(p.kind),
+            tags: p.tags.clone(),
+            notes: p.notes.iter().map(|(k, v)| (k.clone(), note(v))).collect(),
+            main: p.main.as_ref().map(note),
+            pick: p.pick.as_ref().map(|k| match k {
+                PPick::Num(n) => ItemPick::Num(*n),
+                PPick::Txt(t) => ItemPick::Txt(t.clone()),
+            }),
+            weight: p.weight,
+            extra: p.extra.iter().map(note).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn samples() -> Vec<PItem> {
+        let n = |t: &str, p: i32| PNote {
+            text: Some(t.into()),
+            prio: p,
+        };
+        vec![
+            PItem::default(),
+            PItem {
+                id: Some(0),
+                name: "x".into(),
+                kind: 2,
+                tags: vec!["a".into(), "".into()],
+                notes: [
+                    ("k".to_string(), n("t", -1)),
+                    ("".to_string(), PNote::default()),
+                ]
+                .into_iter()
+                .collect(),
+                main: Some(n("m", i32::MAX)),
+                pick: Some(PPick::Num(i64::MIN)),
+                weight: Some(-7),
+                extra: vec![n("e1", 1), n("e2", 2)],
+            },
+            PItem {
+                id: Some(i32::MIN),
+                pick: Some(PPick::Txt("é🦀".into())),
+                kind: 99,
+                ..Default::default()
+            },
+        ]
+    }
+
+    #[test]
+    fn imported_schema_shares_bytes_with_prost_both_ways() {
+        let pkg = package();
+        let limits = DecoderLimits::default();
+        for p in samples() {
+            // prost -> adapter -> generated decode
+            let native = protobuf_to_native(&p.encode_to_vec(), &pkg, "Item", &limits).unwrap();
+            let got = Item::decode(&native).unwrap();
+            let mut want = to_native(&p);
+            want.unknown_fields = got.unknown_fields.clone();
+            assert_eq!(got, want, "{p:?}");
+            // generated encode -> adapter -> prost decode
+            let proto = native_to_protobuf(&want.encode(), &pkg, "Item", &limits).unwrap();
+            assert_eq!(PItem::decode(proto.as_slice()).unwrap(), p);
+        }
+    }
+
+    #[test]
+    fn explicit_presence_from_the_edition_default_is_observable() {
+        let absent = Item::decode(&Item::default().encode()).unwrap();
+        assert_eq!(absent.id, None);
+        let zero = Item {
+            id: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(Item::decode(&zero.encode()).unwrap().id, Some(0));
+    }
+}

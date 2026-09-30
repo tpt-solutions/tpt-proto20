@@ -36,7 +36,7 @@ see the unchecked items.
       built into `Channel`/`Server` (`docs/observability.md`)
 
 ## 27.6 Compatibility
-- [x] import protobuf schemas (proto2/proto3; no editions, extensions dropped)
+- [x] import protobuf schemas (proto2/proto3/editions 2023-24; local extensions merged, external ones reported)
 - [x] encode/decode protobuf-compatible binary (self-consistency tested)
 - [x] differential testing against an established protobuf implementation (`prost`)
 - [x] expose/consume gRPC-compatible services over the network:

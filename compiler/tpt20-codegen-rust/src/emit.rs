@@ -349,7 +349,7 @@ impl std::error::Error for BuildError {}
             if v.alias {
                 continue; // Aliases stay representable by number, not variant.
             }
-            let variant = naming::sanitize_ident(&naming::pascal(&v.name));
+            let variant = naming::enum_variant(&v.name);
             if e.open {
                 self.out.push_str(&format!(
                     "    /// Value `{}` ({}).\n    {variant},\n",
@@ -401,7 +401,7 @@ impl Default for {flat} {{
                         "            {} => {}::{},\n",
                         v.number,
                         flat,
-                        naming::sanitize_ident(&naming::pascal(&v.name))
+                        naming::enum_variant(&v.name)
                     ))
                     .collect::<String>(),
                 to_arms = e
@@ -410,7 +410,7 @@ impl Default for {flat} {{
                     .filter(|v| !v.alias)
                     .map(|v| format!(
                         "            Self::{} => {},\n",
-                        naming::sanitize_ident(&naming::pascal(&v.name)),
+                        naming::enum_variant(&v.name),
                         v.number
                     ))
                     .collect::<String>(),
@@ -444,7 +444,7 @@ impl Default for {flat} {{
                         "            {} => Ok({}::{}),\n",
                         v.number,
                         flat,
-                        naming::sanitize_ident(&naming::pascal(&v.name))
+                        naming::enum_variant(&v.name)
                     ))
                     .collect::<String>(),
             ));
@@ -456,7 +456,7 @@ impl Default for {flat} {{
                 .iter()
                 .find(|v| !v.alias && v.number == default_number)
                 .or_else(|| e.values.iter().find(|v| !v.alias))
-                .map(|v| naming::sanitize_ident(&naming::pascal(&v.name)))
+                .map(|v| naming::enum_variant(&v.name))
                 .unwrap_or_else(|| "_".to_string());
             let needle = format!("Self::from_i32({default_number}).unwrap_or_default_or_first()");
             let replacement =
@@ -474,7 +474,7 @@ impl Default for {flat} {{
             .map(|v| {
                 format!(
                     "            {flat}::{} => __json::Value::String({:?}.to_string()),\n",
-                    naming::sanitize_ident(&naming::pascal(&v.name)),
+                    naming::enum_variant(&v.name),
                     v.name
                 )
             })
@@ -496,7 +496,7 @@ impl Default for {flat} {{
                 format!(
                     "                {:?} => Ok({flat}::{}),\n",
                     v.name,
-                    naming::sanitize_ident(&naming::pascal(&v.name))
+                    naming::enum_variant(&v.name)
                 )
             })
             .collect::<String>();
@@ -2266,10 +2266,11 @@ fn allow_flat_type_names(code: &str) -> String {
     let code = &strip_redundant_closures(code);
     let mut out = String::with_capacity(code.len() + 256);
     for line in code.lines() {
-        let decl = line
-            .strip_prefix("pub struct ")
-            .or_else(|| line.strip_prefix("pub enum "));
-        if let Some(rest) = decl {
+        // Enum variants keep SCREAMING_SNAKE names from the schema, so enums
+        // always opt out of the naming lints.
+        if line.starts_with("pub enum ") {
+            out.push_str("#[allow(non_camel_case_types, clippy::upper_case_acronyms)]\n");
+        } else if let Some(rest) = line.strip_prefix("pub struct ") {
             let name: String = rest
                 .chars()
                 .take_while(|c| c.is_alphanumeric() || *c == '_')
