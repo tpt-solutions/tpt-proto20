@@ -1238,6 +1238,7 @@ impl IncomingHttp2Call {
     /// Builds a call from the channel ends a stream-based transport wires up
     /// (shared with the QUIC transport).
     #[cfg(feature = "quic")]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_channels(
         method: String,
         metadata: Metadata,
