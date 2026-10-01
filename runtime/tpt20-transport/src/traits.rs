@@ -63,6 +63,11 @@ impl Call {
 pub trait Transport: Send + Sync {
     /// Starts a new RPC call.
     ///
+    /// For `ClientStream` and `Bidi` calls an *empty* `request` means "no
+    /// initial message": nothing is sent up front and every message travels
+    /// through the call's sink. (An empty message in such a call is sent via
+    /// the sink like any other.)
+    ///
     /// Returns a [`Call`] containing a sink for request messages and a stream
     /// for response messages/trailers.
     async fn start_call(
@@ -103,8 +108,13 @@ pub struct IncomingCallParts {
     pub method: String,
     /// Request metadata.
     pub metadata: Metadata,
-    /// The initial request message.
+    /// The initial request message (empty when `request_present` is false).
     pub request: Vec<u8>,
+    /// Whether the client actually sent a first message. Unary and
+    /// server-streaming calls always carry one; a client-streaming or bidi
+    /// call may open without any (an empty request stream), and servers must
+    /// then not invent an empty message.
+    pub request_present: bool,
     /// Further request messages (client streaming / bidi).
     pub incoming: RequestStream,
     /// Response half.

@@ -412,7 +412,10 @@ impl Transport for Http2Transport {
             streaming_type,
             StreamingType::Unary | StreamingType::ServerStream
         );
-        write_all_end(&mut send_stream, initial, end_of_stream).await?;
+        // Streaming calls with an empty initial request open without a message.
+        if end_of_stream || !request.is_empty() {
+            write_all_end(&mut send_stream, initial, end_of_stream).await?;
+        }
 
         Ok(Call {
             sink: Box::pin(Http2ClientSink {
@@ -1086,9 +1089,9 @@ async fn handle_stream<F>(
     let mut body = request.into_body();
     let mut frames = FrameBuffer::new(max);
 
-    let first = match read_frame(&mut body, &mut frames).await {
+    let (first, request_present) = match read_frame(&mut body, &mut frames).await {
         Ok(Some(f)) => match frame_payload(f, request_encoding, max) {
-            Ok(payload) => payload,
+            Ok(payload) => (payload, true),
             Err(TransportError::SizeLimitExceeded { .. }) => {
                 respond.send_reset(Reason::ENHANCE_YOUR_CALM);
                 return;
@@ -1098,7 +1101,7 @@ async fn handle_stream<F>(
                 return;
             }
         },
-        Ok(None) => Vec::new(),
+        Ok(None) => (Vec::new(), false),
         Err(TransportError::SizeLimitExceeded { .. }) => {
             respond.send_reset(Reason::ENHANCE_YOUR_CALM);
             return;
@@ -1153,6 +1156,7 @@ async fn handle_stream<F>(
         method,
         metadata,
         request: first,
+        request_present,
         response_tx: Some(response_tx),
         trailers_tx: Some(trailers_tx),
         request_rx,
@@ -1221,6 +1225,9 @@ pub struct IncomingHttp2Call {
     pub metadata: Metadata,
     /// The initial request message payload.
     pub request: Vec<u8>,
+    /// Whether the client sent an initial message (see
+    /// [`IncomingCallParts::request_present`](crate::IncomingCallParts)).
+    pub request_present: bool,
     response_tx: Option<mpsc::Sender<Result<FramedMessage, TransportError>>>,
     trailers_tx: Option<oneshot::Sender<Metadata>>,
     request_rx: mpsc::Receiver<Vec<u8>>,
@@ -1235,6 +1242,7 @@ impl IncomingHttp2Call {
         method: String,
         metadata: Metadata,
         request: Vec<u8>,
+        request_present: bool,
         response_tx: mpsc::Sender<Result<FramedMessage, TransportError>>,
         trailers_tx: oneshot::Sender<Metadata>,
         request_rx: mpsc::Receiver<Vec<u8>>,
@@ -1244,6 +1252,7 @@ impl IncomingHttp2Call {
             method,
             metadata,
             request,
+            request_present,
             response_tx: Some(response_tx),
             trailers_tx: Some(trailers_tx),
             request_rx,
@@ -1337,6 +1346,7 @@ impl crate::traits::IncomingCall for IncomingHttp2Call {
             method: self.method,
             metadata: self.metadata,
             request: self.request,
+            request_present: self.request_present,
             incoming: Box::pin(futures::stream::poll_fn(move |cx| request_rx.poll_recv(cx))),
             sender: Box::new(Http2Sender {
                 response_tx: self.response_tx,

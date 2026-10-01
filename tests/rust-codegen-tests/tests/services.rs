@@ -110,6 +110,13 @@ async fn exercise(client: PingerClient) {
         .unwrap();
     assert_eq!((r.text.as_str(), r.n), ("abc", 3));
 
+    // an empty request stream is a call with zero messages, not one empty message
+    let r = client
+        .collect(&ctx, futures::stream::iter(Vec::<PingRequest>::new()))
+        .await
+        .unwrap();
+    assert_eq!((r.text.as_str(), r.n), ("", 0));
+
     // bidi
     let s = client
         .chat(&ctx, futures::stream::iter(vec![req("p", 1), req("q", 2)]))

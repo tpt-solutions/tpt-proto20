@@ -100,8 +100,27 @@ impl ResponseSender {
 pub struct ServerCall {
     ctx: RpcContext,
     request: Vec<u8>,
+    /// Whether the client sent a first message (always for unary and
+    /// server-streaming calls; optional for client-streaming and bidi ones).
+    request_present: bool,
     incoming: RequestStream,
     sender: ResponseSender,
+}
+
+impl ServerCall {
+    /// All request messages of a streaming call, including the one that
+    /// opened it (if any).
+    fn request_messages(&mut self) -> RequestStream {
+        let rest = std::mem::replace(&mut self.incoming, futures::stream::empty().boxed());
+        if self.request_present {
+            let first = std::mem::take(&mut self.request);
+            futures::stream::once(async move { first })
+                .chain(rest)
+                .boxed()
+        } else {
+            rest
+        }
+    }
 }
 
 impl ServerCall {
@@ -175,11 +194,7 @@ impl ServerCall {
         Fut: Future<Output = Result<Resp, RpcError>> + Send,
     {
         self.sender.observer().set_streaming("client_streaming");
-        let requests = request_stream(
-            std::mem::replace(&mut self.incoming, futures::stream::empty().boxed()),
-            decode,
-            self.sender.clone(),
-        );
+        let requests = request_stream(self.request_messages(), decode, self.sender.clone());
         let result = async {
             let resp = handler(self.ctx.clone(), requests).await?;
             self.sender.send(encode(&resp)).await
@@ -199,11 +214,7 @@ impl ServerCall {
         Fut: Future<Output = Result<BoxStream<'static, Result<Resp, RpcError>>, RpcError>> + Send,
     {
         self.sender.observer().set_streaming("bidi_streaming");
-        let requests = request_stream(
-            std::mem::replace(&mut self.incoming, futures::stream::empty().boxed()),
-            decode,
-            self.sender.clone(),
-        );
+        let requests = request_stream(self.request_messages(), decode, self.sender.clone());
         let result = async {
             let stream = handler(self.ctx.clone(), requests).await?;
             pump_responses(&self.ctx, &self.sender, &encode, stream).await
@@ -340,6 +351,7 @@ impl Server {
         let server_call = ServerCall {
             ctx,
             request: parts.request,
+            request_present: parts.request_present,
             incoming: parts.incoming,
             sender: sender.clone(),
         };

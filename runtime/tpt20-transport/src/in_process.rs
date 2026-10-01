@@ -30,6 +30,8 @@ pub struct IncomingRequest {
     pub metadata: Metadata,
     /// The initial request payload bytes.
     pub request: Vec<u8>,
+    /// Whether the client sent an initial message at all.
+    pub request_present: bool,
     /// Streaming type of the call.
     pub streaming_type: StreamingType,
     response_tx: mpsc::UnboundedSender<Result<FramedMessage, TransportError>>,
@@ -112,6 +114,7 @@ impl crate::traits::IncomingCall for IncomingRequest {
             method: self.method,
             metadata: self.metadata,
             request: self.request,
+            request_present: self.request_present,
             incoming: Box::pin(futures::stream::poll_fn(move |cx| request_rx.poll_recv(cx))),
             sender: Box::new(InProcessSender {
                 response_tx: Some(self.response_tx),
@@ -245,10 +248,17 @@ impl Transport for InProcessTransport {
         let (request_msg_tx, request_msg_rx) = mpsc::unbounded_channel();
         let (alive_tx, client_gone) = tokio::sync::watch::channel(());
 
+        // Streaming calls with an empty initial request open without a message.
+        let request_present = !(request.is_empty()
+            && matches!(
+                streaming_type,
+                StreamingType::ClientStream | StreamingType::Bidi
+            ));
         let incoming = IncomingRequest {
             method: method.to_string(),
             metadata: metadata.clone(),
             request,
+            request_present,
             streaming_type,
             response_tx,
             trailers_tx: Some(trailers_tx),

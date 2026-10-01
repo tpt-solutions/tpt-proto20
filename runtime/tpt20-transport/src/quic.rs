@@ -370,7 +370,12 @@ impl Transport for QuicTransport {
         let mut merged = self.endpoint.default_metadata.clone();
         merged.merge(metadata.clone());
         let headers = frame(KIND_HEADERS, &encode_block(Some(method), &merged)?);
-        let first = frame(KIND_MESSAGE, &request);
+        let first = (!request.is_empty()
+            || matches!(
+                streaming_type,
+                StreamingType::Unary | StreamingType::ServerStream
+            ))
+        .then(|| frame(KIND_MESSAGE, &request));
 
         // One transparent retry on a fresh connection if the cached one died
         // before anything was sent.
@@ -387,7 +392,9 @@ impl Transport for QuicTransport {
             }
         };
         send.write_all(&headers).await.map_err(write_error)?;
-        send.write_all(&first).await.map_err(write_error)?;
+        if let Some(first) = &first {
+            send.write_all(first).await.map_err(write_error)?;
+        }
         let single = matches!(
             streaming_type,
             StreamingType::Unary | StreamingType::ServerStream
@@ -699,9 +706,9 @@ async fn handle_stream(
             return;
         }
     };
-    let first = match read_frame(&mut recv, cfg.max).await {
-        Ok(Some((KIND_MESSAGE, payload))) => payload,
-        Ok(None) => Vec::new(),
+    let (first, request_present) = match read_frame(&mut recv, cfg.max).await {
+        Ok(Some((KIND_MESSAGE, payload))) => (payload, true),
+        Ok(None) => (Vec::new(), false),
         Err(TransportError::SizeLimitExceeded { .. }) => {
             let _ = send.reset(CODE_TOO_BIG.into());
             return;
@@ -731,6 +738,7 @@ async fn handle_stream(
         path,
         metadata,
         first,
+        request_present,
         response_tx,
         trailers_tx,
         request_rx,

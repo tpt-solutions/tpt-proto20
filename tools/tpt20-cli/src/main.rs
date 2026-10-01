@@ -390,6 +390,9 @@ struct PolyglotArgs {
     /// Package/module name (default: derived from the schema package)
     #[arg(long)]
     package_name: Option<String>,
+    /// Do not generate service clients/servers (and the RPC runtime)
+    #[arg(long)]
+    no_services: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1049,7 +1052,7 @@ fn gen_polyglot(name: &str, args: PolyglotArgs) -> Result<(), CliError> {
         .ok_or_else(|| CliError::Usage(format!("unknown backend `{name}`")))?;
     let options = tpt20_codegen_backends::BackendOptions {
         package_name: args.package_name,
-        ..Default::default()
+        services: !args.no_services,
     };
     let files = backend
         .generate(&compiled.ir, &options)
