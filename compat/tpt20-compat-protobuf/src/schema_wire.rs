@@ -67,10 +67,8 @@ impl<'a> Schema<'a> {
             if let Some(m) = self.messages.get(&cand) {
                 return Some((m, cand));
             }
-            match scope.rfind('.') {
-                Some(i) => scope.truncate(i),
-                None => return None,
-            }
+            let i = scope.rfind('.')?;
+            scope.truncate(i);
         }
     }
 
