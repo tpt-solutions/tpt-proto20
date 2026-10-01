@@ -494,3 +494,306 @@ async fn rust_server_for_manual_clients() {
     println!("LISTENING {addr}");
     tokio::time::sleep(Duration::from_secs(600)).await;
 }
+
+// ---- Python -----------------------------------------------------------------
+
+const PY_CLIENT: &str = r#"
+import asyncio
+import sys
+
+import tpt20_rpc as rpc
+from codegen_test_v1 import PingRequest
+from codegen_test_v1_services import PingerClient
+
+
+async def main():
+    host, port = sys.argv[1].rsplit(":", 1)
+    channel = rpc.Channel(host, int(port))
+    c = PingerClient(channel)
+    md = rpc.Metadata()
+    md.set("x-who", "ada")
+
+    r = await c.ping(PingRequest(text="hi", count=41), metadata=md)
+    print("ping %s %d" % (r.text, r.n))
+
+    async for r in c.repeat(PingRequest(text="x", count=3), metadata=md):
+        print("repeat %d" % r.n)
+
+    r = await c.collect([PingRequest(text=t) for t in "abc"], metadata=md)
+    print("collect %s %d" % (r.text, r.n))
+
+    # Bidi with real interleaving: each answer is read before the next request.
+    queue = asyncio.Queue()
+
+    async def requests():
+        while True:
+            item = await queue.get()
+            if item is None:
+                return
+            yield item
+
+    await queue.put(PingRequest(text="p", count=1))
+    answers = c.chat(requests(), metadata=md)
+    for i, t in enumerate("pq"):
+        if i:
+            await queue.put(PingRequest(text=t, count=i + 1))
+        r = await answers.__anext__()
+        print("chat %s %d" % (r.text, r.n))
+    await queue.put(None)
+    try:
+        await answers.__anext__()
+        raise SystemExit("expected end of stream")
+    except StopAsyncIteration:
+        pass
+
+    try:
+        await c.fail(PingRequest(text="secret"), metadata=md)
+    except rpc.RpcError as e:
+        print("fail %d %s" % (e.code, e.message))
+
+    r = await c.get_http_status(PingRequest(), metadata=md)
+    print("status %d" % r.n)
+
+    try:
+        await c.ping(PingRequest(text="late"), metadata=md, timeout=0)
+    except rpc.RpcError as e:
+        print("deadline %d" % e.code)
+
+    task = asyncio.ensure_future(c.ping(PingRequest(text="x"), metadata=md))
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        print("cancelled %d" % rpc.CANCELLED)
+
+    try:
+        await channel.unary("codegen_test.v1.Pinger/Nope", b"")
+    except rpc.RpcError as e:
+        print("unknown %d" % e.code)
+    await channel.close()
+
+
+asyncio.run(main())
+"#;
+
+const PY_SERVER: &str = r#"
+import asyncio
+
+import tpt20_rpc as rpc
+from codegen_test_v1 import PingReply
+from codegen_test_v1_services import PingerBase, register_pinger
+
+
+class Impl(PingerBase):
+    async def ping(self, request, ctx):
+        who = ctx.metadata.get_first("x-who", "anon")
+        return PingReply(text="%s:%s" % (who, request.text), n=request.count + 1)
+
+    async def repeat(self, request, ctx):
+        for i in range(request.count):
+            yield PingReply(text=request.text, n=i)
+
+    async def collect(self, requests, ctx):
+        text, n = "", 0
+        async for r in requests:
+            text += r.text
+            n += 1
+        return PingReply(text=text, n=n)
+
+    async def chat(self, requests, ctx):
+        async for r in requests:
+            yield PingReply(text=r.text.upper(), n=r.count)
+
+    async def fail(self, request, ctx):
+        raise rpc.RpcError(rpc.PERMISSION_DENIED, "nope: " + request.text)
+
+    async def get_http_status(self, request, ctx):
+        return PingReply(text="200", n=200)
+
+
+async def main():
+    server = rpc.Server()
+    register_pinger(server, Impl())
+    srv = await server.serve("127.0.0.1", 0)
+    host, port = srv.sockets[0].getsockname()[:2]
+    print("LISTENING %s:%d" % (host, port), flush=True)
+    await srv.serve_forever()
+
+
+asyncio.run(main())
+"#;
+
+fn python_ready() -> bool {
+    have("python3", "--version")
+        && Command::new("python3")
+            .args(["-c", "import h2"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn python_client_against_rust_server() {
+    if !python_ready() {
+        eprintln!("python3 with the h2 package not available; skipping");
+        return;
+    }
+    let dir = scratch("py-client");
+    generate("python", &dir);
+    std::fs::write(dir.join("client.py"), PY_CLIENT).unwrap();
+    let addr = rust_server().await;
+    let out = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new("python3");
+        cmd.arg("client.py").current_dir(&dir);
+        run_client(cmd, &addr)
+    })
+    .await
+    .unwrap();
+    assert_eq!(out, EXPECTED);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rust_client_against_python_server() {
+    if !python_ready() {
+        eprintln!("python3 with the h2 package not available; skipping");
+        return;
+    }
+    let dir = scratch("py-server");
+    generate("python", &dir);
+    std::fs::write(dir.join("server.py"), PY_SERVER).unwrap();
+    let mut cmd = Command::new("python3");
+    cmd.arg("server.py").current_dir(&dir);
+    let (mut child, addr) = start_server(cmd);
+    rust_client_scenario(addr).await;
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+// ---- Go <-> Python (neither side is Rust) ------------------------------------
+
+#[test]
+fn go_client_against_python_server_and_back() {
+    if !have("go", "version") || !python_ready() {
+        eprintln!("go or python3+h2 not available; skipping");
+        return;
+    }
+    let go_dir = scratch("cross-go");
+    generate("go", &go_dir);
+    let go_client = go_build(&go_dir, "client", GO_CLIENT);
+    let go_server = go_build(&go_dir, "server", GO_SERVER);
+    let py_dir = scratch("cross-py");
+    generate("python", &py_dir);
+    std::fs::write(py_dir.join("server.py"), PY_SERVER).unwrap();
+    std::fs::write(py_dir.join("client.py"), PY_CLIENT).unwrap();
+
+    // Go client -> Python server.
+    let mut cmd = Command::new("python3");
+    cmd.arg("server.py").current_dir(&py_dir);
+    let (mut server, addr) = start_server(cmd);
+    let out = run_client(Command::new(&go_client), &addr);
+    let _ = server.kill();
+    let _ = server.wait();
+    assert_eq!(out, EXPECTED, "go client vs python server");
+
+    // Python client -> Go server.
+    let (mut server, addr) = start_server(Command::new(&go_server));
+    let mut cmd = Command::new("python3");
+    cmd.arg("client.py").current_dir(&py_dir);
+    let out = run_client(cmd, &addr);
+    let _ = server.kill();
+    let _ = server.wait();
+    assert_eq!(out, EXPECTED, "python client vs go server");
+}
+
+// ---- HTTP/2 proxies and load balancers ----------------------------------------
+
+/// A Go reverse proxy (stdlib `httputil.ReverseProxy`, h2c on both sides) that
+/// spreads calls round-robin over the backends given as arguments. It forwards
+/// trailers (where the RPC status travels) and streams without buffering.
+const GO_PROXY: &str = r#"
+package main
+
+import (
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"sync/atomic"
+)
+
+func main() {
+	var targets []*url.URL
+	for _, a := range os.Args[1:] {
+		u, _ := url.Parse("http://" + a)
+		targets = append(targets, u)
+	}
+	var next atomic.Uint64
+	t := &http.Transport{}
+	t.Protocols = new(http.Protocols)
+	t.Protocols.SetUnencryptedHTTP2(true)
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			target := targets[next.Add(1)%uint64(len(targets))]
+			r.SetURL(target)
+		},
+		Transport:     t,
+		FlushInterval: -1,
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	srv := &http.Server{Handler: proxy}
+	srv.Protocols = new(http.Protocols)
+	srv.Protocols.SetUnencryptedHTTP2(true)
+	fmt.Println("LISTENING", l.Addr().String())
+	os.Stdout.Sync()
+	panic(srv.Serve(l))
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clients_work_through_an_http2_proxy_and_a_load_balancer() {
+    if !have("go", "version") || !python_ready() {
+        eprintln!("go or python3+h2 not available; skipping");
+        return;
+    }
+    let go_dir = scratch("proxy-go");
+    generate("go", &go_dir);
+    let proxy_bin = go_build(&go_dir, "proxy", GO_PROXY);
+    let go_client = go_build(&go_dir, "client", GO_CLIENT);
+    let py_dir = scratch("proxy-py");
+    generate("python", &py_dir);
+    std::fs::write(py_dir.join("client.py"), PY_CLIENT).unwrap();
+
+    // Two Rust backends behind one proxy (round-robin load balancing).
+    let (a, b) = (rust_server().await, rust_server().await);
+    let mut cmd = Command::new(&proxy_bin);
+    cmd.args([&a, &b]);
+    let (mut proxy, front) = start_server(cmd);
+
+    // Rust client through the proxy.
+    rust_client_scenario(front.clone()).await;
+
+    // Go and Python clients through the proxy; the scenario makes many calls,
+    // so both backends serve some of them.
+    let f = front.clone();
+    let go_out = tokio::task::spawn_blocking(move || run_client(Command::new(go_client), &f))
+        .await
+        .unwrap();
+    assert_eq!(go_out, EXPECTED, "go client through proxy");
+    let f = front.clone();
+    let py_out = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new("python3");
+        cmd.arg("client.py").current_dir(&py_dir);
+        run_client(cmd, &f)
+    })
+    .await
+    .unwrap();
+    assert_eq!(py_out, EXPECTED, "python client through proxy");
+
+    let _ = proxy.kill();
+    let _ = proxy.wait();
+}

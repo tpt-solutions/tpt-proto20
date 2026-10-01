@@ -696,14 +696,14 @@ above for the underlying status.
 the core system (Phases 0–20) is complete and stable.*
 
 - [x] Multi-language codegen framework driven by the neutral IR (`tpt20-codegen-backends`: shared resolved model, `Backend` trait, `tpt20 gen go|java|python`)
-- [x] Go code generator (messages; services pending)
-- [x] Go minimal runtime (wire format + limits)
-- [x] Java code generator (messages; services pending)
+- [x] Go code generator (messages + service client/server stubs)
+- [x] Go minimal runtime (wire format + limits + HTTP/2 RPC client/server, stdlib only)
+- [x] Java code generator (messages; no RPC — see docs/polyglot.md)
 - [x] Java minimal runtime (wire format + limits)
-- [x] Python code generator (messages; services pending)
-- [x] Python minimal runtime (wire format + limits)
-- [ ] Cross-language interop tests: Go clients/servers
-- [ ] Cross-language interop tests: Java clients/servers
-- [ ] Cross-language interop tests: Python clients/servers
-- [ ] Interop tests: HTTP/2 proxies
-- [ ] Interop tests: load balancers
+- [x] Python code generator (messages + service client/server stubs)
+- [x] Python minimal runtime (wire format + limits + asyncio RPC client/server on `h2`)
+- [x] Cross-language interop tests: Go clients/servers (both directions vs Rust, and vs Python)
+- [x] Cross-language interop tests: Java (message-level, byte-for-byte vs Rust; no Java RPC runtime — see docs/polyglot.md)
+- [x] Cross-language interop tests: Python clients/servers (both directions vs Rust, and vs Go)
+- [x] Interop tests: HTTP/2 proxies (Go `ReverseProxy`; Rust, Go and Python clients through it)
+- [x] Interop tests: load balancers (round-robin proxy over two Rust backends)

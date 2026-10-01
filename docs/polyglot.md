@@ -29,9 +29,40 @@ bounds, unknown-field budget), unknown-field preservation, packed and unpacked
 repeated scalars, maps (entries encoded in key order, absent key/value take
 defaults), oneofs (last one wins), open/closed enums and explicit presence.
 
+**Services (Go and Python).** With services in the schema, `gen go` / `gen
+python` also emit a client and a server stub per service plus an RPC runtime
+(`tpt20_rpc.go` — standard library only, **Go 1.24+**; `tpt20_rpc.py` — asyncio,
+needs `pip install h2`). They speak the same HTTP/2 protocol as the Rust runtime
+(see [RPC model](rpc-model.md)): all four streaming shapes, request/response
+metadata (including `-bin` keys), status codes with messages, `grpc-timeout`
+deadlines and client cancellation, and the server answers `UNIMPLEMENTED` for
+unknown methods. `--no-services` skips them.
+
+```go
+srv := NewTpt20Server()
+RegisterPinger(srv, impl{})              // impl implements PingerHandler
+go srv.Serve(listener)
+c := NewPingerClient(Tpt20Dial("host:50051"))
+reply, err := c.Ping(ctx, md, &PingRequest{Text: "hi"})
+```
+
+```python
+server = rpc.Server(); register_pinger(server, Impl())   # Impl subclasses PingerBase
+await server.serve("127.0.0.1", 50051)
+client = PingerClient(rpc.Channel("host", 50051))
+reply = await client.ping(PingRequest(text="hi"), timeout=2.0)
+```
+
+**Java has no RPC runtime**: the JDK's HTTP client cannot read HTTP/2 trailers
+(where the status travels) and has no HTTP/2 server, so a useful Java RPC layer
+needs a third-party stack such as grpc-java or Netty. Use the generated
+messages with it, or talk to a tpt20 server through the gRPC compatibility
+adapter.
+
 **Not implemented in the other languages:** JSON and text formats, builders and
 validation annotations, borrowed views, canonical encoding
-(`encode_canonical`), and services/RPC — those remain Rust-only for now.
+(`encode_canonical`), TLS/mTLS and QUIC, message compression, reflection and
+health services, and observability hooks — those remain Rust-only for now.
 
 ## How it is verified
 
@@ -44,3 +75,16 @@ the result must be **byte-identical to Rust's**, and an input that Rust rejects
 must be rejected by all of them. The harness found and fixed two Rust bugs
 (tags with a field id beyond 32 bits aliased another field; see
 `DecodeError::FieldIdOutOfRange`).
+
+`tests/rust-codegen-tests/tests/polyglot_rpc.rs` runs a scripted scenario (unary
+with metadata, server/client/bidi streaming with real interleaving, error
+status, unknown method, deadline, cancellation) in every direction that exists:
+Go client ↔ Rust server, Rust client ↔ Go server, Python client ↔ Rust server,
+Rust client ↔ Python server, and Go ↔ Python with no Rust involved. The same
+scenario also runs through a Go `ReverseProxy` and a round-robin load balancer
+over two Rust backends (trailers and streaming survive the hop). It found a
+protocol bug on the first run: client- and bidi-streaming calls opened with an
+empty placeholder frame that servers dropped, so a standard client's first
+message was lost — the Rust client now sends no placeholder and the server
+treats the first frame as a real message. CI installs Go, Java, Python and
+`h2` so these run on every push.
