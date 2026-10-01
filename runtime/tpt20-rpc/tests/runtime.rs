@@ -233,7 +233,7 @@ async fn quic_channel() -> Channel {
             .await;
     });
     Channel::new(QuicTransport::new(
-        Endpoint::new(format!("localhost:{port}")).with_tls(tls),
+        Endpoint::new(format!("127.0.0.1:{port}")).with_tls(tls.with_server_name("localhost")),
     ))
 }
 

@@ -270,7 +270,8 @@ pub struct QuicTransport {
 
 #[derive(Default)]
 struct ClientState {
-    socket: Option<quinn::Endpoint>,
+    /// One UDP socket per address family, created on demand.
+    sockets: Vec<(bool, quinn::Endpoint)>,
     connection: Option<quinn::Connection>,
 }
 
@@ -310,38 +311,67 @@ impl QuicTransport {
             .as_ref()
             .ok_or_else(|| TransportError::Tls("QUIC always needs TLS".into()))?;
         let address = self.endpoint.address.clone();
-        let addr: SocketAddr = tokio::net::lookup_host(&address)
+        let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&address)
             .await
             .map_err(|e| TransportError::Io(e.to_string()))?
-            .next()
-            .ok_or_else(|| TransportError::Io(format!("cannot resolve {address}")))?;
-        let host = address
-            .rsplit_once(':')
-            .map_or(address.as_str(), |(h, _)| h);
-        if st.socket.is_none() {
-            let bind: SocketAddr = if addr.is_ipv6() {
-                ([0u16; 8], 0).into()
-            } else {
-                ([0u8; 4], 0).into()
+            .collect();
+        if addrs.is_empty() {
+            return Err(TransportError::Io(format!("cannot resolve {address}")));
+        }
+        let host = tls.server_name.clone().unwrap_or_else(|| {
+            address
+                .rsplit_once(':')
+                .map_or(address.as_str(), |(h, _)| h)
+                .to_string()
+        });
+
+        // A name can resolve to several addresses (`localhost` is often both
+        // ::1 and 127.0.0.1) while the server listens on only one; UDP gives no
+        // refusal to react to, so all candidates are tried concurrently and
+        // the first handshake to succeed wins.
+        let mut attempts = Vec::new();
+        let mut last_error = None;
+        for addr in addrs {
+            let v6 = addr.is_ipv6();
+            let socket = match st.sockets.iter().find(|(f, _)| *f == v6) {
+                Some((_, s)) => s.clone(),
+                None => {
+                    let bind: SocketAddr = if v6 {
+                        ([0u16; 8], 0).into()
+                    } else {
+                        ([0u8; 4], 0).into()
+                    };
+                    match quinn::Endpoint::client(bind) {
+                        Ok(s) => {
+                            st.sockets.push((v6, s.clone()));
+                            s
+                        }
+                        Err(e) => {
+                            last_error = Some(TransportError::Io(e.to_string()));
+                            continue;
+                        }
+                    }
+                }
             };
-            st.socket =
-                Some(quinn::Endpoint::client(bind).map_err(|e| TransportError::Io(e.to_string()))?);
+            let mut config = client_crypto(tls)?;
+            let mut transport = quinn::TransportConfig::default();
+            if let Some(interval) = self.endpoint.keepalive_interval {
+                transport.keep_alive_interval(Some(interval));
+            }
+            config.transport_config(Arc::new(transport));
+            match socket.connect_with(config, addr, &host) {
+                Ok(connecting) => attempts.push(Box::pin(async move {
+                    connecting
+                        .await
+                        .map_err(|e| TransportError::Tls(e.to_string()))
+                })),
+                Err(e) => last_error = Some(TransportError::Io(e.to_string())),
+            }
         }
-        let mut config = client_crypto(tls)?;
-        let mut transport = quinn::TransportConfig::default();
-        if let Some(interval) = self.endpoint.keepalive_interval {
-            transport.keep_alive_interval(Some(interval));
+        if attempts.is_empty() {
+            return Err(last_error.unwrap_or(TransportError::ConnectionClosed));
         }
-        config.transport_config(Arc::new(transport));
-        let connecting = st
-            .socket
-            .as_ref()
-            .ok_or(TransportError::ConnectionClosed)?
-            .connect_with(config, addr, host)
-            .map_err(|e| TransportError::Io(e.to_string()))?;
-        let conn = connecting
-            .await
-            .map_err(|e| TransportError::Tls(e.to_string()))?;
+        let (conn, _) = futures::future::select_ok(attempts).await?;
         st.connection = Some(conn.clone());
         Ok(conn)
     }
@@ -825,7 +855,11 @@ mod tests {
         let socket = server.bind().unwrap();
         let port = socket.local_addr().unwrap().port();
         let mut client_ep = endpoint;
-        client_ep.address = format!("localhost:{port}");
+        // Connect by IP (no DNS in tests) and verify the certificate's name.
+        client_ep.address = format!("127.0.0.1:{port}");
+        if let Some(t) = client_ep.tls.as_mut() {
+            t.server_name = Some("localhost".into());
+        }
         let (stop_tx, stop_rx) = oneshot::channel::<()>();
         tokio::spawn(async move {
             let _ = server
@@ -1138,7 +1172,7 @@ mod tests {
         server_tls.key_pem = Some(server_key);
         let (ep, _stop) = start(Endpoint::new("x").with_tls(server_tls), echo).await;
 
-        let mut trust = crate::TlsConfig::http2();
+        let mut trust = crate::TlsConfig::http2().with_server_name("localhost");
         trust.cert_pem = Some(ca_pem);
 
         let anonymous = client(&ep.clone().with_tls(trust.clone()))

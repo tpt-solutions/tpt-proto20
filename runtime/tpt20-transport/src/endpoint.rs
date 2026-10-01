@@ -33,6 +33,9 @@ pub struct TlsConfig {
     pub client_key_pem: Option<Vec<u8>>,
     /// Client: path to the PEM private key for the presented certificate.
     pub client_key_path: Option<std::path::PathBuf>,
+    /// Client (QUIC): the name the server certificate must match, when it
+    /// differs from the host in the endpoint address (e.g. connecting to an IP).
+    pub server_name: Option<String>,
 }
 
 impl TlsConfig {
@@ -52,6 +55,7 @@ impl TlsConfig {
             client_cert_path: None,
             client_key_pem: None,
             client_key_path: None,
+            server_name: None,
         }
     }
 
@@ -107,6 +111,13 @@ impl TlsConfig {
     ) -> Self {
         self.client_cert_path = Some(cert.into());
         self.client_key_path = Some(key.into());
+        self
+    }
+
+    /// Client: verify the server certificate against `name` instead of the
+    /// host part of the endpoint address.
+    pub fn with_server_name(mut self, name: impl Into<String>) -> Self {
+        self.server_name = Some(name.into());
         self
     }
 
