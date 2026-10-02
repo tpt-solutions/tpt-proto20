@@ -35,7 +35,9 @@ features = ["logging", "tls12", "ring", "std"]
 optional = true
 
 [dependencies.tokio-rustls]
-version = "0.24"
+version = "0.26"
+default-features = false
+features = ["ring", "tls12", "logging"]
 optional = true
 
 [dependencies.rustls-pemfile]
