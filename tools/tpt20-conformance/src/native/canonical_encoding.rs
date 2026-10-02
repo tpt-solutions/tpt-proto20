@@ -21,7 +21,12 @@ fn canonical_roundtrip_independent_of_unknown_field_order() {
     let ab = [mk(3), mk(1), mk(2)].concat();
     let ba = [mk(2), mk(3), mk(1)].concat();
     let dec = |b: &[u8]| {
-        RawMessage::decode(b, &tpt20_core::DecoderLimits::default(), tpt20_core::UnknownFieldPolicy::Preserve).unwrap()
+        RawMessage::decode(
+            b,
+            &tpt20_core::DecoderLimits::default(),
+            tpt20_core::UnknownFieldPolicy::Preserve,
+        )
+        .unwrap()
     };
     assert_eq!(
         dec(&ab).encode_canonical().unwrap(),
@@ -45,7 +50,11 @@ fn canonical_oneof_last_wins() {
 fn canonical_map_entry_ordering() {
     let entry = |k: &str, v: u64| -> Field {
         let mut e = RawMessage::new();
-        e.push(Field::new(1, WireClass::Len, Value::Len(k.as_bytes().to_vec())));
+        e.push(Field::new(
+            1,
+            WireClass::Len,
+            Value::Len(k.as_bytes().to_vec()),
+        ));
         e.push(Field::new(2, WireClass::Varint, Value::Varint(v)));
         Field::new(5, WireClass::Len, Value::Len(e.encode().unwrap()))
     };
@@ -73,7 +82,9 @@ fn canonical_reduce_oneofs_multiple_groups() {
     msg.push(Field::new(4, WireClass::Varint, Value::Varint(4)));
     msg.canonical_reduce_oneofs(&[&[1, 2], &[4, 5]]);
     let ids: Vec<u32> = msg.fields.iter().map(|f| f.field_id).collect();
-    assert_eq!(ids, vec![1, 5]);
+    // Last occurrence wins per group: group [1,2] keeps the second `1`,
+    // group [4,5] keeps the trailing `4`; ungrouped field 3 is untouched.
+    assert_eq!(ids, vec![3, 1, 4]);
 }
 
 #[test]

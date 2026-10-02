@@ -23,33 +23,33 @@ diagram in spec §5 and the repo layout in spec §26.
 - [x] `git init` the repository
 - [x] `.gitignore` for Rust (`target/`, etc.)
 - [x] Root Cargo workspace `Cargo.toml`
-- [ ] Create workspace layout per spec §26:
+- [x] Create workspace layout per spec §26:
   - [x] `compiler/tpt20-language/`
   - [x] `compiler/tpt20-ir/`
   - [x] `compiler/tpt20-descriptor/`
   - [x] `compiler/tpt20-compiler/`
   - [x] `compiler/tpt20-codegen-rust/`
-  - [ ] `compiler/tpt20-codegen-backends/`
+  - [x] `compiler/tpt20-codegen-backends/`
   - [x] `runtime/tpt20-core/`
-  - [ ] `runtime/tpt20-reflect/`
+  - [x] `runtime/tpt20-reflect/`
   - [x] `runtime/tpt20-json/`
-  - [ ] `runtime/tpt20-text/`
-  - [ ] `runtime/tpt20-stdlib/`
-  - [ ] `runtime/tpt20-rpc/`
-  - [ ] `runtime/tpt20-transport/`
+  - [x] `runtime/tpt20-text/`
+  - [x] `runtime/tpt20-stdlib/`
+  - [x] `runtime/tpt20-rpc/`
+  - [x] `runtime/tpt20-transport/`
   - [x] `runtime/tpt20-observability/`
-  - [ ] `compat/tpt20-compat-protobuf/`
-  - [ ] `compat/tpt20-compat-grpc/`
+  - [x] `compat/tpt20-compat-protobuf/`
+  - [x] `compat/tpt20-compat-grpc/`
   - [x] `tools/tpt20-cli/`
-  - [ ] `tools/tpt20-lint/`
-  - [ ] `tools/tpt20-diff/`
-  - [ ] `tools/tpt20-conformance/`
-  - [ ] `tools/tpt20-registry/`
-  - [ ] `docs/`
-  - [ ] `examples/`
+  - [x] `tools/tpt20-lint/`
+  - [x] `tools/tpt20-diff/`
+  - [x] `tools/tpt20-conformance/`
+  - [x] `tools/tpt20-registry/`
+  - [x] `docs/`
+  - [x] `examples/`
   - [x] `tests/`
-  - [ ] `fuzz/`
-  - [ ] `benches/`
+  - [x] `fuzz/`
+  - [x] `benches/`
   - [x] `provenance/`
 - [x] `LICENSE-MIT` (TPT Solutions)
 - [x] `LICENSE-APACHE` (TPT Solutions)
@@ -249,14 +249,6 @@ diagram in spec §5 and the repo layout in spec §26.
 
 ## Phase 5 — Rust Code Generation (`tpt20-codegen-rust`, spec §12)
 
-**Known regression (actively being worked on):** the `tests/rust-codegen-tests` integration
-crate currently fails to compile against generated output (21–29 errors: borrowed-view
-`Value`/`BorrowedValue` mismatches on oneof/enum fields, missing `unknown_fields` in struct
-initializers, `Option<String>` vs `Option<&str>` view-field mismatches, missing `AsRef` on
-generated nested-view structs). `tpt20-core`/`tpt20-codegen-rust`'s own unit tests still pass;
-the borrowed-view/oneof/map decode codegen paths are mid-rework — don't treat the checked
-items below as "fully verified by the integration suite" until that crate compiles again.
-
 - [x] Generate owned message structs from message schemas
 - [x] Generated methods per message:
   - [x] `encode(&self) -> Vec<u8>`
@@ -275,13 +267,13 @@ items below as "fully verified by the integration suite" until that crate compil
 - [x] Generate Rust enums for schema enums with integer conversion support
   - [x] Respect open/closed unknown-value semantics
 - [x] Generate Rust enums for oneofs (e.g. `enum ContactMethod { Email(String), ... }`)
-- [ ] Generate service code
-  - [ ] Server traits (`#[async_trait]`)
-  - [ ] Client stubs
-  - [ ] Streaming interfaces (server/client/bidi)
-  - [ ] Metadata helpers
-  - [ ] Deadline helpers
-  - [ ] Cancellation helpers
+- [x] Generate service code (`tpt20_rpc` runtime: `Channel`, `Server`, `Service`)
+  - [x] Server traits (`#[async_trait]`)
+  - [x] Client stubs
+  - [x] Streaming interfaces (server/client/bidi)
+  - [x] Metadata helpers (`RpcContext` metadata ↔ wire, binary `-bin` values)
+  - [x] Deadline helpers (`grpc-timeout`, client + server enforcement)
+  - [x] Cancellation helpers (`CancellationToken::wait_cancelled`, server cancel on disconnect/deadline)
 - [x] Wire `tpt20 gen rust --in schema --out src/generated` CLI command (stub now, full CLI
       in Phase 16)
 
@@ -331,20 +323,20 @@ items below as "fully verified by the integration suite" until that crate compil
 - [x] JSON mapping
   - [x] Support original field names on decode
   - [x] Support lowerCamelCase field names on decode
-  - [ ] Configurable field-name style on encode (always emits original names)
+  - [x] Configurable field-name style on encode (`JsonOptions::field_names`)
   - [x] 64-bit integers representable as JSON strings
   - [x] Bytes fields as base64
   - [x] Enums representable by name or by number
-  - [ ] Configurable default-value emission (defaults always omitted)
-  - [ ] Configurable unknown-field handling
-- [ ] Text format
-  - [ ] Printer (message → human-readable text, matching spec §14.3 example)
-  - [ ] Parser (text → message)
-  - [ ] Repeated field support
-  - [ ] Map field support
-  - [ ] Oneof support
-  - [ ] Nested message support
-  - [ ] Deterministic output ordering
+  - [x] Configurable default-value emission (`JsonOptions::emit_defaults`)
+  - [x] Configurable unknown-field handling (`JsonOptions::reject_unknown_fields`)
+- [x] Text format (`tpt20-text`: schema-driven `TextFormat::print` / `parse`)
+  - [x] Printer (message → human-readable text, matching spec §14.3 example)
+  - [x] Parser (text → message)
+  - [x] Repeated field support (packed wire input unpacked; `[a, b]` list syntax)
+  - [x] Map field support
+  - [x] Oneof support
+  - [x] Nested message support
+  - [x] Deterministic output ordering
 
 ---
 
@@ -409,19 +401,16 @@ items below as "fully verified by the integration suite" until that crate compil
 
 ## Phase 11 — Transport Layer (`tpt20-transport`, spec §17)
 
-- [ ] HTTP/2 transport (required production transport)
+- [x] HTTP/2 transport (required production transport)
   - [x] Multiplexed streams (via `h2`, one stream per call)
-  - [ ] Trailers — server sends real trailers; client-side currently fabricates an
-        empty `Metadata` instead of reading actual h2 response trailers (bug)
+  - [x] Trailers — server sends real trailers; client reads them from the h2 response
   - [x] Flow control (delegated to `h2` crate defaults)
-  - [ ] Stream reset handling (`TransportError::StreamReset` defined but never
-        constructed/matched)
-  - [ ] GOAWAY handling (`TransportError::GoAway` defined but never constructed)
-  - [ ] Keepalive/ping behavior (not configured on client/server `h2` builders despite
-        doc comments claiming it)
-  - [ ] TLS with ALPN — **currently does not compile**: `tls`/`rustls` features call
-        rustls 0.22+ APIs against a pinned `rustls = "0.21"` dependency; needs a real fix,
-        not just a checkbox
+  - [x] Stream reset handling (`TransportError::StreamReset`; server `abort()`)
+  - [x] GOAWAY handling (`TransportError::GoAway`; server `serve_with_shutdown` sends GOAWAY)
+  - [x] Keepalive/ping behavior (`Endpoint::with_keepalive`, client and server)
+  - [x] TLS with ALPN — client + server on rustls 0.23 / tokio-rustls 0.26 (ring),
+        ALPN from `TlsConfig`, PEM bytes/path, opt-in accept-invalid-certs, server-side
+        client-CA verification and client-certificate presentation (mTLS round trip tested; CLI `--tls-client-cert/--tls-client-key`)
   - [x] Cleartext h2c for local development (explicit opt-in only)
 - [x] Message framing: 1-byte flags + 4-byte big-endian length + N-byte payload
   - [x] Compression-enabled flag
@@ -430,9 +419,9 @@ items below as "fully verified by the integration suite" until that crate compil
   - [x] Usable in tests
   - [ ] Usable in embedded systems
   - [ ] Usable in local development
-  - [ ] Usable in benchmarking (no `benches/` yet — Phase 18)
+  - [x] Usable in benchmarking (`benches/benches/rpc.rs`)
   - [ ] Usable in fuzzing (no fuzz target exercises the transport directly yet)
-- [ ] Optional QUIC/HTTP3 transport (empty `quic` feature flag only, no implementation)
+- [x] Optional QUIC transport (`quic` feature: native stream mapping on `quinn`, full RPC suite passes over it; not gRPC-over-HTTP/3; no compression/0-RTT/CLI yet)
 - [x] Optional custom stream transport extension point (`Transport` trait)
 
 ---
@@ -470,7 +459,7 @@ items below as "fully verified by the integration suite" until that crate compil
   - [x] Cancellation reason
   - [x] Peer info where allowed
   - [x] Schema fingerprint where useful
-- [ ] CLI schema-aware debugging support (`tpt20 decode --schema ... --message ...`),
+- [x] CLI schema-aware debugging support (`tpt20 decode --schema ... --message ...`),
       full CLI wiring in Phase 16
 
 ---
@@ -494,8 +483,8 @@ items below as "fully verified by the integration suite" until that crate compil
 - [ ] `.proto` schema import
   - [x] proto2 support
   - [x] proto3 support
-  - [ ] Editions support where feasible (doc comments claim it; no `edition = "..."`
-        lexing/parsing actually exists yet)
+  - [x] Editions support where feasible (`edition = "2023"|"2024"`; `features.field_presence`,
+        `features.enum_type` at file/message/enum/field level; groups rejected)
   - [x] Messages
   - [x] Enums
   - [x] Oneofs
@@ -504,35 +493,35 @@ items below as "fully verified by the integration suite" until that crate compil
   - [x] Options where meaningful
   - [x] Reserved fields (message-level; enum-level reserved is parsed but not yet
         stored/lowered)
-  - [ ] Extensions where feasible (`extend` blocks are parsed but dropped — never
-        lowered into IR)
+  - [x] Extensions where feasible (same-file `extend` merged into the extendee as regular
+        fields with range/id/name checks; external extendees dropped and reported)
   - [x] `tpt20 import-proto user.proto --out user.tpt` (CLI wiring in Phase 16)
 - [x] Protobuf wire adapter
   - [x] `decode_protobuf(bytes)` conceptual API
   - [x] `encode_protobuf()` conceptual API
-  - [ ] Round-trip fidelity testing against real protobuf messages (only self-consistency
-        tested so far — see next item)
-- [ ] Golden-vector / differential testing against an established protobuf implementation
-      (no `prost`/reference protobuf crate dependency yet; current "golden"/"differential"
-      tests only compare tpt20 against itself)
+  - [x] Round-trip fidelity testing against real protobuf messages (`prost`, see next item)
+- [x] Differential testing against an established protobuf implementation
+      (`tests/rust-codegen-tests`, `protobuf_differential`: 500 random messages per direction
+      covering every scalar kind, packed/unpacked repeated, maps incl. message values, nested
+      messages, oneofs, explicit presence; prost ↔ `schema_wire` adapter ↔ generated code)
 
 ---
 
 ## Phase 15 — Compatibility Adapter: gRPC (`tpt20-compat-grpc`, spec §10.3)
 
-- [x] HTTP/2 framing compatible with gRPC (5-byte length-prefixed frame codec; actual
-      network `GrpcServer::serve()` is still a hardcoded "not supported" stub)
+- [x] HTTP/2 framing compatible with gRPC (5-byte length-prefixed frame codec; live
+      `GrpcServer::serve()` / `serve_listener()` behind the `server` feature, tested with a
+      stock `h2` client)
 - [x] Protobuf-compatible message payload support
-- [x] Status code mapping (tpt20 ↔ gRPC) — mapping functions work, but
-      `GrpcClient`/`GrpcStream::poll_next` doesn't call them yet: it hardcodes `Status::Ok`
-      on every trailer instead of reading `grpc-status`/`grpc-message` (bug — a failed
-      call is currently misreported as success)
+- [x] Status code mapping (tpt20 ↔ gRPC) — `GrpcClient` reads `grpc-status` /
+      `grpc-message` trailers (percent-decoded); a missing status is `Unknown`, not `Ok`
 - [x] Metadata mapping (tpt20 ↔ gRPC)
 - [x] Deadline mapping (tpt20 ↔ gRPC)
 - [x] Streaming mode mapping (unary/server/client/bidi)
 - [x] Health-checking protocol support
-- [ ] gRPC reflection support where feasible (minimal in-memory symbol registry exists;
-      not wired to the real `grpc.reflection.v1alpha.ServerReflection` wire service)
+- [x] gRPC reflection support where feasible (`reflection_wire::ReflectionServer`: v1alpha/v1
+      `ServerReflectionInfo` with real `FileDescriptorProto`s, validated by `prost-reflect`;
+      no extensions/imports)
 
 ---
 
@@ -551,29 +540,25 @@ items below as "fully verified by the integration suite" until that crate compil
 - [x] CLI command: `tpt20 encode`
 - [x] CLI command: `tpt20 json-to-binary`
 - [x] CLI command: `tpt20 binary-to-json`
-- [ ] CLI command: `tpt20 text-to-binary` (exists but is an ad hoc `field_id: value` line
-      parser, not backed by a real text-format grammar — depends on Phase 8 text parser)
-- [ ] CLI command: `tpt20 binary-to-text` (same ad hoc caveat as above)
+- [x] CLI command: `tpt20 text-to-binary` (schema-driven via `tpt20-text`)
+- [x] CLI command: `tpt20 binary-to-text` (schema-driven via `tpt20-text`)
 - [x] CLI command: `tpt20 import-proto`
-- [ ] CLI command: `tpt20 conformance` (exists but only decodes a `"binary"` hex field
-      from a JSON dir — does not invoke the real `tpt20-conformance` suite from Phase 17)
-- [ ] CLI command: `tpt20 call` (RPC debugger) — parses JSON/binary input, metadata,
-      deadline, and streaming type, but never actually performs a network call; TLS and
-      compression args are accepted and silently ignored
-  - [ ] JSON input support
-  - [ ] Binary input support
-  - [ ] Metadata support
-  - [ ] Deadline support
-  - [ ] TLS configuration support
-  - [ ] Compression configuration support
-  - [ ] Streaming call support
-- [ ] CLI command: `tpt20 health` (prints placeholder text, no real request)
+- [x] CLI command: `tpt20 conformance` (runs the JSON vectors in `conformance/vectors`)
+- [x] CLI command: `tpt20 call` (RPC debugger over the HTTP/2 transport)
+  - [x] JSON input support
+  - [x] Binary input support
+  - [x] Metadata support
+  - [x] Deadline support (client-side)
+  - [x] TLS configuration support (`--tls-cert` CA)
+  - [x] Compression configuration support (`--compression gzip|deflate`)
+  - [x] Streaming call support
+- [x] CLI command: `tpt20 health` (`tpt20.health.v1.Health/Check`)
 - [x] CLI command: `tpt20 reflect`
-- [x] CLI command: `tpt20 registry publish` (local-filesystem registry only)
-- [ ] `tpt20-registry` service/storage design
+- [x] CLI command: `tpt20 registry publish` / `list` / `get` (local-filesystem registry)
+- [x] `tpt20-registry` service/storage design (local filesystem)
   - [x] Schema storage keyed by fingerprint/version
-  - [x] Publish workflow
-  - [ ] Lookup/fetch workflow (no lookup/fetch code path exists at all yet)
+  - [x] Publish workflow (immutable versions, `--force` override)
+  - [x] Lookup/fetch workflow (`registry list` / `registry get`, integrity-verified)
 
 ---
 
@@ -593,13 +578,10 @@ that the underlying features are missing — see per-item notes below.
   - [x] Wire encoding conformance
   - [x] Wire decoding conformance
   - [x] Canonical encoding conformance
-  - [ ] JSON mapping conformance (source exists but doesn't compile: unresolved import
-        `tpt20_stdlib::json`, which doesn't exist)
+  - [x] JSON mapping conformance
   - [x] Text mapping conformance
-  - [ ] Reflection conformance (source exists but doesn't compile: accesses private field
-        `DynamicMessage.raw` instead of the public API)
-  - [ ] Dynamic message conformance (source exists but doesn't compile: `get_bytes_by_name`
-        slice/array type mismatch)
+  - [x] Reflection conformance
+  - [x] Dynamic message conformance
   - [x] RPC behavior conformance
   - [x] Streaming behavior conformance
   - [x] Deadline behavior conformance
@@ -611,16 +593,12 @@ that the underlying features are missing — see per-item notes below.
   - [x] Protobuf binary encoding conformance
   - [x] gRPC-compatible RPC behavior conformance
   - [x] Status mapping conformance
-  - [ ] Metadata mapping conformance (source exists but doesn't compile: missing `http`
-        dependency)
-  - [ ] Streaming semantics conformance (source exists but doesn't compile: references a
-        `StreamingSemantics` type that doesn't exist in `tpt20-compat-grpc`)
+  - [x] Metadata mapping conformance
+  - [x] Streaming semantics conformance
 - [x] Fuzz targets
   - [x] Binary decoder fuzz target
-  - [ ] JSON decoder fuzz target (mislabeled: compiles, but actually fuzzes wire/binary
-        decode, not JSON text decoding — no JSON parser is exercised)
-  - [ ] Text parser fuzz target (mislabeled: compiles, but only fuzzes wire decode plus
-        one-way `DynamicMessage::to_text()`; there is no `from_text` parser to fuzz yet)
+  - [x] JSON decoder fuzz target (`DynamicMessage::from_json` over arbitrary text)
+  - [x] Text parser fuzz target (parse → print → re-parse stability, plus wire → text)
   - [x] Schema parser fuzz target
   - [x] Descriptor decoder fuzz target
   - [x] Dynamic message decoder fuzz target
@@ -638,27 +616,26 @@ that the underlying features are missing — see per-item notes below.
 
 ## Phase 18 — Performance & Benchmarking (`benches/`, spec §23)
 
-- [ ] Benchmark: small messages
-- [ ] Benchmark: large messages
-- [ ] Benchmark: nested messages
-- [ ] Benchmark: repeated fields
-- [ ] Benchmark: packed fields
-- [ ] Benchmark: maps
-- [ ] Benchmark: unknown fields
-- [ ] Benchmark: dynamic decoding
-- [ ] Benchmark: borrowed decoding
-- [ ] Benchmark: JSON conversion
-- [ ] Benchmark: unary RPC
-- [ ] Benchmark: streaming RPC
-- [ ] Benchmark: concurrent streams
-- [ ] Benchmark: cancellation storms
-- [ ] Benchmark: deadline storms
-- [ ] Benchmark: TLS overhead
-- [ ] Benchmark: compression overhead
-- [ ] Profiling pass and optimization backlog based on results
-- [ ] Confirm performance goals from spec §23 (fast varints, minimal allocations, efficient
-      repeated/map handling, efficient streaming, monomorphized codegen, optional
-      zero-copy decode, bounded memory, low-overhead observability)
+- [x] Benchmark: small messages (`benches/benches/wire.rs`)
+- [x] Benchmark: large messages
+- [x] Benchmark: nested messages
+- [x] Benchmark: repeated fields
+- [x] Benchmark: packed fields
+- [x] Benchmark: maps
+- [x] Benchmark: unknown fields
+- [x] Benchmark: dynamic decoding
+- [x] Benchmark: borrowed decoding
+- [x] Benchmark: JSON conversion
+- [x] Benchmark: unary RPC (`benches/benches/rpc.rs`)
+- [x] Benchmark: streaming RPC
+- [x] Benchmark: concurrent streams
+- [x] Benchmark: cancellation storms
+- [x] Benchmark: deadline storms
+- [x] Benchmark: TLS overhead
+- [x] Benchmark: compression overhead (`rpc_compression` group)
+- [x] Profiling pass and optimization backlog based on results (`docs/performance.md`)
+- [x] Confirm performance goals from spec §23 — assessed in `docs/performance.md`; all met
+      (low-overhead observability measured at ~2 %)
 
 ---
 
@@ -684,21 +661,22 @@ above for the underlying status.
 
 ## Phase 20 — Versioning, Release & Governance (spec §24, §27, §28.4)
 
-- [ ] Adopt semantic versioning for the project overall
-- [ ] Document stability policy for public APIs
-- [ ] Document stability policy for generated code
-- [ ] Document stability policy for the wire format
-- [ ] Document stability policy for the descriptor format
-- [ ] Document stability policy for CLI output
-- [ ] Document stability policy for registry APIs
-- [ ] Schema package versioning convention (e.g. `package user.v1;`)
-- [ ] Compatibility policy: wire format changes backward-compatible or protocol-version
+- [x] Adopt semantic versioning for the project overall (`docs/stability.md`)
+- [x] Document stability policy for public APIs
+- [x] Document stability policy for generated code
+- [x] Document stability policy for the wire format
+- [x] Document stability policy for the descriptor format
+- [x] Document stability policy for CLI output
+- [x] Document stability policy for registry APIs
+- [x] Schema package versioning convention (e.g. `package user.v1;`)
+- [x] Compatibility policy: wire format changes backward-compatible or protocol-version
       gated
-- [ ] Compatibility policy: descriptor format versioning
-- [ ] Compatibility policy: generated code stability documentation
-- [ ] Compatibility policy: CLI breaking changes follow semver
-- [ ] Community governance documentation
-- [ ] v1.0 acceptance-criteria sign-off checklist (mirrors spec §27.1–27.9):
+- [x] Compatibility policy: descriptor format versioning
+- [x] Compatibility policy: generated code stability documentation
+- [x] Compatibility policy: CLI breaking changes follow semver
+- [x] Community governance documentation (`docs/governance.md`)
+- [x] v1.0 acceptance-criteria sign-off checklist written (`docs/release-checklist.md`);
+      sign-off itself is open — it lists the unmet criteria (mirrors spec §27.1–27.9):
   - [ ] §27.1 Schema language acceptance criteria met
   - [ ] §27.2 Compiler acceptance criteria met
   - [ ] §27.3 Runtime acceptance criteria met
@@ -717,15 +695,15 @@ above for the underlying status.
 *Not required for v1. Rust is the reference implementation; this phase is deferred until
 the core system (Phases 0–20) is complete and stable.*
 
-- [ ] Multi-language codegen framework driven by the neutral IR
-- [ ] Go code generator (where feasible)
-- [ ] Go minimal runtime (where feasible)
-- [ ] Java code generator (where feasible)
-- [ ] Java minimal runtime (where feasible)
-- [ ] Python code generator (where feasible)
-- [ ] Python minimal runtime (where feasible)
-- [ ] Cross-language interop tests: Go clients/servers
-- [ ] Cross-language interop tests: Java clients/servers
-- [ ] Cross-language interop tests: Python clients/servers
-- [ ] Interop tests: HTTP/2 proxies
-- [ ] Interop tests: load balancers
+- [x] Multi-language codegen framework driven by the neutral IR (`tpt20-codegen-backends`: shared resolved model, `Backend` trait, `tpt20 gen go|java|python`)
+- [x] Go code generator (messages + service client/server stubs)
+- [x] Go minimal runtime (wire format + limits + HTTP/2 RPC client/server, stdlib only)
+- [x] Java code generator (messages; no RPC — see docs/polyglot.md)
+- [x] Java minimal runtime (wire format + limits)
+- [x] Python code generator (messages + service client/server stubs)
+- [x] Python minimal runtime (wire format + limits + asyncio RPC client/server on `h2`)
+- [x] Cross-language interop tests: Go clients/servers (both directions vs Rust, and vs Python)
+- [x] Cross-language interop tests: Java (message-level, byte-for-byte vs Rust; no Java RPC runtime — see docs/polyglot.md)
+- [x] Cross-language interop tests: Python clients/servers (both directions vs Rust, and vs Go)
+- [x] Interop tests: HTTP/2 proxies (Go `ReverseProxy`; Rust, Go and Python clients through it)
+- [x] Interop tests: load balancers (round-robin proxy over two Rust backends)

@@ -14,7 +14,23 @@ categories = ["development-tools", "testing"]
 [dependencies]
 tpt20-core = { path = "../../runtime/tpt20-core" }
 tpt20-json = { path = "../../runtime/tpt20-json" }
+tpt20-rpc = { path = "../../runtime/tpt20-rpc" }
 
 [build-dependencies]
+tpt20-compat-protobuf = { path = "../../compat/tpt20-compat-protobuf" }
+serde_json = "1"
 tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
 tpt20-codegen-rust = { path = "../../compiler/tpt20-codegen-rust" }
+
+[dev-dependencies]
+tpt20-codegen-backends = { path = "../../compiler/tpt20-codegen-backends" }
+serde_json = "1"
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
+tpt20-ir = { path = "../../compiler/tpt20-ir" }
+prost = "0.13"
+tpt20-compat-protobuf = { path = "../../compat/tpt20-compat-protobuf" }
+tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
+tpt20-rpc = { path = "../../runtime/tpt20-rpc", features = ["http2"] }
+tpt20-transport = { path = "../../runtime/tpt20-transport", features = ["http2"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"

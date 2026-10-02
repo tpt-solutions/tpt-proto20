@@ -196,15 +196,50 @@ pub enum OuterContact {
 
 matching spec §12.5's mutually-exclusive representation.
 
-## Services: not yet generated
+## Services
 
-Spec §12.6 calls for generated server traits, client stubs, and streaming
-interfaces per `service` block (e.g. `#[async_trait] trait UserService`).
-**This is not implemented** — `tpt20-codegen-rust` only generates message
-and enum code today. To build an RPC service today, hand-write the trait
-against [`tpt20-rpc`'s types](rpc-model.md) (`RpcContext`,
-`ServerStreamSink<T>`, etc.) using the generated message types as your
-request/response payloads.
+Each `service` block generates (unless `CodegenOptions::services` is off /
+`tpt20 gen rust --no-services`), using the [`tpt20-rpc`](rpc-model.md)
+runtime:
+
+```rust
+// Server side: implement the trait, wrap it, register it on a Server.
+#[__rpc::async_trait]
+pub trait UserService: Send + Sync + 'static {
+    async fn get_user(&self, ctx: &RpcContext, request: GetUserRequest) -> Result<User, RpcError>;
+    async fn watch_users(&self, ctx: &RpcContext, request: WatchUsersRequest)
+        -> Result<BoxStream<'static, Result<User, RpcError>>, RpcError>;
+    async fn upload_logs(&self, ctx: &RpcContext, requests: BoxStream<'static, Result<LogEntry, RpcError>>)
+        -> Result<UploadSummary, RpcError>;
+    async fn chat(&self, ctx: &RpcContext, requests: BoxStream<'static, Result<ChatMessage, RpcError>>)
+        -> Result<BoxStream<'static, Result<ChatMessage, RpcError>>, RpcError>;
+}
+pub struct UserServiceServer<S> { /* … */ }   // implements tpt20_rpc::Service
+pub struct UserServiceClient { /* … */ }      // wraps tpt20_rpc::Channel
+```
+
+```rust
+let server = Arc::new(Server::new().add_service(UserServiceServer::new(MyImpl)));
+tokio::spawn(server.clone().serve_in_process(rx));          // or serve_http2(&http2_server)
+
+let client = UserServiceClient::new(Channel::new(transport));
+let user = client.get_user(&RpcContext::new().with_timeout(Duration::from_secs(2)), &req).await?;
+```
+
+- Method names become `snake_case` (`GetHTTPStatus` → `get_http_status`); the
+  wire path is `<package>.<Service>/<Method>`.
+- `RpcContext` carries the call's **metadata** (text, and `-bin` binary
+  values as base64 on the wire), **deadline** (sent as `grpc-timeout`,
+  enforced by both client and server), and **cancellation** token.
+- Errors are `RpcError`s; the final status travels in the `grpc-status` /
+  `grpc-message` trailers. A call that ends without a status is an error.
+- Client-/bidi-streaming calls take any `Stream<Item = Req> + Send + 'static`.
+- For schemas with services the module also defines `PACKAGE`, `FINGERPRINT`,
+  `SERVICE_NAMES` and `DESCRIPTOR` (the binary `TPD1` descriptor), which feed
+  `tpt20_rpc::reflection::ReflectionService::register` so a server can expose
+  its own schema.
+- Generated code needs the `tpt20-rpc` crate in addition to `tpt20-core` and
+  `tpt20-json`.
 
 ## What's generated vs. what's planned
 
@@ -217,7 +252,7 @@ request/response payloads.
 | Builders (opt-in) | ✅ generation; ⚠️ partial validation (see above) |
 | Enums with integer conversion, open/closed semantics | ✅ |
 | Oneofs as Rust enums | ✅ |
-| Service server traits / client stubs / streaming interfaces | ❌ not implemented |
+| Service server traits / client stubs / streaming interfaces | ✅ |
 
 ## Dynamic alternative: no codegen at all
 
@@ -226,3 +261,27 @@ admin tool that only has a descriptor at runtime — `DynamicMessage` in
 `tpt20-core`/`tpt20-reflect` decodes and manipulates messages purely from
 their descriptor, with the same wire format and limits. See the reflection
 examples referenced from [Security limits](security-limits.md) and spec §13.
+
+## Recursive messages
+
+A message that refers to itself (directly, through a repeated/map field, or
+through other messages or oneofs) is supported. Singular message fields and
+oneof message payloads that sit on a cycle are emitted as `Option<Box<T>>` /
+`Box<T>` so the generated types have finite size; repeated and map fields
+already heap-allocate and are unchanged. Borrowed views follow the same rule.
+Nesting is bounded at decode time by `DecoderLimits::max_depth`.
+
+## JSON options
+
+Every generated message has `to_json_with(&JsonOptions)` /
+`to_json_value_with` and `from_json_with` / `from_json_value_with` next to the
+plain `to_json` / `from_json` (which use `JsonOptions::default()`):
+
+- `field_names: FieldNameStyle::{Original, LowerCamel}` — member spelling on
+  encode (decode always accepts both);
+- `emit_defaults: bool` — also emit zero/empty implicit-presence fields, empty
+  lists and empty maps (absent explicit-presence and message fields stay out);
+- `reject_unknown_fields: bool` — decode fails with `JsonError::UnknownField`
+  for members that match no field (either spelling).
+
+Options propagate into nested messages.

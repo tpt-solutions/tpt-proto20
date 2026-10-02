@@ -63,7 +63,9 @@ impl Tag {
     pub fn from_u64(value: u64) -> Result<Tag, crate::error::DecodeError> {
         let wire_class = WireClass::from_bits(value as u8 & 0x07)
             .ok_or(crate::error::DecodeError::Internal("unknown wire class"))?;
-        let field_id = (value >> 3) as u32;
+        // A field id beyond 32 bits would alias another field once truncated.
+        let field_id =
+            u32::try_from(value >> 3).map_err(|_| crate::error::DecodeError::FieldIdOutOfRange)?;
         Ok(Tag {
             field_id,
             wire_class,

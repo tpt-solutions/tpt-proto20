@@ -24,13 +24,14 @@ pub fn parse_grpc_timeout(value: &str) -> Result<Duration, crate::GrpcError> {
     if value.is_empty() {
         return Err(crate::GrpcError::InvalidTimeout(value.into()));
     }
-    let unit = value.chars().last().ok_or_else(|| {
-        crate::GrpcError::InvalidTimeout(value.into())
-    })?;
+    let unit = value
+        .chars()
+        .last()
+        .ok_or_else(|| crate::GrpcError::InvalidTimeout(value.into()))?;
     let num_str = &value[..value.len() - 1];
-    let num: u64 = num_str.parse().map_err(|_| {
-        crate::GrpcError::InvalidTimeout(value.into())
-    })?;
+    let num: u64 = num_str
+        .parse()
+        .map_err(|_| crate::GrpcError::InvalidTimeout(value.into()))?;
     match unit {
         'n' => Ok(Duration::from_nanos(num)),
         'u' => Ok(Duration::from_micros(num)),

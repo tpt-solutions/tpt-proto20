@@ -26,6 +26,10 @@ base64 = "0.22"
 tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
+h2 = "0.4"
+prost = "0.13"
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
+prost-reflect = "0.14"
 tokio = { version = "1", features = ["test-util", "macros"] }
 
 [features]

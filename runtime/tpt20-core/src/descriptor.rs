@@ -58,7 +58,12 @@ pub struct FieldDescriptor {
 
 impl FieldDescriptor {
     /// Creates a new field descriptor.
-    pub fn new(id: u32, name: impl Into<String>, wire_class: WireClass, kind: FieldKind) -> FieldDescriptor {
+    pub fn new(
+        id: u32,
+        name: impl Into<String>,
+        wire_class: WireClass,
+        kind: FieldKind,
+    ) -> FieldDescriptor {
         FieldDescriptor {
             id,
             name: name.into(),

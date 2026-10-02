@@ -3,7 +3,7 @@ use serde_json::Value;
 /// Converts an `i64` to a `serde_json::Value`, emitting as string when outside
 /// the safe JSON integer range.
 pub fn i64_to_value(v: i64) -> Value {
-    if v >= i64::MIN + 1 && v <= i64::MAX - 1 {
+    if (i64::MIN + 1..=i64::MAX - 1).contains(&v) {
         Value::Number(serde_json::Number::from(v))
     } else {
         Value::String(v.to_string())
@@ -24,9 +24,7 @@ pub fn u64_to_value(v: u64) -> Value {
 /// number and string representations.
 pub fn as_i64(value: &Value) -> Result<i64, String> {
     match value {
-        Value::Number(n) => n
-            .as_i64()
-            .ok_or_else(|| format!("invalid i64: {value}")),
+        Value::Number(n) => n.as_i64().ok_or_else(|| format!("invalid i64: {value}")),
         Value::String(s) => s
             .parse::<i64>()
             .map_err(|_| format!("invalid i64 string: {s}")),
@@ -38,9 +36,7 @@ pub fn as_i64(value: &Value) -> Result<i64, String> {
 /// number and string representations.
 pub fn as_u64(value: &Value) -> Result<u64, String> {
     match value {
-        Value::Number(n) => n
-            .as_u64()
-            .ok_or_else(|| format!("invalid u64: {value}")),
+        Value::Number(n) => n.as_u64().ok_or_else(|| format!("invalid u64: {value}")),
         Value::String(s) => s
             .parse::<u64>()
             .map_err(|_| format!("invalid u64 string: {s}")),

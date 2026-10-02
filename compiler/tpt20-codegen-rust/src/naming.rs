@@ -27,6 +27,18 @@ pub fn sanitize_ident(name: &str) -> String {
 }
 
 /// `email_addr` -> `EmailAddr` (PascalCase; used for oneof variants/types).
+/// Rust variant name for an enum value. `SCREAMING_SNAKE` names (no lowercase
+/// letters) are kept verbatim — `KIND_A` stays `KIND_A`, never the lossy
+/// `KINDA` — everything else is PascalCased.
+pub fn enum_variant(name: &str) -> String {
+    let screaming = !name.chars().any(|c| c.is_ascii_lowercase());
+    if screaming {
+        sanitize_ident(name)
+    } else {
+        sanitize_ident(&pascal(name))
+    }
+}
+
 pub fn pascal(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut upper_next = true;
@@ -50,6 +62,32 @@ pub fn pascal(name: &str) -> String {
 /// snake_case; this guards against keywords).
 pub fn field_ident(name: &str) -> String {
     sanitize_ident(name)
+}
+
+/// `GetUser` -> `get_user`, `HTTPServer` -> `http_server` (keyword-safe).
+pub fn snake(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let mut out = String::with_capacity(name.len() + 4);
+    for (i, &c) in chars.iter().enumerate() {
+        if c == '-' || c == '.' {
+            out.push('_');
+            continue;
+        }
+        if c.is_uppercase() {
+            let prev_lower =
+                i > 0 && (chars[i - 1].is_lowercase() || chars[i - 1].is_ascii_digit());
+            let acronym_end = i > 0
+                && chars[i - 1].is_uppercase()
+                && chars.get(i + 1).is_some_and(|n| n.is_lowercase());
+            if (prev_lower || acronym_end) && !out.ends_with('_') {
+                out.push('_');
+            }
+            out.extend(c.to_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    sanitize_ident(&out)
 }
 
 /// `user_id` -> `userId` (lowerCamelCase JSON alias, spec §14.2).
@@ -107,6 +145,16 @@ mod tests {
     }
 
     #[test]
+    fn snake_case() {
+        assert_eq!(snake("GetUser"), "get_user");
+        assert_eq!(snake("get_user"), "get_user");
+        assert_eq!(snake("HTTPServer"), "http_server");
+        assert_eq!(snake("ListV2Items"), "list_v2_items");
+        assert_eq!(snake("Type"), "r#type");
+        assert_eq!(snake("Ping"), "ping");
+    }
+
+    #[test]
     fn flattening_and_files() {
         assert_eq!(
             flat_type_name(&["Outer".to_string()], "Inner"),
@@ -114,5 +162,20 @@ mod tests {
         );
         assert_eq!(package_file_stem(Some("user.v1")), "user_v1");
         assert_eq!(package_file_stem(None), "generated");
+    }
+}
+
+#[cfg(test)]
+mod enum_variant_tests {
+    use super::enum_variant;
+
+    #[test]
+    fn screaming_snake_is_kept_and_distinct() {
+        assert_eq!(enum_variant("KIND_A"), "KIND_A");
+        assert_eq!(enum_variant("KINDA"), "KINDA");
+        assert_ne!(enum_variant("KIND_A"), enum_variant("KINDA"));
+        assert_eq!(enum_variant("SUSPENDED"), "SUSPENDED");
+        assert_eq!(enum_variant("active_now"), "ActiveNow");
+        assert_eq!(enum_variant("Already"), "Already");
     }
 }

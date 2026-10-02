@@ -11,8 +11,10 @@ keywords = ["tpt20", "fuzzing", "testing", "security", "schema-parser"]
 categories = ["development-tools", "testing"]
 
 [[bin]]
-name = "fuzz_target"
+name = "schema-parser-fuzz"
 path = "fuzz_targets/fuzz_target.rs"
+test = false
+bench = false
 
 [dependencies]
 tpt20-language = { path = "../../compiler/tpt20-language" }

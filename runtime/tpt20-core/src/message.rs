@@ -176,15 +176,15 @@ impl RawMessage {
     /// [`RawMessage::canonical_reduce_oneofs`] (oneof last-wins) and
     /// [`RawMessage::canonical_sort_map_entries`] (map ordering).
     pub fn encode_canonical(&self) -> Result<Vec<u8>, EncodeError> {
-        let mut sorted = self.fields.clone();
-        sorted.sort_by(|a, b| {
-            a.field_id
-                .cmp(&b.field_id)
-                .then_with(|| (a.wire_class as u8).cmp(&(b.wire_class as u8)))
-                .then_with(|| canonical_payload(a).cmp(&canonical_payload(b)))
-        });
-        let msg = RawMessage { fields: sorted };
-        msg.encode()
+        // Sort references with allocation-free keys; the resulting order is
+        // exactly (field_id, wire_class, canonical payload bytes).
+        let mut refs: Vec<&Field> = self.fields.iter().collect();
+        refs.sort_by_cached_key(|f| (f.field_id, f.wire_class as u8, payload_key(f)));
+        let mut out = Vec::with_capacity(self.fields.iter().map(estimated_field_size).sum());
+        for field in refs {
+            encode_field(field, &mut out);
+        }
+        Ok(out)
     }
 
     /// Applies canonical oneof serialization behavior (spec §9.8, §9.10):
@@ -194,7 +194,10 @@ impl RawMessage {
     /// `groups` lists oneofs as slices of their member field ids.
     pub fn canonical_reduce_oneofs(&mut self, groups: &[&[u32]]) {
         for group in groups {
-            let Some(keep_idx) = self.fields.iter().rposition(|f| group.contains(&f.field_id))
+            let Some(keep_idx) = self
+                .fields
+                .iter()
+                .rposition(|f| group.contains(&f.field_id))
             else {
                 continue;
             };
@@ -228,29 +231,32 @@ impl RawMessage {
             .fields
             .iter()
             .enumerate()
-            .filter(|(_, f)| map_field_ids.contains(&f.field_id) && matches!(f.value, Value::Len(_)))
+            .filter(|(_, f)| {
+                map_field_ids.contains(&f.field_id) && matches!(f.value, Value::Len(_))
+            })
             .map(|(i, _)| i)
             .collect();
         if positions.len() < 2 {
             return;
         }
-        let mut entries: Vec<Field> = positions.iter().map(|&i| self.fields[i].clone()).collect();
-        entries.sort_by(|a, b| {
-            let ka = match &a.value {
+        // Move the entries out (no payload clones), order them by
+        // (entry key, full payload as tie-break), and move them back.
+        let placeholder = || Field::new(0, WireClass::Varint, Value::Varint(0));
+        let mut entries: Vec<Field> = positions
+            .iter()
+            .map(|&i| std::mem::replace(&mut self.fields[i], placeholder()))
+            .collect();
+        let mut order: Vec<usize> = (0..entries.len()).collect();
+        order.sort_by_cached_key(|&i| {
+            let f = &entries[i];
+            let key: &[u8] = match &f.value {
                 Value::Len(v) => map_entry_sort_key(v),
-                _ => Vec::new(),
+                _ => &[],
             };
-            let kb = match &b.value {
-                Value::Len(v) => map_entry_sort_key(v),
-                _ => Vec::new(),
-            };
-            ka.cmp(&kb).then_with(|| {
-                // Tie-break on the full entry so equal keys are deterministic.
-                canonical_payload(a).cmp(&canonical_payload(b))
-            })
+            (key, payload_key(f))
         });
-        for (slot, entry) in positions.into_iter().zip(entries) {
-            self.fields[slot] = entry;
+        for (slot, i) in positions.into_iter().zip(order) {
+            self.fields[slot] = std::mem::replace(&mut entries[i], placeholder());
         }
     }
 }
@@ -259,49 +265,113 @@ impl RawMessage {
 /// (`field 1 = key`). Keys within one map share a type, so raw byte order is a
 /// consistent deterministic order. Falls back to the whole entry on malformed
 /// input (canonicalization never fails; it only orders).
-fn map_entry_sort_key(entry: &[u8]) -> Vec<u8> {
+fn map_entry_sort_key(entry: &[u8]) -> &[u8] {
     let mut cursor = 0usize;
     let Ok(tag_value) = decode_varint(entry, &mut cursor) else {
-        return entry.to_vec();
+        return entry;
     };
     let Ok(tag) = Tag::from_u64(tag_value) else {
-        return entry.to_vec();
+        return entry;
     };
     match tag.wire_class {
-        WireClass::Varint => entry[cursor..].to_vec(),
+        WireClass::Varint => &entry[cursor..],
         WireClass::Fixed32 | WireClass::Fixed64 => {
-            let n = if tag.wire_class == WireClass::Fixed32 { 4 } else { 8 };
-            if cursor + n <= entry.len() {
-                entry[cursor..cursor + n].to_vec()
+            let n = if tag.wire_class == WireClass::Fixed32 {
+                4
             } else {
-                entry.to_vec()
+                8
+            };
+            if cursor + n <= entry.len() {
+                &entry[cursor..cursor + n]
+            } else {
+                entry
             }
         }
         WireClass::Len => {
             let Ok(len) = decode_varint(entry, &mut cursor) else {
-                return entry.to_vec();
+                return entry;
             };
             let len = len as usize;
-            if cursor.checked_add(len).is_some_and(|end| end <= entry.len()) {
-                entry[cursor..cursor + len].to_vec()
+            if cursor
+                .checked_add(len)
+                .is_some_and(|end| end <= entry.len())
+            {
+                &entry[cursor..cursor + len]
             } else {
-                entry.to_vec()
+                entry
             }
         }
     }
 }
 
-fn canonical_payload(f: &Field) -> Vec<u8> {
-    match &f.value {
-        Value::Varint(v) => encode_varint_vec_canon(*v),
-        Value::Fixed32(v) => v.to_le_bytes().to_vec(),
-        Value::Fixed64(v) => v.to_le_bytes().to_vec(),
-        Value::Len(v) => v.clone(),
+/// Canonical payload bytes used as the sort key, held inline (no heap) for
+/// fixed-size and varint values and borrowed for length-delimited ones.
+enum PayloadKey<'a> {
+    Inline([u8; 10], usize),
+    Bytes(&'a [u8]),
+}
+
+impl PayloadKey<'_> {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            PayloadKey::Inline(buf, len) => &buf[..*len],
+            PayloadKey::Bytes(b) => b,
+        }
     }
 }
 
-fn encode_varint_vec_canon(value: u64) -> Vec<u8> {
-    encode_varint_vec(value)
+impl PartialEq for PayloadKey<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+impl Eq for PayloadKey<'_> {}
+impl PartialOrd for PayloadKey<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for PayloadKey<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_slice().cmp(other.as_slice())
+    }
+}
+
+fn payload_key(f: &Field) -> PayloadKey<'_> {
+    let mut buf = [0u8; 10];
+    match &f.value {
+        Value::Varint(v) => {
+            let (mut v, mut n) = (*v, 0);
+            loop {
+                let byte = (v & 0x7f) as u8;
+                v >>= 7;
+                if v == 0 {
+                    buf[n] = byte;
+                    n += 1;
+                    break;
+                }
+                buf[n] = byte | 0x80;
+                n += 1;
+            }
+            PayloadKey::Inline(buf, n)
+        }
+        Value::Fixed32(v) => {
+            buf[..4].copy_from_slice(&v.to_le_bytes());
+            PayloadKey::Inline(buf, 4)
+        }
+        Value::Fixed64(v) => {
+            buf[..8].copy_from_slice(&v.to_le_bytes());
+            PayloadKey::Inline(buf, 8)
+        }
+        Value::Len(v) => PayloadKey::Bytes(v),
+    }
+}
+
+fn estimated_field_size(f: &Field) -> usize {
+    11 + match &f.value {
+        Value::Len(v) => v.len() + 5,
+        _ => 10,
+    }
 }
 
 /// Returns an unowned slice for the length-delimited payload starting at
@@ -352,19 +422,23 @@ fn read_fixed(bytes: &[u8], cursor: &mut usize, n: usize) -> Result<[u8; 8], Dec
     Ok(buf)
 }
 
+fn encode_field(field: &Field, out: &mut Vec<u8>) {
+    let tag = Tag::new(field.field_id, field.wire_class).to_u64();
+    encode_varint(tag, out);
+    match &field.value {
+        Value::Varint(v) => encode_varint(*v, out),
+        Value::Fixed32(v) => out.extend_from_slice(&v.to_le_bytes()),
+        Value::Fixed64(v) => out.extend_from_slice(&v.to_le_bytes()),
+        Value::Len(payload) => {
+            encode_varint(payload.len() as u64, out);
+            out.extend_from_slice(payload);
+        }
+    }
+}
+
 fn encode_message(msg: &RawMessage, out: &mut Vec<u8>) -> Result<(), EncodeError> {
     for field in &msg.fields {
-        let tag = Tag::new(field.field_id, field.wire_class).to_u64();
-        encode_varint(tag, out);
-        match &field.value {
-            Value::Varint(v) => encode_varint(*v, out),
-            Value::Fixed32(v) => out.extend_from_slice(&v.to_le_bytes()),
-            Value::Fixed64(v) => out.extend_from_slice(&v.to_le_bytes()),
-            Value::Len(payload) => {
-                encode_varint(payload.len() as u64, out);
-                out.extend_from_slice(payload);
-            }
-        }
+        encode_field(field, out);
     }
     Ok(())
 }
@@ -403,7 +477,11 @@ pub struct BorrowedField<'a> {
 
 impl<'a> BorrowedField<'a> {
     /// Constructs a borrowed field from its parts.
-    pub fn new(field_id: u32, wire_class: WireClass, value: BorrowedValue<'a>) -> BorrowedField<'a> {
+    pub fn new(
+        field_id: u32,
+        wire_class: WireClass,
+        value: BorrowedValue<'a>,
+    ) -> BorrowedField<'a> {
         BorrowedField {
             field_id,
             wire_class,
@@ -448,7 +526,10 @@ impl<'a> BorrowedMessage<'a> {
 
     /// Returns the first value for `field_id`, if present.
     pub fn get_first(&self, field_id: u32) -> Option<&BorrowedValue<'a>> {
-        self.fields.iter().find(|f| f.field_id == field_id).map(|f| &f.value)
+        self.fields
+            .iter()
+            .find(|f| f.field_id == field_id)
+            .map(|f| &f.value)
     }
 
     /// Reads a bytes field by id.
@@ -649,7 +730,11 @@ mod tests {
     }
 
     fn field_bytes(field: &Field) -> Vec<u8> {
-        RawMessage { fields: vec![field.clone()] }.encode().unwrap()
+        RawMessage {
+            fields: vec![field.clone()],
+        }
+        .encode()
+        .unwrap()
     }
 
     #[test]
@@ -744,7 +829,11 @@ mod tests {
         // Map field 5 with string keys: entries out of order on the wire.
         let entry = |k: &str, v: u64| -> Field {
             let mut e = RawMessage::new();
-            e.push(Field::new(1, WireClass::Len, Value::Len(k.as_bytes().to_vec())));
+            e.push(Field::new(
+                1,
+                WireClass::Len,
+                Value::Len(k.as_bytes().to_vec()),
+            ));
             e.push(Field::new(2, WireClass::Varint, Value::Varint(v)));
             Field::new(5, WireClass::Len, Value::Len(e.encode().unwrap()))
         };

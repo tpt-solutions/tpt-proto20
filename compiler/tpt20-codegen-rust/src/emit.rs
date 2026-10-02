@@ -26,21 +26,61 @@ struct MsgCtx {
     map_ids: Vec<u32>,
 }
 
+mod services;
+
 pub(crate) struct Emitter<'a> {
     pkg: &'a ir::PackageIr,
     opts: &'a CodegenOptions,
     model: Model,
     out: String,
+    /// `(owner message, field id)` of singular message fields (and oneof
+    /// message members) that are part of a type cycle and must be boxed.
+    boxed: std::collections::HashSet<(String, u32)>,
+    /// Flat name of the message currently being emitted.
+    cur_owner: String,
+    /// Messages whose borrowed view really borrows from the input (a string
+    /// or bytes value somewhere in it, directly or via nested views). Views
+    /// outside this set carry the lifetime only through a marker field.
+    borrowing: std::collections::HashSet<String>,
 }
 
 impl<'a> Emitter<'a> {
     pub(crate) fn new(pkg: &'a ir::PackageIr, opts: &'a CodegenOptions) -> Emitter<'a> {
         let model = Model::build(pkg);
+        let boxed = compute_boxed(pkg, &model);
+        let borrowing = compute_borrowing(pkg, &model);
         Emitter {
             pkg,
             opts,
             model,
             out: String::new(),
+            boxed,
+            cur_owner: String::new(),
+            borrowing,
+        }
+    }
+
+    /// Whether the singular message field `id` of the current message needs
+    /// `Box` indirection (recursive types would otherwise have infinite size).
+    fn is_boxed(&self, id: u32) -> bool {
+        self.boxed.contains(&(self.cur_owner.clone(), id))
+    }
+
+    /// `Box<ty>` when field `id` of the current message is boxed, else `ty`.
+    fn boxed_ty(&self, id: u32, ty: &str) -> String {
+        if self.is_boxed(id) {
+            format!("Box<{ty}>")
+        } else {
+            ty.to_string()
+        }
+    }
+
+    /// `Box::new(expr)` when field `id` of the current message is boxed.
+    fn boxed_expr(&self, id: u32, expr: &str) -> String {
+        if self.is_boxed(id) {
+            format!("Box::new({expr})")
+        } else {
+            expr.to_string()
         }
     }
 
@@ -55,12 +95,15 @@ impl<'a> Emitter<'a> {
             self.emit_enum(&top_scope, e);
         }
         for m in &messages {
-            self.emit_message(&top_scope, &m);
+            self.emit_message(&top_scope, m);
         }
         if self.opts.builders && !self.pkg.messages.is_empty() {
             self.emit_build_error();
         }
-        self.out
+        if self.opts.services && !self.pkg.services.is_empty() {
+            self.emit_services();
+        }
+        allow_flat_type_names(&self.out)
     }
 
     /// Resolves a type reference to its flat Rust name and kind.
@@ -77,30 +120,6 @@ impl<'a> Emitter<'a> {
             Some((flat, kind)) => (flat.to_string(), kind),
             None => ("()".to_string(), TypeKind::Message),
         }
-    }
-
-    /// Returns true if the message or any of its transitive fields borrow
-    /// string/bytes payloads, which forces the view struct to carry a lifetime.
-    fn message_needs_lifetime(&self, msg: &ir::MessageIr) -> bool {
-        fn field_needs(f: &ir::FieldIr) -> bool {
-            match &f.label {
-                ir::FieldLabelIr::Singular(t) => {
-                    model::is_scalar_path(&t.path)
-                        && matches!(t.path[0].as_str(), "string" | "bytes")
-                }
-                ir::FieldLabelIr::Repeated(t) => {
-                    model::is_scalar_path(&t.path)
-                        && matches!(t.path[0].as_str(), "string" | "bytes")
-                }
-                ir::FieldLabelIr::Map { value, .. } => {
-                    model::is_scalar_path(&value.path)
-                        && matches!(value.path[0].as_str(), "string" | "bytes")
-                }
-            }
-        }
-        msg.fields.iter().any(field_needs)
-            || msg.oneofs.iter().any(|o| o.fields.iter().any(field_needs))
-            || msg.messages.iter().any(|m| self.message_needs_lifetime(m))
     }
 
     /// Owned Rust type for a referenced type relative to `scope`.
@@ -120,40 +139,6 @@ impl<'a> Emitter<'a> {
         }
         let base = self.resolve_ref(scope, path).0;
         format!("{base}View<'a>")
-    }
-
-    fn type_needs_lifetime(&self, scope: &[String], path: &[String]) -> bool {
-        if model::is_scalar_path(path) {
-            return matches!(path[0].as_str(), "string" | "bytes");
-        }
-        if let Some(msg) = self.find_message_ir(scope, path) {
-            self.message_needs_lifetime(msg)
-        } else {
-            true
-        }
-    }
-
-    fn find_message_ir(&self, scope: &[String], path: &[String]) -> Option<&'a ir::MessageIr> {
-        if path.is_empty() {
-            return None;
-        }
-        if let Some((flat, _)) = self.model.resolve(scope, path) {
-            return self.find_by_flat_name(&self.pkg.messages, flat);
-        }
-        None
-    }
-
-    fn find_by_flat_name(&self, messages: &'a [ir::MessageIr], flat: &str) -> Option<&'a ir::MessageIr> {
-        for m in messages {
-            let self_flat = naming::flat_type_name(&[], &m.name);
-            if self_flat == flat {
-                return Some(m);
-            }
-            if let Some(nested) = self.find_by_flat_name(&m.messages, flat) {
-                return Some(nested);
-            }
-        }
-        None
     }
 
     fn header(&mut self) {
@@ -290,11 +275,25 @@ impl std::error::Error for BuildError {}
         }
     }
 
-    fn emit_oneof_enum(&mut self, scope: &[String], msg: &ir::MessageIr, o: &ir::OneofIr, view: bool) {
+    fn emit_oneof_enum(
+        &mut self,
+        scope: &[String],
+        msg: &ir::MessageIr,
+        o: &ir::OneofIr,
+        view: bool,
+    ) {
         let oty = if view {
-            format!("{}{}<'a>", naming::flat_type_name(scope, &msg.name), naming::pascal(&o.name))
+            format!(
+                "{}{}<'a>",
+                naming::flat_type_name(scope, &msg.name),
+                naming::pascal(&o.name)
+            )
         } else {
-            format!("{}{}", naming::flat_type_name(scope, &msg.name), naming::pascal(&o.name))
+            format!(
+                "{}{}",
+                naming::flat_type_name(scope, &msg.name),
+                naming::pascal(&o.name)
+            )
         };
         let mut s = String::new();
         if view {
@@ -316,7 +315,15 @@ impl std::error::Error for BuildError {}
             } else {
                 self.owned_type(scope, &t.path)
             };
-            s.push_str(&format!("    /// Field id {}.\n    {variant}({vty}),\n", mf.id));
+            let vty = if self.resolve_ref(scope, &t.path).1 == TypeKind::Message {
+                self.boxed_ty(mf.id, &vty)
+            } else {
+                vty
+            };
+            s.push_str(&format!(
+                "    /// Field id {}.\n    {variant}({vty}),\n",
+                mf.id
+            ));
         }
         s.push_str("}\n");
         self.out.push_str(&s);
@@ -342,10 +349,12 @@ impl std::error::Error for BuildError {}
             if v.alias {
                 continue; // Aliases stay representable by number, not variant.
             }
-            let variant = naming::sanitize_ident(&naming::pascal(&v.name));
+            let variant = naming::enum_variant(&v.name);
             if e.open {
-                self.out
-                    .push_str(&format!("    /// Value `{}` ({}).\n    {variant},\n", v.name, v.number));
+                self.out.push_str(&format!(
+                    "    /// Value `{}` ({}).\n    {variant},\n",
+                    v.name, v.number
+                ));
             } else {
                 self.out.push_str(&format!(
                     "    /// Value `{}` ({}).\n    {variant} = {},\n",
@@ -392,7 +401,7 @@ impl Default for {flat} {{
                         "            {} => {}::{},\n",
                         v.number,
                         flat,
-                        naming::sanitize_ident(&naming::pascal(&v.name))
+                        naming::enum_variant(&v.name)
                     ))
                     .collect::<String>(),
                 to_arms = e
@@ -401,7 +410,7 @@ impl Default for {flat} {{
                     .filter(|v| !v.alias)
                     .map(|v| format!(
                         "            Self::{} => {},\n",
-                        naming::sanitize_ident(&naming::pascal(&v.name)),
+                        naming::enum_variant(&v.name),
                         v.number
                     ))
                     .collect::<String>(),
@@ -435,7 +444,7 @@ impl Default for {flat} {{
                         "            {} => Ok({}::{}),\n",
                         v.number,
                         flat,
-                        naming::sanitize_ident(&naming::pascal(&v.name))
+                        naming::enum_variant(&v.name)
                     ))
                     .collect::<String>(),
             ));
@@ -447,14 +456,11 @@ impl Default for {flat} {{
                 .iter()
                 .find(|v| !v.alias && v.number == default_number)
                 .or_else(|| e.values.iter().find(|v| !v.alias))
-                .map(|v| naming::sanitize_ident(&naming::pascal(&v.name)))
+                .map(|v| naming::enum_variant(&v.name))
                 .unwrap_or_else(|| "_".to_string());
-            let needle = format!(
-                "Self::from_i32({default_number}).unwrap_or_default_or_first()"
-            );
-            let replacement = format!(
-                "Self::from_i32({default_number}).unwrap_or(Self::{first_variant})"
-            );
+            let needle = format!("Self::from_i32({default_number}).unwrap_or_default_or_first()");
+            let replacement =
+                format!("Self::from_i32({default_number}).unwrap_or(Self::{first_variant})");
             self.out = self.out.replacen(&needle, &replacement, 1);
         }
 
@@ -467,8 +473,8 @@ impl Default for {flat} {{
             .filter(|v| !v.alias)
             .map(|v| {
                 format!(
-"            {flat}::{} => __json::Value::String({:?}.to_string()),\n",
-                    naming::sanitize_ident(&naming::pascal(&v.name)),
+                    "            {flat}::{} => __json::Value::String({:?}.to_string()),\n",
+                    naming::enum_variant(&v.name),
                     v.name
                 )
             })
@@ -488,9 +494,9 @@ impl Default for {flat} {{
             .filter(|v| !v.alias)
             .map(|v| {
                 format!(
-"                {:?} => Ok({flat}::{}),\n",
+                    "                {:?} => Ok({flat}::{}),\n",
                     v.name,
-                    naming::sanitize_ident(&naming::pascal(&v.name))
+                    naming::enum_variant(&v.name)
                 )
             })
             .collect::<String>();
@@ -510,6 +516,7 @@ impl Default for {flat} {{
     fn emit_message(&mut self, scope: &[String], msg: &ir::MessageIr) {
         let ctx = self.msg_ctx(scope, msg);
         let inner_scope = ctx.scope.clone();
+        self.cur_owner = ctx.flat.clone();
 
         // ---- Owned struct -------------------------------------------------
         let mut s = String::new();
@@ -537,7 +544,7 @@ impl Default for {flat} {{
         // ---- Nested declarations ---------------------------------------------
         let enums = msg.enums.clone();
         for e in &enums {
-            self.emit_enum(&inner_scope, &e);
+            self.emit_enum(&inner_scope, e);
         }
         let messages = msg.messages.clone();
         for m in &messages {
@@ -579,7 +586,7 @@ impl Default for {flat} {{
                 let kind = self.resolve_ref(scope, &t.path).1;
                 let base = self.owned_type(scope, &t.path);
                 match kind {
-                    TypeKind::Message => format!("Option<{base}>"),
+                    TypeKind::Message => format!("Option<{}>", self.boxed_ty(f.id, &base)),
                     _ => match f.presence {
                         ir::Presence::Explicit => format!("Option<{base}>"),
                         ir::Presence::Implicit => base,
@@ -625,7 +632,10 @@ impl Default for {flat} {{
             .map(|g| {
                 format!(
                     "&[{}]",
-                    g.iter().map(|i| format!("{i}u32")).collect::<Vec<_>>().join(", ")
+                    g.iter()
+                        .map(|i| format!("{i}u32"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             })
             .collect::<Vec<_>>()
@@ -637,7 +647,7 @@ impl Default for {flat} {{
             .collect::<Vec<_>>()
             .join(", ");
         b.push_str(&format!(
-r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
+            r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
     pub fn encode(&self) -> Vec<u8> {{
         self.to_raw().encode().unwrap_or_default()
     }}
@@ -685,8 +695,7 @@ r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
                                     ));
                                 }
                                 Implicit => {
-                                    let cond =
-                                        Self::skip_cond(&t.path[0], "v");
+                                    let cond = Self::skip_cond(&t.path[0], "v");
                                     b.push_str(&format!(
 "        let v = &self.{fname};\n        if {cond} {{\n            raw.push(__core::Field::new({id}, {class}, {enc}));\n        }}\n",
                                         id = f.id
@@ -698,11 +707,11 @@ r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
                             let cls = class_name(crate::WireClass::Varint);
                             match f.presence {
                                 Explicit => b.push_str(&format!(
-"        if let Some(v) = &self.{fname} {{\n            raw.push(__core::Field::new({id}, {cls}, __core::Value::Varint((v.to_i32() as u64))));\n        }}\n",
+"        if let Some(v) = &self.{fname} {{\n            raw.push(__core::Field::new({id}, {cls}, __core::Value::Varint(v.to_i32() as u64)));\n        }}\n",
                                     id = f.id
                                 )),
                                 Implicit => b.push_str(&format!(
-"        if self.{fname}.to_i32() != 0 {{\n            raw.push(__core::Field::new({id}, {cls}, __core::Value::Varint((self.{fname}.to_i32() as u64))));\n        }}\n",
+"        if self.{fname}.to_i32() != 0 {{\n            raw.push(__core::Field::new({id}, {cls}, __core::Value::Varint(self.{fname}.to_i32() as u64)));\n        }}\n",
                                     id = f.id
                                 )),
                             }
@@ -735,7 +744,9 @@ r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
         b: &mut String,
     ) {
         let id = f.id;
-        let kind = self.resolve_ref(scope, f.label.unwrap_type().path.as_slice()).1;
+        let kind = self
+            .resolve_ref(scope, f.label.unwrap_type().path.as_slice())
+            .1;
         match kind {
             TypeKind::Scalar(info) => match info.pack {
                 PackKind::NotPackable => {
@@ -779,10 +790,12 @@ r#"    /// Encodes to the native binary wire format (spec \u{{a7}}9).
         let kenc = expr::enc_value(key_scalar, "k");
         let vkind = self.resolve_ref(scope, &value.path).1;
         let (vclass, venc) = match vkind {
-            TypeKind::Scalar(info) => (class_name(info.class), expr::enc_value(&value.path[0], "v")),
+            TypeKind::Scalar(info) => {
+                (class_name(info.class), expr::enc_value(&value.path[0], "v"))
+            }
             TypeKind::Enum { .. } => (
                 class_name(crate::WireClass::Varint),
-                "__core::Value::Varint((v.to_i32() as u64))".to_string(),
+                "__core::Value::Varint(v.to_i32() as u64)".to_string(),
             ),
             TypeKind::Message => (
                 class_name(crate::WireClass::Len),
@@ -843,7 +856,7 @@ r#"        for (k, v) in &self.{fname} {{
                 )
             }
             TypeKind::Enum { .. } => format!(
-"            Some({oneof_ty}::{variant}(v)) => raw.push(__core::Field::new({}, {}, __core::Value::Varint((v.to_i32() as u64)))),\n",
+"            Some({oneof_ty}::{variant}(v)) => raw.push(__core::Field::new({}, {}, __core::Value::Varint(v.to_i32() as u64))),\n",
                 mf.id,
                 class_name(crate::WireClass::Varint),
             ),
@@ -884,9 +897,9 @@ r#"        for (k, v) in &self.{fname} {{
             "        let raw = __core::RawMessage::decode_filtered(\n            bytes,\n            limits,\n            __core::UnknownFieldPolicy::Preserve,\n            &|id| Self::KNOWN_IDS.contains(&id),\n        )?;\n",
         );
         b.push_str("        let mut out_msg = Self::default();\n");
-        b.push_str("        for field in &raw.fields {\n");
+        b.push_str("        for field in raw.fields {\n");
         b.push_str("            if !Self::KNOWN_IDS.contains(&field.field_id) {\n");
-        b.push_str("                out_msg.unknown_fields.push(field.clone());\n                continue;\n            }\n");
+        b.push_str("                out_msg.unknown_fields.push(field);\n                continue;\n            }\n");
         b.push_str("            match (field.field_id, field.wire_class) {\n");
         b.push_str(&arms);
         b.push_str("                _ => {\n                    return Err(__core::DecodeError::WireClassMismatch {\n                        field_id: field.field_id,\n                    });\n                }\n");
@@ -897,7 +910,9 @@ r#"        for (k, v) in &self.{fname} {{
         b.push_str(
             "    /// Decodes with the default conservative limits.\n    pub fn decode(bytes: &[u8]) -> Result<Self, __core::DecodeError> {\n        Self::decode_inner(bytes, &__core::DecoderLimits::default(), 1)\n    }\n\n",
         );
-        b.push_str("    /// Borrows over `bytes`: zero-copy strings/bytes, nested views recursive.\n");
+        b.push_str(
+            "    /// Borrows over `bytes`: zero-copy strings/bytes, nested views recursive.\n",
+        );
         b.push_str("    pub fn decode_borrowed(bytes: &[u8]) -> Result<");
         b.push_str(&view);
         b.push_str("<'_>, __core::DecodeError> {\n        ");
@@ -948,34 +963,36 @@ r#"        for (k, v) in &self.{fname} {{
                             assign
                         )
                     }
-                     TypeKind::Enum { open } => {
-                         let ety = self.resolve_ref(scope, &t.path).0;
-                         let val = if open {
-                             format!("{ety}::from_i32(n)")
-                         } else {
-                             format!("{ety}::from_i32(n)?")
-                         };
-                         let assign = if f.presence == ir::Presence::Explicit {
-                             format!("{target}.{fname} = Some({val});")
-                         } else {
-                             format!("{target}.{fname} = {val};")
-                         };
-                         format!(
+                    TypeKind::Enum { open } => {
+                        let ety = self.resolve_ref(scope, &t.path).0;
+                        let val = if open {
+                            format!("{ety}::from_i32(n)")
+                        } else {
+                            format!("{ety}::from_i32(n)?")
+                        };
+                        let assign = if f.presence == ir::Presence::Explicit {
+                            format!("{target}.{fname} = Some({val});")
+                        } else {
+                            format!("{target}.{fname} = {val};")
+                        };
+                        format!(
  "                ({}, {}) => {{\n                    let n = __support::wire_i32(&field.value)?;\n                    {}\n                }}\n",
                              f.id,
                              class_name(crate::WireClass::Varint),
                              assign
                          )
-                     }
-                       TypeKind::Message => {
-                           let ty = self.owned_type(scope, &t.path);
-                           let method = format!("{ty}::decode_inner");
-                           format!(
-   "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    {target}.{fname} = Some({method}(sub, limits, depth + 1)?);\n                }}\n",
+                    }
+                    TypeKind::Message => {
+                        let ty = self.owned_type(scope, &t.path);
+                        let method = format!("{ty}::decode_inner");
+                        let value =
+                            self.boxed_expr(f.id, &format!("{method}(sub, limits, depth + 1)?"));
+                        format!(
+   "                ({}, {}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    {target}.{fname} = Some({value});\n                }}\n",
                                f.id,
                                class_name(crate::WireClass::Len),
                            )
-                       }
+                    }
                 }
             }
             FieldLabelIr::Repeated(t) => {
@@ -989,11 +1006,7 @@ r#"        for (k, v) in &self.{fname} {{
 
     /// Conversion snippet from wire i32 `n` into an enum assignment.
     #[allow(dead_code)]
-    fn enum_conv(
-        _explicit: bool,
-        _open: bool,
-        _ty: &str,
-    ) -> String {
+    fn enum_conv(_explicit: bool, _open: bool, _ty: &str) -> String {
         String::new()
     }
 
@@ -1007,7 +1020,9 @@ r#"        for (k, v) in &self.{fname} {{
         _view: bool,
     ) -> String {
         let id = f.id;
-        let kind = self.resolve_ref(scope, f.label.unwrap_type().path.as_slice()).1;
+        let kind = self
+            .resolve_ref(scope, f.label.unwrap_type().path.as_slice())
+            .1;
         match kind {
             TypeKind::Scalar(info) => {
                 let (single_reader, packed_reader) = match info.pack {
@@ -1041,7 +1056,9 @@ r#"        for (k, v) in &self.{fname} {{
                 )
             }
             TypeKind::Enum { open } => {
-                let ety = self.resolve_ref(scope, f.label.unwrap_type().path.as_slice()).0;
+                let ety = self
+                    .resolve_ref(scope, f.label.unwrap_type().path.as_slice())
+                    .0;
                 if open {
                     format!(
  "                ({id}, {varint}) => {{\n                    let n = __support::wire_i32(&field.value)?;\n                    out_msg.{fname}.push({ety}::from_i32(n));\n                }}\n                ({id}, {len}) => {{\n                    let words = __scalar::decode_packed_varints(&field.value, limits)?;\n                    out_msg.{fname}.extend(words.into_iter().map(|x| {ety}::from_i32(x as i32)));\n                    limits.check_repeated_entries(out_msg.{fname}.len())?;\n                }}\n",
@@ -1056,14 +1073,14 @@ r#"        for (k, v) in &self.{fname} {{
                     )
                 }
             }
-               TypeKind::Message => {
-                   let ty = self.owned_type(scope, f.label.unwrap_type().path.as_slice());
-                   let method = format!("{ty}::decode_inner");
-                   format!(
+            TypeKind::Message => {
+                let ty = self.owned_type(scope, f.label.unwrap_type().path.as_slice());
+                let method = format!("{ty}::decode_inner");
+                format!(
    "                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes(&field.value)?;\n                    out_msg.{fname}.push({method}(sub, limits, depth + 1)?);\n                }}\n",
                        len = class_name(crate::WireClass::Len),
                    )
-               }
+            }
         }
     }
 
@@ -1079,7 +1096,7 @@ r#"        for (k, v) in &self.{fname} {{
         view: bool,
     ) -> String {
         let kinfo = scalar_info(key_scalar).expect("map keys must be scalar");
-        let kdec = expr::dec_owned(key_scalar, "&ef.value", "limits");
+        let kdec = expr::dec_owned_from_borrowed(key_scalar, "&ef.value", "limits");
         let vkind = self.resolve_ref(scope, &value.path).1;
         let vt = if view {
             if model::is_scalar_path(&value.path)
@@ -1095,51 +1112,39 @@ r#"        for (k, v) in &self.{fname} {{
         let vclass = model::Model::wire_class(vkind);
         let vexpr = match vkind {
             TypeKind::Scalar(_) => {
-                let d = expr::dec_owned(&value.path[0], "&ef.value", "limits");
+                let d = expr::dec_owned_from_borrowed(&value.path[0], "&ef.value", "limits");
                 format!("{d}?")
             }
             TypeKind::Enum { open } => {
                 let ety = self.resolve_ref(scope, &value.path).0;
                 if open {
-                    format!("{ety}::from_i32(__support::wire_i32(&ef.value)?)")
+                    format!("{ety}::from_i32(__support::wire_i32_borrowed(&ef.value)?)")
                 } else {
-                    format!("{ety}::from_i32(__support::wire_i32(&ef.value)?)?")
+                    format!("{ety}::from_i32(__support::wire_i32_borrowed(&ef.value)?)?")
                 }
             }
-              TypeKind::Message => {
-                  let ty = if view {
-                      self.view_type(scope, &value.path)
-                  } else {
-                      self.owned_type(scope, &value.path)
-                  };
-                  let method = if view {
-                      turbo_call(&ty, "decode_inner")
-                  } else {
-                      format!("{ty}::decode_inner")
-                  };
-                  let bytes_dec = if view {
-                      "__scalar::decode_bytes_borrowed(&ef.value)"
-                  } else {
-                      "__scalar::decode_bytes(&ef.value)"
-                  };
-                  format!(
-                      "{method}({bytes_dec}, limits, depth + 1)?",
-                      bytes_dec = bytes_dec,
-                  )
-              }
+            TypeKind::Message => {
+                let ty = if view {
+                    self.view_type(scope, &value.path)
+                } else {
+                    self.owned_type(scope, &value.path)
+                };
+                let method = if view {
+                    turbo_call(&ty, "decode_inner")
+                } else {
+                    format!("{ty}::decode_inner")
+                };
+                format!("{method}(__scalar::decode_bytes_borrowed(&ef.value)?, limits, depth + 1)?")
+            }
         };
-        let kt = if view {
-            self.owned_type(&[], &[key_scalar.to_string()])
-        } else {
-            self.owned_type(&[], &[key_scalar.to_string()])
-        };
+        let kt = self.owned_type(&[], &[key_scalar.to_string()]);
         format!(
             r#"                ({id}, {len}) => {{
-                     let entry_bytes = __scalar::decode_bytes_borrowed(&field.value)?;
-                     let entry = __core::RawMessage::decode(
+                     let entry_bytes = __scalar::decode_bytes(&field.value)?;
+                     let entry = __core::decode_borrowed(
                          entry_bytes,
                          limits,
-                         __core::UnknownFieldPolicy::Preserve,
+                         __core::UnknownFieldPolicy::Discard,
                      )?;
                      let mut k: Option<{kt}> = None;
                      let mut v: Option<{vt}> = None;
@@ -1154,12 +1159,10 @@ r#"        for (k, v) in &self.{fname} {{
                              _ => {{}}
                          }}
                      }}
-                      match (k, v) {{
-                          (Some(k), Some(v)) => {{
-                              out_msg.{fname}.{map_push}({map_args});
-                          }}
-                          _ => return Err(__core::DecodeError::MalformedMapEntry),
-                      }}
+                      // Absent key/value take their defaults (protobuf semantics).
+                      let k = k.unwrap_or_default();
+                      {vfill}
+                      out_msg.{fname}.{map_push}({map_args});
                       limits.check_map_entries(out_msg.{fname}.len())?;
                   }}
                 "#,
@@ -1167,6 +1170,7 @@ r#"        for (k, v) in &self.{fname} {{
             len = class_name(crate::WireClass::Len),
             kt = kt,
             vt = vt,
+            vfill = map_value_fill(vkind, &vexpr),
             kclass = class_name(kinfo.class),
             vclass = class_name(vclass.unwrap_or(crate::WireClass::Len)),
             map_push = if view { "push" } else { "insert" },
@@ -1215,48 +1219,61 @@ r#"        for (k, v) in &self.{fname} {{
                     class_name(info.class),
                 )
             }
-             TypeKind::Enum { open } => {
-                 let ety = self.resolve_ref(scope, &t.path).0;
-                 let conv = if open {
-                     format!("{ety}::from_i32(n)")
-                 } else {
-                     format!("{ety}::from_i32(n)?")
-                 };
-                 let wire_fn = if view {
-                     "__support::wire_i32_borrowed(&field.value)"
-                 } else {
-                     "__support::wire_i32(&field.value)"
-                 };
-                 format!(
+            TypeKind::Enum { open } => {
+                let ety = self.resolve_ref(scope, &t.path).0;
+                let conv = if open {
+                    format!("{ety}::from_i32(n)")
+                } else {
+                    format!("{ety}::from_i32(n)?")
+                };
+                let wire_fn = if view {
+                    "__support::wire_i32_borrowed(&field.value)"
+                } else {
+                    "__support::wire_i32(&field.value)"
+                };
+                format!(
  "                ({}, {}) => {{\n                    let n = {wire_fn}?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({conv}));\n                }}\n",
                      mf.id,
                      class_name(crate::WireClass::Varint),
                      wire_fn = wire_fn,
                  )
-             }
-             TypeKind::Message => {
-                 let mty = if view {
-                     self.view_type(scope, &t.path)
-                 } else {
-                     self.owned_type(scope, &t.path)
-                 };
-                 let method = if view {
-                     turbo_call(&mty, "decode_inner")
-                 } else {
-                     format!("{mty}::decode_inner")
-                 };
-                 let bytes_dec = if view {
-                     "__scalar::decode_bytes_borrowed(&field.value)"
-                 } else {
-                     "__scalar::decode_bytes(&field.value)"
-                 };
-                 format!(
-   "                ({}, {}) => {{\n                    let sub = {bytes_dec}?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({method}(sub, limits, depth + 1)?));\n                }}\n",
+            }
+            TypeKind::Message => {
+                let mty = if view {
+                    self.view_type(scope, &t.path)
+                } else {
+                    self.owned_type(scope, &t.path)
+                };
+                let method = if view {
+                    turbo_call(&mty, "decode_inner")
+                } else {
+                    format!("{mty}::decode_inner")
+                };
+                let bytes_dec = if view {
+                    "__scalar::decode_bytes_borrowed(&field.value)"
+                } else {
+                    "__scalar::decode_bytes(&field.value)"
+                };
+                let value = self.boxed_expr(mf.id, &format!("{method}(sub, limits, depth + 1)?"));
+                format!(
+   "                ({}, {}) => {{\n                    let sub = {bytes_dec}?;\n                    out_msg.{oname} = Some({ty_name}::{variant}({value}));\n                }}\n",
                      mf.id,
                      class_name(crate::WireClass::Len),
                      bytes_dec = bytes_dec,
                  )
-             }
+            }
+        }
+    }
+
+    /// Borrowed Rust type of a referenced type inside a view: scalars borrow,
+    /// enums stay owned (plain integers), messages become nested views.
+    fn view_value_type(&self, scope: &[String], path: &[String]) -> String {
+        if model::is_scalar_path(path) {
+            return expr::view_rust_type(path[0].as_str()).to_string();
+        }
+        match self.resolve_ref(scope, path) {
+            (_, TypeKind::Enum { .. }) => self.owned_type(scope, path),
+            (base, _) => format!("{base}View<'a>"),
         }
     }
 
@@ -1265,37 +1282,59 @@ r#"        for (k, v) in &self.{fname} {{
         let flat = format!("{}View", ctx.flat);
         let lt = "<'a>";
         let mut s = String::new();
-        s.push_str(&format!(
-            "\n/// Borrowed view over `{}` bytes (spec §11.2): strings/bytes copy into owned\n/// buffers. Numerics copy. Unknown fields are dropped here (use owned decoding to\n/// preserve them).\n#[derive(Debug, Clone, PartialEq)]\npub struct {flat}{lt} {{\n",
-            ctx.flat
-        ));
-        for f in &msg.fields {
-            let fname = naming::field_ident(&f.name);
-            let ty = self.view_field_type(scope, f);
-            s.push_str(&format!("    pub {fname}: {ty},\n"));
-        }
-        for o in &msg.oneofs {
-            let oname = naming::field_ident(&o.name);
-            let oty = format!("{}{}View{lt}", ctx.flat, naming::pascal(&o.name));
-            s.push_str(&format!("    pub {oname}: Option<{oty}>,\n"));
-        }
-        s.push_str("}\n");
+        let mut body = String::new();
+        let borrows = self.borrowing.contains(&ctx.flat);
 
-        // Oneof view enum.
+        // Oneof view enums are emitted first so the parent knows whether they
+        // carry the lifetime.
+        let mut oneof_types: Vec<(String, bool)> = Vec::new();
+        let mut oneof_defs = String::new();
         for o in &msg.oneofs {
             let oty = format!("{}{}View", ctx.flat, naming::pascal(&o.name));
-            s.push_str(&format!(
-"\n/// Borrowed oneof view for `{}`.\n#[derive(Debug, Clone, PartialEq)]\npub enum {oty}{lt} {{\n",
-                o.name
-            ));
+            let mut variants = String::new();
+            let mut has_lt = false;
             for mf in &o.fields {
                 let variant = naming::sanitize_ident(&naming::pascal(&mf.name));
                 let t = mf.label.unwrap_type();
-                let vty = self.view_type(scope, &t.path);
-                s.push_str(&format!("    /// Field id {}.\n    {variant}({vty}),\n", mf.id));
+                let vty = self.view_value_type(scope, &t.path);
+                let vty = if self.resolve_ref(scope, &t.path).1 == TypeKind::Message {
+                    self.boxed_ty(mf.id, &vty)
+                } else {
+                    vty
+                };
+                has_lt |= vty.contains("'a");
+                variants.push_str(&format!(
+                    "    /// Field id {}.\n    {variant}({vty}),\n",
+                    mf.id
+                ));
             }
-            s.push_str("}\n");
+            let generics = if has_lt { lt } else { "" };
+            oneof_defs.push_str(&format!(
+"\n/// Borrowed oneof view for `{}`.\n#[derive(Debug, Clone, PartialEq)]\npub enum {oty}{generics} {{\n{variants}}}\n",
+                o.name
+            ));
+            oneof_types.push((format!("{oty}{generics}"), has_lt));
         }
+
+        for f in &msg.fields {
+            let fname = naming::field_ident(&f.name);
+            let ty = self.view_field_type(scope, f);
+            body.push_str(&format!("    pub {fname}: {ty},\n"));
+        }
+        for (o, (oty, _)) in msg.oneofs.iter().zip(&oneof_types) {
+            let oname = naming::field_ident(&o.name);
+            body.push_str(&format!("    pub {oname}: Option<{oty}>,\n"));
+        }
+        if !borrows {
+            body.push_str(
+                "    #[doc(hidden)]\n    pub _marker: std::marker::PhantomData<&'a ()>,\n",
+            );
+        }
+        s.push_str(&format!(
+            "\n/// Borrowed view over `{}` bytes (spec §11.2): strings/bytes reference the\n/// source buffer without copying. Unknown fields are dropped here (use owned\n/// decoding to preserve them).\n#[derive(Debug, Clone, PartialEq)]\npub struct {flat}{lt} {{\n{body}}}\n",
+            ctx.flat
+        ));
+        s.push_str(&oneof_defs);
 
         // Decoder impl.
         let known = ctx
@@ -1304,25 +1343,37 @@ r#"        for (k, v) in &self.{fname} {{
             .map(|i| i.to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        let bytes_lt = "'a";
+        let mut inits = self.view_inits(scope, msg);
+        if !borrows {
+            inits.push_str("                _marker: std::marker::PhantomData,\n");
+        }
+        let mut arms = String::new();
+        for f in &msg.fields {
+            arms.push_str(&self.view_field_arm(scope, f));
+        }
+        for o in &msg.oneofs {
+            for mf in &o.fields {
+                arms.push_str(&self.oneof_decode_arm(scope, &ctx.flat, o, mf, true));
+            }
+        }
         s.push_str(&format!(
             r#"impl{lt} {flat}{lt} {{
     const KNOWN_IDS: &'static [u32] = &[{known}];
 
     fn decode_inner(
-        bytes: &{bytes_lt} [u8],
+        bytes: &'a [u8],
         limits: &__core::DecoderLimits,
         depth: usize,
     ) -> Result<Self, __core::DecodeError> {{
         limits.check_depth(depth)?;
-        let raw = __core::RawMessage::decode_filtered(
+        let raw = __core::decode_borrowed_filtered(
             bytes,
             limits,
             __core::UnknownFieldPolicy::Discard,
             &|id| Self::KNOWN_IDS.contains(&id),
         )?;
         let mut out_msg = Self {{
- {inits}        }};
+{inits}        }};
         for field in &raw.fields {{
             match (field.field_id, field.wire_class) {{
 {arms}                _ => {{
@@ -1337,50 +1388,183 @@ r#"        for (k, v) in &self.{fname} {{
 
     /// Decodes a view with explicit resource limits.
     pub fn decode_with_limits(
-        bytes: &{bytes_lt} [u8],
+        bytes: &'a [u8],
         limits: &__core::DecoderLimits,
     ) -> Result<Self, __core::DecodeError> {{
         Self::decode_inner(bytes, limits, 1)
     }}
 }}
-"#,
-            inits = self.view_inits(scope, msg),
-            arms = self.decode_arms(scope, msg, &ctx.flat, true),
+"#
         ));
         self.out.push_str(&s);
+    }
+
+    /// Match arms decoding one regular field into a view.
+    fn view_field_arm(&self, scope: &[String], f: &ir::FieldIr) -> String {
+        use ir::FieldLabelIr;
+        let fname = naming::field_ident(&f.name);
+        let len = class_name(crate::WireClass::Len);
+        let varint = class_name(crate::WireClass::Varint);
+        let id = f.id;
+        match &f.label {
+            FieldLabelIr::Singular(t) => match self.resolve_ref(scope, &t.path).1 {
+                TypeKind::Scalar(info) => {
+                    let dec = expr::dec_view(t.path[0].as_str(), "&field.value", "limits");
+                    let assign = match f.presence {
+                        ir::Presence::Explicit => format!("Some({dec}?)"),
+                        ir::Presence::Implicit => format!("{dec}?"),
+                    };
+                    format!(
+"                ({id}, {cls}) => {{\n                    out_msg.{fname} = {assign};\n                }}\n",
+                        cls = class_name(info.class)
+                    )
+                }
+                TypeKind::Enum { open } => {
+                    let ety = self.owned_type(scope, &t.path);
+                    let q = if open { "" } else { "?" };
+                    let val = format!("{ety}::from_i32(n){q}");
+                    let assign = if f.presence == ir::Presence::Explicit {
+                        format!("Some({val})")
+                    } else {
+                        val
+                    };
+                    format!(
+"                ({id}, {varint}) => {{\n                    let n = __support::wire_i32_borrowed(&field.value)?;\n                    out_msg.{fname} = {assign};\n                }}\n"
+                    )
+                }
+                TypeKind::Message => {
+                    let vty = self.view_value_type(scope, &t.path).replace("<'a>", "");
+                    let value = self
+                        .boxed_expr(id, &format!("{vty}::decode_inner(sub, limits, depth + 1)?"));
+                    format!(
+"                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes_borrowed(&field.value)?;\n                    out_msg.{fname} = Some({value});\n                }}\n"
+                    )
+                }
+            },
+            FieldLabelIr::Repeated(t) => {
+                let scalar = t.path[0].as_str();
+                match self.resolve_ref(scope, &t.path).1 {
+                    TypeKind::Scalar(info) => {
+                        let (single, packed) = match info.pack {
+                            PackKind::Varint => (
+                                "__scalar::decode_uint_borrowed(&field.value)?",
+                                "__scalar::decode_packed_varints_borrowed(&field.value, limits)?",
+                            ),
+                            PackKind::Fixed32 => (
+                                "__scalar::decode_fixed32_borrowed(&field.value)?",
+                                "__scalar::decode_packed_fixed32_borrowed(&field.value, limits)?",
+                            ),
+                            PackKind::Fixed64 => (
+                                "__scalar::decode_fixed64_borrowed(&field.value)?",
+                                "__scalar::decode_packed_fixed64_borrowed(&field.value, limits)?",
+                            ),
+                            PackKind::NotPackable => {
+                                let dec = expr::dec_view(scalar, "&field.value", "limits");
+                                return format!(
+"                ({id}, {len}) => {{\n                    out_msg.{fname}.push({dec}?);\n                    limits.check_repeated_entries(out_msg.{fname}.len())?;\n                }}\n"
+                                );
+                            }
+                        };
+                        let from = expr::from_wire_word(scalar, "x");
+                        format!(
+"                ({id}, {cls}) => {{\n                    let x = {single};\n                    out_msg.{fname}.push({from});\n                    limits.check_repeated_entries(out_msg.{fname}.len())?;\n                }}\n                ({id}, {len}) => {{\n                    let words = {packed};\n                    out_msg.{fname}.extend(words.into_iter().map(|x| {from}));\n                    limits.check_repeated_entries(out_msg.{fname}.len())?;\n                }}\n",
+                            cls = class_name(info.class)
+                        )
+                    }
+                    TypeKind::Enum { open } => {
+                        let ety = self.owned_type(scope, &t.path);
+                        let q = if open { "" } else { "?" };
+                        format!(
+"                ({id}, {varint}) => {{\n                    let n = __support::wire_i32_borrowed(&field.value)?;\n                    out_msg.{fname}.push({ety}::from_i32(n){q});\n                    limits.check_repeated_entries(out_msg.{fname}.len())?;\n                }}\n                ({id}, {len}) => {{\n                    let words = __scalar::decode_packed_varints_borrowed(&field.value, limits)?;\n                    for x in words {{\n                        out_msg.{fname}.push({ety}::from_i32(x as i32){q});\n                    }}\n                    limits.check_repeated_entries(out_msg.{fname}.len())?;\n                }}\n"
+                        )
+                    }
+                    TypeKind::Message => {
+                        let vty = self.view_value_type(scope, &t.path).replace("<'a>", "");
+                        format!(
+"                ({id}, {len}) => {{\n                    let sub = __scalar::decode_bytes_borrowed(&field.value)?;\n                    out_msg.{fname}.push({vty}::decode_inner(sub, limits, depth + 1)?);\n                    limits.check_repeated_entries(out_msg.{fname}.len())?;\n                }}\n"
+                        )
+                    }
+                }
+            }
+            FieldLabelIr::Map { key, value } => {
+                let key_scalar = key.path[0].as_str();
+                let kinfo = scalar_info(key_scalar).expect("map keys must be scalar");
+                let kdec = expr::dec_view(key_scalar, "&ef.value", "limits");
+                let kt = self.view_value_type(scope, &key.path);
+                let vt = self.view_value_type(scope, &value.path);
+                let vkind = self.resolve_ref(scope, &value.path).1;
+                let vclass = model::Model::wire_class(vkind).unwrap_or(crate::WireClass::Len);
+                let vexpr = match vkind {
+                    TypeKind::Scalar(_) => {
+                        format!("{}?", expr::dec_view(&value.path[0], "&ef.value", "limits"))
+                    }
+                    TypeKind::Enum { open } => {
+                        let ety = self.owned_type(scope, &value.path);
+                        let q = if open { "" } else { "?" };
+                        format!("{ety}::from_i32(__support::wire_i32_borrowed(&ef.value)?){q}")
+                    }
+                    TypeKind::Message => {
+                        let base = vt.replace("<'a>", "");
+                        format!("{base}::decode_inner(__scalar::decode_bytes_borrowed(&ef.value)?, limits, depth + 1)?")
+                    }
+                };
+                format!(
+                    r#"                ({id}, {len}) => {{
+                    let entry_bytes = __scalar::decode_bytes_borrowed(&field.value)?;
+                    let entry = __core::decode_borrowed(
+                        entry_bytes,
+                        limits,
+                        __core::UnknownFieldPolicy::Discard,
+                    )?;
+                    let mut k: Option<{kt}> = None;
+                    let mut v: Option<{vt}> = None;
+                    for ef in &entry.fields {{
+                        match (ef.field_id, ef.wire_class) {{
+                            (1, {kclass}) => {{
+                                k = Some({kdec}?);
+                            }}
+                            (2, {vclass}) => {{
+                                v = Some({vexpr});
+                            }}
+                            _ => {{}}
+                        }}
+                    }}
+                    // Absent key/value take their defaults (protobuf semantics).
+                    let k = k.unwrap_or_default();
+                    {vfill}
+                    out_msg.{fname}.push((k, v));
+                    limits.check_map_entries(out_msg.{fname}.len())?;
+                }}
+"#,
+                    kclass = class_name(kinfo.class),
+                    vclass = class_name(vclass),
+                    vfill = map_value_fill(vkind, &vexpr),
+                )
+            }
+        }
     }
 
     /// Rust type for a view struct field.
     fn view_field_type(&self, scope: &[String], f: &ir::FieldIr) -> String {
         match &f.label {
             ir::FieldLabelIr::Singular(t) => {
-                if model::is_scalar_path(&t.path)
-                    && matches!(t.path[0].as_str(), "string" | "bytes")
-                {
-                    return match f.presence {
-                        ir::Presence::Explicit => {
-                            format!("Option<{}>", self.owned_type(scope, &t.path))
-                        }
-                        ir::Presence::Implicit => self.owned_type(scope, &t.path),
-                    };
-                }
-                match f.presence {
-                    ir::Presence::Explicit => {
-                        format!("Option<{}>", self.owned_type(scope, &t.path))
-                    }
-                    ir::Presence::Implicit => self.owned_type(scope, &t.path),
+                let vt = self.view_value_type(scope, &t.path);
+                if self.resolve_ref(scope, &t.path).1 == TypeKind::Message {
+                    format!("Option<{}>", self.boxed_ty(f.id, &vt))
+                } else if f.presence == ir::Presence::Explicit {
+                    format!("Option<{vt}>")
+                } else {
+                    vt
                 }
             }
             ir::FieldLabelIr::Repeated(t) => {
-                format!("Vec<{}>", self.owned_type(scope, &t.path))
+                format!("Vec<{}>", self.view_value_type(scope, &t.path))
             }
-            ir::FieldLabelIr::Map { key, value } => {
-                format!(
-                    "Vec<({}, {})>",
-                    self.owned_type(scope, &key.path),
-                    self.owned_type(scope, &value.path)
-                )
-            }
+            ir::FieldLabelIr::Map { key, value } => format!(
+                "Vec<({}, {})>",
+                self.view_value_type(scope, &key.path),
+                self.view_value_type(scope, &value.path)
+            ),
         }
     }
 
@@ -1414,7 +1598,9 @@ r#"        for (k, v) in &self.{fname} {{
                         scalar_zero(t.path[0].as_str()).to_string()
                     }
                 }
-                ir::FieldLabelIr::Repeated(_) | ir::FieldLabelIr::Map { .. } => String::from("Vec::new()"),
+                ir::FieldLabelIr::Repeated(_) | ir::FieldLabelIr::Map { .. } => {
+                    String::from("Vec::new()")
+                }
             };
             out.push_str(&format!("                {}: {},\n", fname, init));
         }
@@ -1431,12 +1617,12 @@ r#"        for (k, v) in &self.{fname} {{
         let mut s = String::new();
         s.push_str(&format!("impl {flat} {{\n"));
         s.push_str(
-"    /// Converts to a JSON value (spec \u{a7}14.2): original field names,\n    /// 64-bit ints as strings, bytes as base64, defaults omitted.\n    pub fn to_json_value(&self) -> Result<__json::Value, __json::JsonError> {\n        let mut obj = __json::json::Map::new();\n",
+"    /// Converts to a JSON value (spec \u{a7}14.2): original field names,\n    /// 64-bit ints as strings, bytes as base64, defaults omitted.\n    pub fn to_json_value(&self) -> Result<__json::Value, __json::JsonError> {\n        self.to_json_value_with(&__json::JsonOptions::default())\n    }\n\n    /// Like [`to_json_value`](Self::to_json_value) with explicit options.\n    pub fn to_json_value_with(&self, opts: &__json::JsonOptions) -> Result<__json::Value, __json::JsonError> {\n        let _ = opts;\n        let mut obj = __json::json::Map::new();\n",
         );
         self.push_json_inserts(scope, msg, ctx, &mut s);
         self.push_json_oneof_inserts(scope, msg, ctx, &mut s);
         s.push_str(
-"        Ok(__json::Value::Object(obj))\n    }\n\n    /// Serializes to a JSON string.\n    pub fn to_json(&self) -> Result<String, __json::JsonError> {\n        let v = self.to_json_value()?;\n        __json::json::to_string(&v).map_err(Into::into)\n    }\n",
+"        Ok(__json::Value::Object(obj))\n    }\n\n    /// Serializes to a JSON string.\n    pub fn to_json(&self) -> Result<String, __json::JsonError> {\n        let v = self.to_json_value()?;\n        __json::json::to_string(&v).map_err(Into::into)\n    }\n\n    /// Serializes to a JSON string with explicit options.\n    pub fn to_json_with(&self, opts: &__json::JsonOptions) -> Result<String, __json::JsonError> {\n        let v = self.to_json_value_with(opts)?;\n        __json::json::to_string(&v).map_err(Into::into)\n    }\n",
         );
         s.push_str(&self.json_from_body(scope, msg, ctx));
         s.push_str("}\n");
@@ -1454,7 +1640,7 @@ r#"        for (k, v) in &self.{fname} {{
         use ir::FieldLabelIr;
         for f in &msg.fields {
             let fname = naming::field_ident(&f.name);
-            let name_lit = format!("{:?}", f.name);
+            let name_lit = format!("opts.key({:?}, {:?})", f.name, naming::lower_camel(&f.name));
             match &f.label {
                 FieldLabelIr::Singular(t) => {
                     let kind = self.resolve_ref(scope, &t.path).1;
@@ -1463,12 +1649,12 @@ r#"        for (k, v) in &self.{fname} {{
                             let jt = expr::json_to(t.path[0].as_str(), "v");
                             match f.presence {
                                 ir::Presence::Explicit => s.push_str(&format!(
-"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}.to_string(), {jt});\n        }}\n"
+"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}, {jt});\n        }}\n"
                                 )),
                                 ir::Presence::Implicit => {
                                     let cond = Self::skip_cond(t.path[0].as_str(), "v");
                                     s.push_str(&format!(
-"        let v = &self.{fname};\n        if {cond} {{\n            obj.insert({name_lit}.to_string(), {jt});\n        }}\n"
+"        let v = &self.{fname};\n        if opts.emit_defaults || {cond} {{\n            obj.insert({name_lit}, {jt});\n        }}\n"
                                     ));
                                 }
                             }
@@ -1477,29 +1663,38 @@ r#"        for (k, v) in &self.{fname} {{
                             let ety = self.resolve_ref(scope, &t.path).0;
                             match f.presence {
                                 ir::Presence::Explicit => s.push_str(&format!(
-"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}.to_string(), {ety}::json_name(v));\n        }}\n"
+"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}, {ety}::json_name(v));\n        }}\n"
                                 )),
                                 ir::Presence::Implicit => s.push_str(&format!(
-"        if self.{fname}.to_i32() != 0 {{\n            obj.insert({name_lit}.to_string(), {ety}::json_name(&self.{fname}));\n        }}\n"
+"        if opts.emit_defaults || self.{fname}.to_i32() != 0 {{\n            obj.insert({name_lit}, {ety}::json_name(&self.{fname}));\n        }}\n"
                                 )),
                             }
                         }
                         TypeKind::Message => s.push_str(&format!(
-"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}.to_string(), v.to_json_value()?);\n        }}\n"
+"        if let Some(v) = &self.{fname} {{\n            obj.insert({name_lit}, v.to_json_value_with(opts)?);\n        }}\n"
                         )),
                     }
                 }
                 FieldLabelIr::Repeated(t) => {
-                    let mapper = self.json_mapper(scope, t.path[0].as_str(), t);
+                    let mapper = result_expr(&self.json_mapper(scope, t.path[0].as_str(), t));
                     s.push_str(&format!(
-"        if !self.{fname}.is_empty() {{\n            let arr: Vec<__json::Value> = self.{fname}.iter().map(|v| {mapper}).collect();\n            obj.insert({name_lit}.to_string(), __json::Value::Array(arr));\n        }}\n"
+"        if opts.emit_defaults || !self.{fname}.is_empty() {{\n            let arr = self.{fname}.iter().map(|v| {mapper}).collect::<Result<Vec<__json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}, __json::Value::Array(arr));\n        }}\n"
                     ));
                 }
                 FieldLabelIr::Map { key, value } => {
-                    let vmapper = self.json_mapper(scope, value.path[0].as_str(), value);
                     let kstr = key_to_string(key.path[0].as_str(), "k");
+                    let vmapper = match self
+                        .json_mapper(scope, value.path[0].as_str(), value)
+                        .strip_suffix('?')
+                    {
+                        Some(fallible) => format!("{fallible}.map(|x| ({kstr}, x))"),
+                        None => format!(
+                            "Ok::<_, __json::JsonError>(({kstr}, {}))",
+                            self.json_mapper(scope, value.path[0].as_str(), value)
+                        ),
+                    };
                     s.push_str(&format!(
-"        if !self.{fname}.is_empty() {{\n            let mobj: __json::json::Map<String, __json::Value> = self\n                .{fname}\n                .iter()\n                .map(|(k, v)| ({kstr}, {vmapper}))\n                .collect();\n            obj.insert({name_lit}.to_string(), __json::Value::Object(mobj));\n        }}\n"
+"        if opts.emit_defaults || !self.{fname}.is_empty() {{\n            let mobj = self\n                .{fname}\n                .iter()\n                .map(|(k, v)| {vmapper})\n                .collect::<Result<__json::json::Map<String, __json::Value>, __json::JsonError>>()?;\n            obj.insert({name_lit}, __json::Value::Object(mobj));\n        }}\n"
                     ));
                 }
             }
@@ -1510,8 +1705,10 @@ r#"        for (k, v) in &self.{fname} {{
     fn json_mapper(&self, scope: &[String], scalar: &str, t: &ir::TypeRefIr) -> String {
         match self.resolve_ref(scope, &t.path).1 {
             TypeKind::Scalar(_) => expr::json_to(scalar, "v"),
-            TypeKind::Enum { .. } => format!("{}::json_name(v)", self.resolve_ref(scope, &t.path).0),
-            TypeKind::Message => "v.to_json_value()?".to_string(),
+            TypeKind::Enum { .. } => {
+                format!("{}::json_name(v)", self.resolve_ref(scope, &t.path).0)
+            }
+            TypeKind::Message => "v.to_json_value_with(opts)?".to_string(),
         }
     }
 
@@ -1532,8 +1729,9 @@ r#"        for (k, v) in &self.{fname} {{
                 let t = mf.label.unwrap_type();
                 let val_expr = self.json_mapper(scope, t.path[0].as_str(), t);
                 s.push_str(&format!(
-"            Some({oty}::{variant}(v)) => {{\n                obj.insert({:?}.to_string(), {val_expr});\n            }}\n",
-                    mf.name
+"            Some({oty}::{variant}(v)) => {{\n                obj.insert(opts.key({:?}, {:?}), {val_expr});\n            }}\n",
+                    mf.name,
+                    naming::lower_camel(&mf.name)
                 ));
             }
             s.push_str("            None => {}\n        }\n");
@@ -1545,7 +1743,7 @@ r#"        for (k, v) in &self.{fname} {{
         use ir::FieldLabelIr;
         let mut b = String::new();
         b.push_str(
-"    /// Parses from a parsed JSON value.\n    pub fn from_json_value(v: &__json::Value) -> Result<Self, __json::JsonError> {\n        let obj = v\n            .as_object()\n            .ok_or(__json::JsonError::TypeMismatch { expected: \"object\" })?;\n        let mut out_msg = Self::default();\n",
+"    /// Parses from a parsed JSON value.\n    pub fn from_json_value(v: &__json::Value) -> Result<Self, __json::JsonError> {\n        Self::from_json_value_with(v, &__json::JsonOptions::default())\n    }\n\n    /// Parses from a parsed JSON value with explicit options.\n    pub fn from_json_value_with(v: &__json::Value, opts: &__json::JsonOptions) -> Result<Self, __json::JsonError> {\n        let _ = opts;\n        let obj = v\n            .as_object()\n            .ok_or(__json::JsonError::TypeMismatch { expected: \"object\" })?;\n        let mut out_msg = Self::default();\n",
         );
         for f in &msg.fields {
             let fname = naming::field_ident(&f.name);
@@ -1574,8 +1772,12 @@ r#"        for (k, v) in &self.{fname} {{
                         }
                         TypeKind::Message => {
                             let ty = self.owned_type(scope, &t.path);
+                            let value = self.boxed_expr(
+                                f.id,
+                                &format!("{ty}::from_json_value_with(jv, opts)?"),
+                            );
                             b.push_str(&format!(
-"        if let Some(jv) = __json::get_field(obj, {names}) {{\n            out_msg.{fname} = Some({ty}::from_json_value(jv)?);\n        }}\n"
+"        if let Some(jv) = __json::get_field(obj, {names}) {{\n            out_msg.{fname} = Some({value});\n        }}\n"
                             ));
                         }
                     }
@@ -1596,19 +1798,27 @@ r#"        for (k, v) in &self.{fname} {{
             }
         }
         b.push_str(&self.json_oneof_pulls(scope, msg, ctx));
+        let mut known: Vec<String> = Vec::new();
+        for f in msg
+            .fields
+            .iter()
+            .chain(msg.oneofs.iter().flat_map(|o| o.fields.iter()))
+        {
+            known.push(format!("{:?}", f.name));
+            known.push(format!("{:?}", naming::lower_camel(&f.name)));
+        }
+        b.push_str(&format!(
+"        if opts.reject_unknown_fields {{\n            const KNOWN: &[&str] = &[{}];\n            if let Some(k) = obj.keys().find(|k| !KNOWN.contains(&k.as_str())) {{\n                return Err(__json::JsonError::UnknownField(k.clone()));\n            }}\n        }}\n",
+            known.join(", ")
+        ));
         b.push_str(
-"        Ok(out_msg)\n    }\n\n    /// Parses from a JSON string.\n    pub fn from_json(json: &str) -> Result<Self, __json::JsonError> {\n        let v: __json::Value = __json::json::from_str(json)?;\n        Self::from_json_value(&v)\n    }\n",
+"        Ok(out_msg)\n    }\n\n    /// Parses from a JSON string.\n    pub fn from_json(json: &str) -> Result<Self, __json::JsonError> {\n        let v: __json::Value = __json::json::from_str(json)?;\n        Self::from_json_value(&v)\n    }\n\n    /// Parses from a JSON string with explicit options.\n    pub fn from_json_with(json: &str, opts: &__json::JsonOptions) -> Result<Self, __json::JsonError> {\n        let v: __json::Value = __json::json::from_str(json)?;\n        Self::from_json_value_with(&v, opts)\n    }\n",
         );
         b
     }
 
     /// Oneof JSON pulls (flattened member names; later members win).
-    fn json_oneof_pulls(
-        &self,
-        scope: &[String],
-        msg: &ir::MessageIr,
-        ctx: &MsgCtx,
-    ) -> String {
+    fn json_oneof_pulls(&self, scope: &[String], msg: &ir::MessageIr, ctx: &MsgCtx) -> String {
         let mut b = String::new();
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
@@ -1622,13 +1832,15 @@ r#"        for (k, v) in &self.{fname} {{
                     TypeKind::Scalar(_) => {
                         format!("{}?", expr::json_from(t.path[0].as_str(), "jv"))
                     }
-                    TypeKind::Enum { .. } => format!(
-                        "{}::from_json(jv)?",
-                        self.resolve_ref(scope, &t.path).0
-                    ),
-                    TypeKind::Message => format!(
-                        "{}::from_json_value(jv)?",
-                        self.resolve_ref(scope, &t.path).0
+                    TypeKind::Enum { .. } => {
+                        format!("{}::from_json(jv)?", self.resolve_ref(scope, &t.path).0)
+                    }
+                    TypeKind::Message => self.boxed_expr(
+                        mf.id,
+                        &format!(
+                            "{}::from_json_value_with(jv, opts)?",
+                            self.resolve_ref(scope, &t.path).0
+                        ),
                     ),
                 };
                 b.push_str(&format!(
@@ -1643,9 +1855,11 @@ r#"        for (k, v) in &self.{fname} {{
     fn json_from_expr(&self, scope: &[String], t: &ir::TypeRefIr) -> String {
         match self.resolve_ref(scope, &t.path).1 {
             TypeKind::Scalar(_) => expr::json_from(t.path[0].as_str(), "item"),
-            TypeKind::Enum { .. } => format!("{}::from_json(item)", self.resolve_ref(scope, &t.path).0),
+            TypeKind::Enum { .. } => {
+                format!("{}::from_json(item)", self.resolve_ref(scope, &t.path).0)
+            }
             TypeKind::Message => format!(
-                "{}::from_json_value(item)",
+                "{}::from_json_value_with(item, opts)",
                 self.resolve_ref(scope, &t.path).0
             ),
         }
@@ -1666,14 +1880,15 @@ r#"        for (k, v) in &self.{fname} {{
         ));
         for f in &msg.fields {
             let fname = naming::field_ident(&f.name);
-            s.push_str(&format!("    {fname}: {},\n", self.struct_field_type(scope, f)));
+            s.push_str(&format!(
+                "    {fname}: {},\n",
+                self.struct_field_type(scope, f)
+            ));
         }
         for o in &msg.oneofs {
             let oname = naming::field_ident(&o.name);
             let oty = format!("{}{}", ctx.flat, naming::pascal(&o.name));
-            s.push_str(&format!(
-"    {oname}: Option<{oty}>,\n"
-            ));
+            s.push_str(&format!("    {oname}: Option<{oty}>,\n"));
         }
         s.push_str("}\n");
 
@@ -1684,8 +1899,9 @@ r#"        for (k, v) in &self.{fname} {{
                 FieldLabelIr::Singular(t) => match self.resolve_ref(scope, &t.path).1 {
                     TypeKind::Message => {
                         let ty = self.owned_type(scope, &t.path);
+                        let value = self.boxed_expr(f.id, "v");
                         s.push_str(&format!(
-"    /// Sets `{fname}`.\n    pub fn {fname}(mut self, v: {ty}) -> Self {{\n        self.{fname} = Some(v);\n        self\n    }}\n"
+"    /// Sets `{fname}`.\n    pub fn {fname}(mut self, v: {ty}) -> Self {{\n        self.{fname} = Some({value});\n        self\n    }}\n"
                         ));
                     }
                     TypeKind::Enum { .. } => {
@@ -1701,7 +1917,9 @@ r#"        for (k, v) in &self.{fname} {{
                         }
                     }
                     TypeKind::Scalar(info) => {
-                        if matches!(t.path[0].as_str(), "string" | "bytes") && f.presence == ir::Presence::Explicit {
+                        if matches!(t.path[0].as_str(), "string" | "bytes")
+                            && f.presence == ir::Presence::Explicit
+                        {
                             s.push_str(&format!(
 "    pub fn {fname}(mut self, v: impl Into<{}>) -> Self {{\n        self.{fname} = Some(v.into());\n        self\n    }}\n",
                                 info.rust
@@ -1763,7 +1981,7 @@ r#"        for (k, v) in &self.{fname} {{
             s.push_str(&format!("            {oname}: self.{oname},\n"));
         }
         s.push_str(
-"            unknown_fields: __core::RawMessage::new(),\n        })\n    }\n}\n",
+            "            unknown_fields: __core::RawMessage::new(),\n        })\n    }\n}\n",
         );
         self.out.push_str(&s);
     }
@@ -1800,18 +2018,17 @@ r#"        for (k, v) in &self.{fname} {{
         if let Some((lo, hi)) = anno_range(f) {
             let check = if f.presence == ir::Presence::Explicit {
                 format!(
-"        if let Some(v) = &self.{fname} {{\n            if !(({lo})..=({hi})).contains(v) {{\n                return Err(BuildError::OutOfRange {{ field: {name_lit} }});\n            }}\n        }}\n"
+"        if let Some(v) = &self.{fname} {{\n            if !({lo}..={hi}).contains(v) {{\n                return Err(BuildError::OutOfRange {{ field: {name_lit} }});\n            }}\n        }}\n"
                 )
             } else {
                 format!(
-"        if !(({lo})..=({hi})).contains(&self.{fname}) {{\n            return Err(BuildError::OutOfRange {{ field: {name_lit} }});\n        }}\n"
+"        if !({lo}..={hi}).contains(&self.{fname}) {{\n            return Err(BuildError::OutOfRange {{ field: {name_lit} }});\n        }}\n"
                 )
             };
             out.push_str(&check);
         }
         out
     }
-
 }
 
 /// JSON object-key stringifier expression for map keys.
@@ -1847,13 +2064,12 @@ fn scalar_zero(scalar: &str) -> &'static str {
 
 /// First integer argument of annotation `@name`, if present.
 fn anno_int(f: &ir::FieldIr, name: &str) -> Option<i64> {
-    f.annotations
-        .iter()
-        .find(|a| a.name == name)
-        .and_then(|a| a.args.iter().find_map(|arg| match arg {
+    f.annotations.iter().find(|a| a.name == name).and_then(|a| {
+        a.args.iter().find_map(|arg| match arg {
             ir::AnnotationArgIr::Int(n) => Some(*n),
             _ => None,
-        }))
+        })
+    })
 }
 
 /// `(min, max)` from `@range(min, max)` positional integers.
@@ -1864,6 +2080,242 @@ fn anno_range(f: &ir::FieldIr) -> Option<(i64, i64)> {
         _ => None,
     });
     Some((ints.next()?, ints.next()?))
+}
+
+/// Turns a mapper expression into one evaluating to `Result<Value, JsonError>`:
+/// fallible mappers (`expr?`) already are one, infallible ones are wrapped.
+fn result_expr(mapper: &str) -> String {
+    match mapper.strip_suffix('?') {
+        Some(fallible) => fallible.to_string(),
+        None => format!("Ok::<_, __json::JsonError>({mapper})"),
+    }
+}
+
+/// Finds the inline (by-value) message edges that close a type cycle. Only
+/// singular message fields and oneof message members are inline: repeated
+/// fields and maps already live on the heap.
+fn compute_boxed(pkg: &ir::PackageIr, model: &Model) -> std::collections::HashSet<(String, u32)> {
+    use std::collections::{HashMap, HashSet};
+    // owner flat name -> [(field id, target flat name)]
+    let mut edges: HashMap<String, Vec<(u32, String)>> = HashMap::new();
+
+    fn walk(
+        msg: &ir::MessageIr,
+        scope: &[String],
+        model: &Model,
+        edges: &mut HashMap<String, Vec<(u32, String)>>,
+    ) {
+        let owner = naming::flat_type_name(scope, &msg.name);
+        let mut list = Vec::new();
+        let singular = msg.fields.iter().filter_map(|f| match &f.label {
+            ir::FieldLabelIr::Singular(t) => Some((f.id, t)),
+            _ => None,
+        });
+        let oneof = msg.oneofs.iter().flat_map(|o| {
+            o.fields.iter().filter_map(|f| match &f.label {
+                ir::FieldLabelIr::Singular(t) => Some((f.id, t)),
+                _ => None,
+            })
+        });
+        for (id, t) in singular.chain(oneof) {
+            if let Some((target, TypeKind::Message)) = model.resolve(scope, &t.path) {
+                list.push((id, target.to_string()));
+            }
+        }
+        edges.insert(owner, list);
+        let mut inner = scope.to_vec();
+        inner.push(msg.name.clone());
+        for nested in &msg.messages {
+            walk(nested, &inner, model, edges);
+        }
+    }
+    for m in &pkg.messages {
+        walk(m, &[], model, &mut edges);
+    }
+
+    let reaches = |from: &str, to: &str| -> bool {
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut stack = vec![from];
+        while let Some(n) = stack.pop() {
+            if n == to {
+                return true;
+            }
+            if !seen.insert(n) {
+                continue;
+            }
+            for (_, next) in edges.get(n).into_iter().flatten() {
+                stack.push(next.as_str());
+            }
+        }
+        false
+    };
+    let mut boxed = HashSet::new();
+    for (owner, list) in &edges {
+        for (id, target) in list {
+            if reaches(target, owner) {
+                boxed.insert((owner.clone(), *id));
+            }
+        }
+    }
+    boxed
+}
+
+/// Statement binding `v` for a map entry whose value may be absent on the
+/// wire: the type's default, derived from the decode expression of a present
+/// value.
+fn map_value_fill(kind: TypeKind, vexpr: &str) -> String {
+    let default = match kind {
+        TypeKind::Scalar(_) => return "let v = v.unwrap_or_default();".to_string(),
+        TypeKind::Enum { .. } => vexpr.replace("__support::wire_i32_borrowed(&ef.value)?", "0"),
+        TypeKind::Message => vexpr.replace("__scalar::decode_bytes_borrowed(&ef.value)?", "&[]"),
+    };
+    format!("let v = match v {{ Some(v) => v, None => {default} }};")
+}
+
+/// Fixpoint of "this message's view borrows string/bytes data".
+fn compute_borrowing(pkg: &ir::PackageIr, model: &Model) -> std::collections::HashSet<String> {
+    use std::collections::HashSet;
+    // owner flat name -> (borrows directly, referenced message flat names)
+    let mut info: Vec<(String, bool, Vec<String>)> = Vec::new();
+
+    fn walk(
+        msg: &ir::MessageIr,
+        scope: &[String],
+        model: &Model,
+        info: &mut Vec<(String, bool, Vec<String>)>,
+    ) {
+        let owner = naming::flat_type_name(scope, &msg.name);
+        let (mut direct, mut refs) = (false, Vec::new());
+        let mut visit = |t: &ir::TypeRefIr| {
+            if model::is_scalar_path(&t.path) {
+                direct |= matches!(t.path[0].as_str(), "string" | "bytes");
+            } else if let Some((target, TypeKind::Message)) = model.resolve(scope, &t.path) {
+                refs.push(target.to_string());
+            }
+        };
+        let fields = msg
+            .fields
+            .iter()
+            .chain(msg.oneofs.iter().flat_map(|o| o.fields.iter()));
+        for f in fields {
+            match &f.label {
+                ir::FieldLabelIr::Singular(t) | ir::FieldLabelIr::Repeated(t) => visit(t),
+                ir::FieldLabelIr::Map { key, value } => {
+                    visit(key);
+                    visit(value);
+                }
+            }
+        }
+        info.push((owner, direct, refs));
+        let mut inner = scope.to_vec();
+        inner.push(msg.name.clone());
+        for nested in &msg.messages {
+            walk(nested, &inner, model, info);
+        }
+    }
+    for m in &pkg.messages {
+        walk(m, &[], model, &mut info);
+    }
+    let mut set: HashSet<String> = info
+        .iter()
+        .filter(|(_, direct, _)| *direct)
+        .map(|(n, _, _)| n.clone())
+        .collect();
+    loop {
+        let before = set.len();
+        for (name, _, refs) in &info {
+            if refs.iter().any(|r| set.contains(r)) {
+                set.insert(name.clone());
+            }
+        }
+        if set.len() == before {
+            return set;
+        }
+    }
+}
+
+/// Rewrites `map(|x| some::path(x))` to `map(some::path)`.
+fn strip_redundant_closures(code: &str) -> String {
+    let mut out = String::with_capacity(code.len());
+    let mut rest = code;
+    while let Some(i) = rest.find("|x| ") {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i + 4..];
+        let path_len = tail
+            .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+            .unwrap_or(tail.len());
+        let path = &tail[..path_len];
+        let after = &tail[path_len..];
+        if !path.is_empty() && after.starts_with("(x))") {
+            out.push_str(path);
+            out.push(')');
+            rest = &after[4..];
+        } else {
+            out.push_str("|x| ");
+            rest = tail;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Nested types are flattened to `Outer_Inner` names; mark those items so
+/// consumers do not get `non_camel_case_types` warnings from generated code.
+fn allow_flat_type_names(code: &str) -> String {
+    // `|x| path(x)` closures trip clippy::redundant_closure in user crates.
+    let code = &strip_redundant_closures(code);
+    let mut out = String::with_capacity(code.len() + 256);
+    for line in code.lines() {
+        // Enum variants keep SCREAMING_SNAKE names from the schema, so enums
+        // always opt out of the naming lints.
+        if line.starts_with("pub enum ") {
+            out.push_str("#[allow(non_camel_case_types, clippy::upper_case_acronyms)]\n");
+        } else if let Some(rest) = line.strip_prefix("pub struct ") {
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if name.contains('_') {
+                out.push_str("#[allow(non_camel_case_types)]\n");
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// Wire-class expression as referenced from generated code.
+pub(crate) fn class_name(c: crate::WireClass) -> &'static str {
+    match c {
+        crate::WireClass::Varint => "__core::WireClass::Varint",
+        crate::WireClass::Fixed32 => "__core::WireClass::Fixed32",
+        crate::WireClass::Fixed64 => "__core::WireClass::Fixed64",
+        crate::WireClass::Len => "__core::WireClass::Len",
+    }
+}
+
+/// Produces a turbo-path call like `Type::<'a>::method` when `ty` carries a
+/// lifetime parameter, falling back to `Type::method` otherwise.
+pub(crate) fn turbo_call(ty: &str, method: &str) -> String {
+    if let Some(idx) = ty.find('<') {
+        let base = &ty[..idx];
+        let lt = &ty[idx..];
+        let lt_inner = &lt[1..lt.len() - 1];
+        format!("{base}::<{lt_inner}>::{method}")
+    } else {
+        format!("{ty}::{method}")
+    }
+}
+
+/// Core scalar helper for packed encoding of this pack kind.
+pub(crate) fn packed_encode_fn(pack: PackKind) -> &'static str {
+    match pack {
+        PackKind::Varint => "__scalar::encode_packed_varints",
+        PackKind::Fixed32 => "__scalar::encode_packed_fixed32",
+        PackKind::Fixed64 => "__scalar::encode_packed_fixed64",
+        PackKind::NotPackable => unreachable!(),
+    }
 }
 
 #[cfg(test)]
@@ -1907,46 +2359,7 @@ mod tests {
         assert!(text.contains("pub struct Address"));
     }
 
-    fn generate_module_pub(
-        pkg: &tpt20_ir::PackageIr,
-        opts: &CodegenOptions,
-    ) -> String {
+    fn generate_module_pub(pkg: &tpt20_ir::PackageIr, opts: &CodegenOptions) -> String {
         Emitter::new(pkg, opts).generate()
     }
 }
-
-
-/// Wire-class expression as referenced from generated code.
-pub(crate) fn class_name(c: crate::WireClass) -> &'static str {
-    match c {
-        crate::WireClass::Varint => "__core::WireClass::Varint",
-        crate::WireClass::Fixed32 => "__core::WireClass::Fixed32",
-        crate::WireClass::Fixed64 => "__core::WireClass::Fixed64",
-        crate::WireClass::Len => "__core::WireClass::Len",
-    }
-}
-
-/// Produces a turbo-path call like `Type::<'a>::method` when `ty` carries a
-/// lifetime parameter, falling back to `Type::method` otherwise.
-pub(crate) fn turbo_call(ty: &str, method: &str) -> String {
-    if let Some(idx) = ty.find('<') {
-        let base = &ty[..idx];
-        let lt = &ty[idx..];
-        let lt_inner = &lt[1..lt.len() - 1];
-        format!("{base}::<{lt_inner}>::{method}")
-    } else {
-        format!("{ty}::{method}")
-    }
-}
-
-/// Core scalar helper for packed encoding of this pack kind.
-pub(crate) fn packed_encode_fn(pack: PackKind) -> &'static str {
-    match pack {
-        PackKind::Varint => "__scalar::encode_packed_varints",
-        PackKind::Fixed32 => "__scalar::encode_packed_fixed32",
-        PackKind::Fixed64 => "__scalar::encode_packed_fixed64",
-        PackKind::NotPackable => unreachable!(),
-    }
-}
-
-

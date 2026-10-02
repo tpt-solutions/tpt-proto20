@@ -7,7 +7,7 @@
 use crate::error::TransportError;
 use crate::frame::FrameFlags;
 use crate::metadata::Metadata;
-use crate::traits::{Call, StreamingType, StreamItem, Transport};
+use crate::traits::{Call, StreamItem, StreamingType, Transport};
 use async_trait::async_trait;
 use futures::{Sink, Stream};
 use std::pin::Pin;
@@ -30,11 +30,15 @@ pub struct IncomingRequest {
     pub metadata: Metadata,
     /// The initial request payload bytes.
     pub request: Vec<u8>,
+    /// Whether the client sent an initial message at all.
+    pub request_present: bool,
     /// Streaming type of the call.
     pub streaming_type: StreamingType,
     response_tx: mpsc::UnboundedSender<Result<FramedMessage, TransportError>>,
     trailers_tx: Option<oneshot::Sender<Result<Metadata, TransportError>>>,
     request_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    /// Resolves (with an error) when the client drops its response stream.
+    client_gone: tokio::sync::watch::Receiver<()>,
 }
 
 impl IncomingRequest {
@@ -63,10 +67,70 @@ impl IncomingRequest {
     }
 }
 
+/// Response half of an in-process call.
+struct InProcessSender {
+    response_tx: Option<mpsc::UnboundedSender<Result<FramedMessage, TransportError>>>,
+    trailers_tx: Option<oneshot::Sender<Result<Metadata, TransportError>>>,
+    client_gone: tokio::sync::watch::Receiver<()>,
+}
+
+#[async_trait]
+impl crate::traits::CallSender for InProcessSender {
+    async fn send_message(&self, payload: Vec<u8>) -> Result<(), TransportError> {
+        let tx = self
+            .response_tx
+            .as_ref()
+            .ok_or(TransportError::ConnectionClosed)?;
+        tx.send(Ok(FramedMessage {
+            flags: FrameFlags::empty(),
+            payload,
+        }))
+        .map_err(|_| TransportError::ConnectionClosed)
+    }
+
+    async fn send_trailers(&mut self, trailers: Metadata) -> Result<(), TransportError> {
+        if let Some(tx) = self.trailers_tx.take() {
+            let _ = tx.send(Ok(trailers));
+        }
+        // Closing the response channel is what ends the client's stream.
+        self.response_tx = None;
+        Ok(())
+    }
+
+    fn closed_signal(&self) -> futures::future::BoxFuture<'static, ()> {
+        let mut rx = self.client_gone.clone();
+        Box::pin(async move {
+            // The sender lives in the client's response stream; it is dropped
+            // with it, which is what `changed()` reports as an error.
+            let _ = rx.changed().await;
+        })
+    }
+}
+
+impl crate::traits::IncomingCall for IncomingRequest {
+    fn into_parts(self) -> crate::traits::IncomingCallParts {
+        let mut request_rx = self.request_rx;
+        crate::traits::IncomingCallParts {
+            method: self.method,
+            metadata: self.metadata,
+            request: self.request,
+            request_present: self.request_present,
+            incoming: Box::pin(futures::stream::poll_fn(move |cx| request_rx.poll_recv(cx))),
+            sender: Box::new(InProcessSender {
+                response_tx: Some(self.response_tx),
+                trailers_tx: self.trailers_tx,
+                client_gone: self.client_gone,
+            }),
+        }
+    }
+}
+
 /// Stream of response items from an in-process call.
 struct InProcessResponseStream {
     response_rx: mpsc::UnboundedReceiver<Result<FramedMessage, TransportError>>,
     trailers_rx: oneshot::Receiver<Result<Metadata, TransportError>>,
+    /// Dropped with the stream to tell the server the client is gone.
+    _alive: tokio::sync::watch::Sender<()>,
 }
 
 impl Stream for InProcessResponseStream {
@@ -74,10 +138,7 @@ impl Stream for InProcessResponseStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match Pin::new(&mut self.response_rx).poll_recv(cx) {
-            Poll::Ready(Some(Ok(FramedMessage {
-                flags,
-                payload,
-            }))) => {
+            Poll::Ready(Some(Ok(FramedMessage { flags, payload }))) => {
                 if flags.is_compressed() {
                     return Poll::Ready(Some(Err(TransportError::Compression(
                         "compressed frames not yet supported in in-process transport".into(),
@@ -86,14 +147,12 @@ impl Stream for InProcessResponseStream {
                 Poll::Ready(Some(Ok(StreamItem::Message(payload))))
             }
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
-            Poll::Ready(None) => {
-                match self.trailers_rx.try_recv() {
-                    Ok(Ok(trailers)) => Poll::Ready(Some(Ok(StreamItem::Trailer(trailers)))),
-                    Ok(Err(e)) => Poll::Ready(Some(Err(e))),
-                    Err(oneshot::error::TryRecvError::Empty) => Poll::Ready(None),
-                    Err(oneshot::error::TryRecvError::Closed) => Poll::Ready(None),
-                }
-            }
+            Poll::Ready(None) => match self.trailers_rx.try_recv() {
+                Ok(Ok(trailers)) => Poll::Ready(Some(Ok(StreamItem::Trailer(trailers)))),
+                Ok(Err(e)) => Poll::Ready(Some(Err(e))),
+                Err(oneshot::error::TryRecvError::Empty) => Poll::Ready(None),
+                Err(oneshot::error::TryRecvError::Closed) => Poll::Ready(None),
+            },
             Poll::Pending => Poll::Pending,
         }
     }
@@ -107,28 +166,21 @@ struct InProcessSink {
 impl Sink<Vec<u8>> for InProcessSink {
     type Error = TransportError;
 
-    fn poll_ready(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn start_send(self: Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
-        self.tx.send(item).map_err(|_| TransportError::ConnectionClosed)
+        self.tx
+            .send(item)
+            .map_err(|_| TransportError::ConnectionClosed)
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -168,6 +220,12 @@ pub struct InProcessTransport {
     request_tx: mpsc::Sender<IncomingRequest>,
 }
 
+impl Default for InProcessTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InProcessTransport {
     /// Creates a new in-process transport connected to a fresh server.
     pub fn new() -> Self {
@@ -188,15 +246,24 @@ impl Transport for InProcessTransport {
         let (response_tx, response_rx) = mpsc::unbounded_channel();
         let (trailers_tx, trailers_rx) = oneshot::channel();
         let (request_msg_tx, request_msg_rx) = mpsc::unbounded_channel();
+        let (alive_tx, client_gone) = tokio::sync::watch::channel(());
 
+        // Streaming calls with an empty initial request open without a message.
+        let request_present = !(request.is_empty()
+            && matches!(
+                streaming_type,
+                StreamingType::ClientStream | StreamingType::Bidi
+            ));
         let incoming = IncomingRequest {
             method: method.to_string(),
             metadata: metadata.clone(),
             request,
+            request_present,
             streaming_type,
             response_tx,
             trailers_tx: Some(trailers_tx),
             request_rx: request_msg_rx,
+            client_gone,
         };
 
         self.request_tx
@@ -207,13 +274,16 @@ impl Transport for InProcessTransport {
         let stream = InProcessResponseStream {
             response_rx,
             trailers_rx,
+            _alive: alive_tx,
         };
 
         Ok(Call {
-            sink: Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(Box::new(InProcessSink {
-                tx: request_msg_tx,
-            })),
-            stream: Pin::<Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>>::new(Box::new(stream)),
+            sink: Pin::<Box<dyn Sink<Vec<u8>, Error = TransportError> + Send + Sync + Unpin>>::new(
+                Box::new(InProcessSink { tx: request_msg_tx }),
+            ),
+            stream: Pin::<
+                Box<dyn Stream<Item = Result<StreamItem, TransportError>> + Send + Sync + Unpin>,
+            >::new(Box::new(stream)),
         })
     }
 }
@@ -236,7 +306,12 @@ mod tests {
         });
 
         let call = transport
-            .start_call("test.Method", b"request".to_vec(), &Metadata::new(), StreamingType::Unary)
+            .start_call(
+                "test.Method",
+                b"request".to_vec(),
+                &Metadata::new(),
+                StreamingType::Unary,
+            )
             .await
             .unwrap();
 
@@ -265,7 +340,12 @@ mod tests {
         });
 
         let call = transport
-            .start_call("test.Stream", b"req".to_vec(), &Metadata::new(), StreamingType::ServerStream)
+            .start_call(
+                "test.Stream",
+                b"req".to_vec(),
+                &Metadata::new(),
+                StreamingType::ServerStream,
+            )
             .await
             .unwrap();
 

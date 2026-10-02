@@ -260,6 +260,24 @@ fn validate_typeref(
 }
 
 fn analyze_enum(en: &ast::Enum, file: &str, reg: &AnnotationRegistry, diags: &mut Vec<Diagnostic>) {
+    // Duplicate value names (they would become duplicate Rust variants).
+    let mut names: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for v in &en.values {
+        if !names.insert(v.name.as_str()) {
+            diags.push(
+                Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "duplicate enum value name `{}` in enum `{}`",
+                        v.name, en.name
+                    ),
+                )
+                .in_file(file)
+                .at(v.span.line, v.span.column)
+                .with_help("enum value names must be unique within an enum"),
+            );
+        }
+    }
     // Duplicate non-alias enum value numbers.
     let mut seen: std::collections::HashMap<i32, String> = std::collections::HashMap::new();
     for v in &en.values {

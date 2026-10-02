@@ -7,6 +7,7 @@
 //! The design targets untrusted input: every decoder limit in
 //! [`DecoderLimits`] is enforced on the decode path with conservative defaults.
 
+pub mod descriptor;
 pub mod dynamic;
 pub mod error;
 pub mod limits;
@@ -14,14 +15,16 @@ pub mod message;
 pub mod scalar;
 pub mod varint;
 pub mod wire;
-pub mod descriptor;
 
-pub use error::{DecodeError, EncodeError};
-pub use limits::{DecoderLimits, UnknownFieldPolicy};
-pub use message::{decode_borrowed, decode_borrowed_filtered, BorrowedField, BorrowedMessage, BorrowedValue, split_len_delimited, Field, RawMessage, Value};
-pub use wire::{Tag, WireClass};
 pub use descriptor::{FieldDescriptor, FieldKind, MessageDescriptor, OneofDescriptor, ScalarKind};
 pub use dynamic::DynamicMessage;
+pub use error::{DecodeError, EncodeError};
+pub use limits::{DecoderLimits, UnknownFieldPolicy};
+pub use message::{
+    decode_borrowed, decode_borrowed_filtered, split_len_delimited, BorrowedField, BorrowedMessage,
+    BorrowedValue, Field, RawMessage, Value,
+};
+pub use wire::{Tag, WireClass};
 
 /// Optional envelope wrapping a schema-identified payload (spec §9).
 ///

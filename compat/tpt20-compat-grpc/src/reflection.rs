@@ -35,7 +35,10 @@ impl ReflectionService {
     /// The `symbol` is the fully-qualified name (e.g. `user.v1.UserService`).
     /// The `file_uri` is an opaque identifier for the file containing the symbol.
     pub fn register_symbol(&self, symbol: impl Into<String>, file_uri: impl Into<String>) {
-        self.symbols.write().unwrap().insert(symbol.into(), file_uri.into());
+        self.symbols
+            .write()
+            .unwrap()
+            .insert(symbol.into(), file_uri.into());
     }
 
     /// Looks up symbols matching the given query.

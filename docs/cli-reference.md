@@ -86,8 +86,16 @@ tpt20 gen rust --in <schema.tpt> --out <dir> [--builders]
 Compiles the schema and writes `<dir>/<package_file_stem>.rs` (e.g. package
 `user.v1` → `user_v1.rs`) using `tpt20-codegen-rust`. See
 [Code generation](code-generation.md) for what the output contains.
-`--builders` enables generated builder types. Other codegen backends
-(`compiler/tpt20-codegen-backends/`) are not yet exposed through `gen`.
+`--builders` enables generated builder types.
+
+## `gen go` / `gen java` / `gen python`
+
+```sh
+tpt20 gen <go|java|python> --in <schema.tpt> --out <dir> [--package-name NAME]
+```
+
+Writes message code plus a minimal runtime for the language (messages and
+binary wire format only; see [Polyglot code generation](polyglot.md)).
 
 ## `descriptors`
 
@@ -102,15 +110,16 @@ descriptor format, to a file or stdout.
 ## `decode`
 
 ```sh
-tpt20 decode [--input FILE] [--output FILE]
+tpt20 decode [--input FILE] [--output FILE] [--schema FILE --message NAME]
 ```
 
-Decodes native-wire-format bytes (stdin by default) into a JSON object keyed
-by **field ID** (not field name) and prints it. **This command has no schema
-input** — it operates purely on the raw `(field_id, wire_class, value)`
-model, so it cannot tell you a field's name or declared type. Use `tpt20
-reflect` for schema-aware inspection. `binary-to-json` is an alias for this
-command.
+Without a schema, decodes native-wire-format bytes (stdin by default) into a
+JSON object keyed by **field ID**, operating purely on the raw
+`(field_id, wire_class, value)` model. With `--schema` and `--message`, the
+bytes are decoded against that message type and printed in the schema-aware
+[text format](#text-to-binary--binary-to-text) (field names, enum names,
+nested messages, maps, oneofs). `binary-to-json` is an alias for the
+schema-free form.
 
 ## `encode`
 
@@ -132,17 +141,33 @@ behavior described above.
 ## `text-to-binary` / `binary-to-text`
 
 ```sh
-tpt20 text-to-binary [--input FILE] [--output FILE]
-tpt20 binary-to-text [--input FILE] [--output FILE]
+tpt20 text-to-binary --schema FILE --message NAME [--input FILE] [--output FILE]
+tpt20 binary-to-text --schema FILE --message NAME [--input FILE] [--output FILE]
 ```
 
-> **Not the text format described in spec §14.3.** These commands implement
-> an ad hoc `field_id: value` line format (one field per line, values
-> inferred as quoted strings, booleans, integers, or floats) rather than a
-> real grammar over field *names*, nested messages, repeated fields, maps, or
-> oneofs. The proper text format's parser doesn't exist yet (`todo.md` Phase
-> 8) — these commands are a stopgap for quick manual inspection of scalar
-> fields only.
+Convert between the spec §14.3 text format and native wire bytes, driven by
+the schema (`tpt20-text`):
+
+```text
+id: 42
+name: "Ada"
+tags: "a"
+tags: "b"
+home {
+  street: "1 Way"
+}
+attrs {
+  key: "k"
+  value: "v"
+}
+```
+
+Fields are named by schema field name; repeated fields are one line per
+element (or `tags: ["a", "b"]`); maps are `name { key: … value: … }` entries;
+oneofs print only the member that wins on the wire; output order is
+deterministic (field id order, map entries sorted by key). `#` starts a
+comment. Unknown fields, type mismatches, out-of-range numbers, and
+syntax errors are reported as errors (exit 1) with line/column where known.
 
 ## `import-proto`
 
@@ -161,40 +186,78 @@ for supported/unsupported proto features.
 tpt20 conformance [--directory DIR] [--test NAME]
 ```
 
-> **Does not run the real conformance suite.** This walks a directory
-> (default `tests/conformance`) of `.json` files, and for each one that has a
-> top-level `"binary"` string field, hex-decodes it and attempts to
-> wire-decode it with default limits — that's the entire test. It does not
-> invoke `tools/tpt20-conformance` (the actual native/compatibility
-> conformance suite described in spec §22). Use `cargo test -p
-> tpt20-conformance` directly for real conformance coverage (subject to the
-> compile-status caveats in `todo.md` Phase 17).
+Runs the language-neutral JSON vectors in `DIR` (default
+`conformance/vectors`; see [`conformance/README.md`](../conformance/README.md))
+and prints `PASS`/`FAIL suite/case` per case plus a summary. The vectors cover
+wire decoding (scalars, ordering, malformed input, limits, unknown-field
+policies), canonical encoding, round trips, the text format, and schema
+diagnostics. `--test` selects a file, suite or single case by name. Exit codes:
+`0` all passed, `1` at least one failed, `2` no vectors / nothing matched.
+The larger Rust suite runs with `cargo test -p tpt20-conformance`.
 
 ## `call`
 
 ```sh
-tpt20 call <endpoint> <method> [--input FILE] [--binary-input FILE]
-           [--streaming unary|server|client|bidi]
-           [--metadata key=value ...] [--deadline-ms N]
-           [--tls-cert FILE] [--compression none|gzip|deflate]
+tpt20 call <endpoint> <method> [--input FILE | --binary-input FILE |
+           --text-input FILE --schema FILE --request-type NAME]
+           [--response-type NAME] [--streaming unary|server|client|bidi]
+           [--metadata key=value ...] [--deadline-ms N] [--tls-cert FILE]
 ```
 
-> **Does not perform a network call.** The command parses JSON or binary
-> input, builds `Metadata` from `--metadata` pairs, and validates the
-> streaming/deadline arguments — but never dials `endpoint` or sends
-> anything. `--tls-cert` and `--compression` are accepted and silently
-> ignored. Treat this as argument-parsing scaffolding for a future real RPC
-> debugger, not a working `grpcurl`-equivalent yet.
+Performs a real call over the HTTP/2 transport and prints every response
+message followed by the trailing metadata:
+
+```text
+# message 1 (9 bytes)
+1: 42
+# trailers
+x-status: ok
+```
+
+- `endpoint` is `host:port` or `http(s)://host:port`. `https://` (or
+  `--tls-cert`) enables TLS with ALPN `h2`; `--tls-client-cert FILE --tls-client-key FILE` (global options, before or
+  after the subcommand) present a client certificate to servers that require
+  mTLS; `--tls-cert` is the PEM CA
+  certificate to trust.
+- Request input: `--input` is a JSON object keyed by field ID (an array of
+  objects sends several messages for `client`/`bidi` streams);
+  `--binary-input` is one raw wire message; `--text-input` parses the text
+  format against `--schema`/`--request-type`. With no input flag the JSON is
+  read from stdin.
+- Responses print in text format when `--schema` and `--response-type` are
+  given, otherwise as a schema-free `id: value` listing.
+- `--deadline-ms` is enforced client-side (exit 1 when exceeded).
+- `--compression gzip|deflate` compresses request messages (each one that gets
+  smaller); the server answers compressed if it is configured to and the
+  client advertised support, which `call` always does. Any other algorithm is
+  a usage error (exit 2).
+- Unary and server-streaming calls require exactly one request message.
 
 ## `health`
 
 ```sh
-tpt20 health <endpoint> [--tls-cert FILE]
+tpt20 health <endpoint> [--service NAME] [--deadline-ms N] [--tls-cert FILE]
 ```
 
-Prints a placeholder message; does not contact `endpoint`. Not yet wired to
-[`tpt20-compat-grpc`'s health protocol support](compatibility-adapters.md#health-checking)
-or a native health check.
+Calls `tpt20.health.v1.Health/Check` (served by
+`tpt20_rpc::health::HealthService`, see [RPC model](rpc-model.md#built-in-health-and-reflection-services))
+with the service name (empty for the overall server) and prints
+`<endpoint>: <STATUS>` (`UNKNOWN`, `SERVING`, `NOT_SERVING`,
+`SERVICE_UNKNOWN`). Exits `0` only for `SERVING`, otherwise `1`.
+
+## `reflect-remote`
+
+```sh
+tpt20 reflect-remote <endpoint> [--descriptor] [--package NAME]
+                     [--format json|binary] [--out FILE] [--deadline-ms N] [--tls-cert FILE]
+```
+
+Asks a running server (one that registered
+`tpt20_rpc::reflection::ReflectionService`) what it serves. Without
+`--descriptor` it prints the fully qualified service names, one per line; with
+it, the schema descriptor of `--package` (default: the only registered one) as
+JSON or binary. Use it to get a schema for `decode --schema`-style tooling
+without the original `.tpt` files.
 
 ## `reflect`
 
@@ -207,22 +270,33 @@ list: name, ID, type (including `repeated T` / `map<K, V>` shape), and
 presence (`implicit`/`explicit`). This is the schema-aware inspection tool —
 prefer it over `decode` when you need field names and types, not just IDs.
 
-## `registry publish`
+## `registry`
 
 ```sh
-tpt20 registry publish <file> [--registry DIR] [--version LABEL]
+tpt20 registry publish <file> [--registry DIR] [--version LABEL] [--force]
+tpt20 registry list [--registry DIR]
+tpt20 registry get <version|fingerprint-prefix> [--registry DIR]
+                   [--format json|binary] [--out FILE]
 ```
 
-Compiles the schema and writes its descriptor (`descriptor.json`) into
-`<registry>/<version>/` (default registry root: `~/.tpt20/registry`; default
-version label: the schema's package name), then records the version,
-fingerprint, and a `"strict"` compatibility policy in a local
-`manifest.json`-style file alongside it.
+A local-filesystem registry (default root `~/.tpt20/registry`):
 
-> **No corresponding lookup/fetch command exists yet.** `registry publish`
-> writes files a human or script can read directly from the registry
-> directory, but there is no `tpt20 registry get`/`list` to query them back
-> through the CLI (`todo.md` Phase 16).
+- `publish` compiles the schema and writes its descriptor
+  (`<registry>/<version>/descriptor.json`) plus a manifest entry (version,
+  fingerprint, `"strict"` policy, UTC publish time). The version label
+  defaults to the package name and may only contain letters, digits and
+  `. _ - +`. **Published versions are immutable:** re-publishing the same
+  content is a no-op; different content under an existing label is an error
+  unless `--force` is given.
+- `list` prints versions with (truncated) fingerprints, policy and publish
+  time.
+- `get` fetches a descriptor by version label or by a fingerprint prefix
+  (≥ 8 characters, unambiguous) and prints it as JSON or writes the binary
+  form. It **verifies integrity**: the stored descriptor is re-fingerprinted
+  and must match the manifest, otherwise the command fails.
+
+The `"strict"` compatibility policy is recorded but not enforced at publish
+time yet (`tpt20 diff` checks two schema files directly).
 
 ## Exit codes
 
@@ -237,10 +311,11 @@ fingerprint, and a `"strict"` compatibility policy in a local
 | `init`, `check`, `fmt`, `lint`, `diff` | Fully functional |
 | `gen rust` | Fully functional (message/enum codegen only — no service codegen, see [Code generation](code-generation.md)) |
 | `descriptors`, `reflect` | Fully functional |
-| `decode` / `encode` / `json-to-binary` / `binary-to-json` | Functional, but schema-free (field-ID-keyed) |
-| `text-to-binary` / `binary-to-text` | Ad hoc scalar-only format, not the real text format |
+| `decode` / `encode` / `json-to-binary` / `binary-to-json` | Functional; schema-free (field-ID-keyed), except `decode --schema --message` which is schema-aware |
+| `text-to-binary` / `binary-to-text` | Fully functional, schema-driven text format |
 | `import-proto` | Functional; emits IR JSON, not `.tpt` source |
-| `conformance` | Stub — does not run the real suite |
-| `call` | Parses arguments only — makes no network call |
-| `health` | Placeholder only |
-| `registry publish` | Functional (local filesystem only, no lookup/fetch) |
+| `conformance` | Functional: runs the JSON conformance vectors in `conformance/vectors` |
+| `call` | Fully functional over HTTP/2 (TLS, metadata, deadline, streaming, compression) |
+| `health` | Fully functional (`tpt20.health.v1.Health/Check`) |
+| `reflect-remote` | Fully functional (`tpt20.reflection.v1.Reflection`) |
+| `registry publish` / `list` / `get` | Functional (local filesystem; immutable versions, integrity-checked fetch) |

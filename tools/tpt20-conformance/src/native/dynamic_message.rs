@@ -1,13 +1,33 @@
-use tpt20_core::{DecoderLimits, Field, FieldDescriptor, FieldKind, MessageDescriptor, RawMessage, UnknownFieldPolicy, Value, WireClass};
 use tpt20_core::DynamicMessage;
 use tpt20_core::ScalarKind;
+use tpt20_core::{DecoderLimits, FieldDescriptor, FieldKind, MessageDescriptor, WireClass};
 
 fn make_user_descriptor() -> MessageDescriptor {
     let mut desc = MessageDescriptor::new();
-    desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-    desc.add_field(FieldDescriptor::new(2, "name", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
-    desc.add_field(FieldDescriptor::new(3, "email", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
-    desc.add_field(FieldDescriptor::new(4, "tags", WireClass::Len, FieldKind::Repeated { packed: true }));
+    desc.add_field(FieldDescriptor::new(
+        1,
+        "id",
+        WireClass::Varint,
+        FieldKind::Scalar(ScalarKind::Int64),
+    ));
+    desc.add_field(FieldDescriptor::new(
+        2,
+        "name",
+        WireClass::Len,
+        FieldKind::Scalar(ScalarKind::String),
+    ));
+    desc.add_field(FieldDescriptor::new(
+        3,
+        "email",
+        WireClass::Len,
+        FieldKind::Scalar(ScalarKind::String),
+    ));
+    desc.add_field(FieldDescriptor::new(
+        4,
+        "tags",
+        WireClass::Len,
+        FieldKind::Repeated { packed: true },
+    ));
     desc
 }
 
@@ -42,7 +62,12 @@ fn encode_decode_with_descriptor_roundtrip() {
 #[test]
 fn unknown_fields_via_descriptor() {
     let mut desc = MessageDescriptor::new();
-    desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
+    desc.add_field(FieldDescriptor::new(
+        1,
+        "id",
+        WireClass::Varint,
+        FieldKind::Scalar(ScalarKind::Int64),
+    ));
     let mut msg = DynamicMessage::with_descriptor(desc);
     msg.set_varint(1, 42);
     msg.set_varint(99, 1);
@@ -54,8 +79,18 @@ fn unknown_fields_via_descriptor() {
 #[test]
 fn field_access_by_name() {
     let mut desc = MessageDescriptor::new();
-    desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-    desc.add_field(FieldDescriptor::new(2, "name", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
+    desc.add_field(FieldDescriptor::new(
+        1,
+        "id",
+        WireClass::Varint,
+        FieldKind::Scalar(ScalarKind::Int64),
+    ));
+    desc.add_field(FieldDescriptor::new(
+        2,
+        "name",
+        WireClass::Len,
+        FieldKind::Scalar(ScalarKind::String),
+    ));
     let mut msg = DynamicMessage::with_descriptor(desc.clone());
     msg.set_varint_by_name("id", 7).unwrap();
     msg.set_string_by_name("name", "test").unwrap();
@@ -67,8 +102,18 @@ fn field_access_by_name() {
 #[test]
 fn remove_by_name() {
     let mut desc = MessageDescriptor::new();
-    desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
-    desc.add_field(FieldDescriptor::new(2, "name", WireClass::Len, FieldKind::Scalar(ScalarKind::String)));
+    desc.add_field(FieldDescriptor::new(
+        1,
+        "id",
+        WireClass::Varint,
+        FieldKind::Scalar(ScalarKind::Int64),
+    ));
+    desc.add_field(FieldDescriptor::new(
+        2,
+        "name",
+        WireClass::Len,
+        FieldKind::Scalar(ScalarKind::String),
+    ));
     let mut msg = DynamicMessage::with_descriptor(desc);
     msg.set_varint_by_name("id", 1).unwrap();
     msg.set_string_by_name("name", "test").unwrap();
@@ -80,7 +125,8 @@ fn remove_by_name() {
 #[test]
 fn encode_canonical_is_deterministic() {
     let desc = make_user_descriptor();
-    let mut msg = DynamicMessage::decode_descriptor(desc.clone(), &[], &DecoderLimits::default()).unwrap();
+    let mut msg =
+        DynamicMessage::decode_descriptor(desc.clone(), &[], &DecoderLimits::default()).unwrap();
     msg.set_varint_by_name("id", 1).unwrap();
     let canon = msg.encode_canonical().unwrap();
 
@@ -92,7 +138,12 @@ fn encode_canonical_is_deterministic() {
 #[test]
 fn oneof_descriptor_lookup() {
     let mut desc = MessageDescriptor::new();
-    desc.add_field(FieldDescriptor::new(1, "id", WireClass::Varint, FieldKind::Scalar(ScalarKind::Int64)));
+    desc.add_field(FieldDescriptor::new(
+        1,
+        "id",
+        WireClass::Varint,
+        FieldKind::Scalar(ScalarKind::Int64),
+    ));
     desc.add_oneof(tpt20_core::OneofDescriptor::new("contact", vec![10, 11]));
     assert_eq!(desc.oneof_members("contact"), Some(&[10, 11][..]));
 }

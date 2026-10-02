@@ -14,8 +14,9 @@
 //! - `default` = `["in_process"]` — in-process transport is always available
 //! - `http2` — HTTP/2 production transport (requires `h2`)
 //! - `tls` — TLS with ALPN (requires `tokio-rustls` and `rustls-pemfile`)
-//! - `quic` — QUIC/HTTP3 transport (requires `quinn`)
+//! - `quic` — native QUIC transport (requires `quinn`; see [`quic`])
 
+pub mod compression;
 pub mod endpoint;
 pub mod error;
 pub mod frame;
@@ -23,8 +24,11 @@ pub mod frame;
 pub mod http2;
 pub mod in_process;
 pub mod metadata;
+#[cfg(feature = "quic")]
+pub mod quic;
 pub mod traits;
 
+pub use compression::Compression;
 pub use endpoint::{Endpoint, TlsConfig};
 pub use error::TransportError;
 pub use frame::{decode_frame, encode_frame, Frame, FrameFlags, FramedMessage};
@@ -32,4 +36,7 @@ pub use frame::{decode_frame, encode_frame, Frame, FrameFlags, FramedMessage};
 pub use http2::{Http2Server, Http2Transport};
 pub use in_process::{InProcessServer, InProcessTransport};
 pub use metadata::Metadata;
-pub use traits::{Call, StreamingType, StreamItem, Transport};
+pub use traits::{
+    Call, CallSender, IncomingCall, IncomingCallParts, RequestStream, ResponseStream, StreamItem,
+    StreamingType, Transport,
+};

@@ -30,10 +30,11 @@ pub mod lexer;
 pub mod lower;
 pub mod parser;
 pub mod proto_ast;
+pub mod schema_wire;
 pub mod wire;
 
 pub use error::{ProtoError, WireError};
 pub use lexer::lex as lex_proto;
-pub use lower::lower;
+pub use lower::{lower, lower_with_report, LowerReport};
 pub use parser::parse as parse_proto;
 pub use wire::{decode_protobuf, decode_protobuf_with, encode_protobuf, encode_protobuf_with};

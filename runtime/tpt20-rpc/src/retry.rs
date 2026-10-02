@@ -1,7 +1,7 @@
 //! Retry policy for resilient RPC calls (spec §16).
 
-use std::time::Duration;
 use crate::status::Status;
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RetryPolicy {
@@ -25,12 +25,16 @@ impl Default for RetryPolicy {
 }
 
 impl RetryPolicy {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn is_retryable(&self, status: Status) -> bool {
         self.retryable_statuses.contains(&status)
     }
     pub fn backoff_for_attempt(&self, attempt: u32) -> Duration {
-        let backoff = self.initial_backoff.mul_f64(self.backoff_multiplier.powi(attempt as i32));
+        let backoff = self
+            .initial_backoff
+            .mul_f64(self.backoff_multiplier.powi(attempt as i32));
         backoff.min(self.max_backoff)
     }
 }

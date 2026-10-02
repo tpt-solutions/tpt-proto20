@@ -11,11 +11,15 @@ keywords = ["tpt20", "fuzzing", "testing", "security", "text-parser"]
 categories = ["development-tools", "testing"]
 
 [[bin]]
-name = "fuzz_target"
+name = "text-parser-fuzz"
 path = "fuzz_targets/fuzz_target.rs"
+test = false
+bench = false
 
 [dependencies]
 tpt20-core = { path = "../../runtime/tpt20-core" }
-tpt20-json = { path = "../../runtime/tpt20-json" }
+tpt20-text = { path = "../../runtime/tpt20-text" }
+tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
 libfuzzer-sys = "0.4"
 arbitrary = "1.3"

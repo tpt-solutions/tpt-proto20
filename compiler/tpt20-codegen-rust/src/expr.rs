@@ -14,8 +14,11 @@ pub const CLASS_LEN: &str = "__core::WireClass::Len";
 pub fn enc_value(scalar: &str, v: &str) -> String {
     match scalar {
         "bool" => format!("__core::Value::Varint((*{v}) as u64)"),
-        "int32" | "sint32" => format!("__core::Value::Varint(i64::from(*{v}) as u64)"),
-        "int64" | "sint64" | "uint64" => format!("__core::Value::Varint((*{v}) as u64)"),
+        "int32" => format!("__core::Value::Varint(i64::from(*{v}) as u64)"),
+        "sint32" => format!("__scalar::encode_sint(i64::from(*{v}))"),
+        "sint64" => format!("__scalar::encode_sint(*{v})"),
+        "int64" => format!("__core::Value::Varint((*{v}) as u64)"),
+        "uint64" => format!("__core::Value::Varint(*{v})"),
         "uint32" => format!("__core::Value::Varint((*{v}) as u64)"),
         "fixed32" => format!("__core::Value::Fixed32(*{v})"),
         "sfixed32" => format!("__core::Value::Fixed32((*{v}) as u32)"),
@@ -38,6 +41,18 @@ pub fn dec_owned(scalar: &str, v: &str, l: &str) -> String {
     }
 }
 
+/// Decodes from a *borrowed* wire value into an *owned* Rust value (used for
+/// map entries, which are parsed without copying the entry payload first).
+pub fn dec_owned_from_borrowed(scalar: &str, v: &str, l: &str) -> String {
+    match scalar {
+        "string" => {
+            format!("__scalar::decode_string_limited_borrowed({v}, {l}).map(str::to_string)")
+        }
+        "bytes" => format!("__scalar::decode_bytes_borrowed({v}).map(<[u8]>::to_vec)"),
+        other => dec_view(other, v, l),
+    }
+}
+
 /// Same as [`dec_owned`] but borrows string/bytes payloads (view decoding).
 pub fn dec_view(scalar: &str, v: &str, l: &str) -> String {
     match scalar {
@@ -50,7 +65,7 @@ pub fn dec_view(scalar: &str, v: &str, l: &str) -> String {
         "uint64" => format!("__scalar::decode_uint_borrowed({v})"),
         "sint32" => format!("__scalar::decode_sint_borrowed({v}).map(|x| x as i32)"),
         "sint64" => format!("__scalar::decode_sint_borrowed({v})"),
-        "fixed32" => format!("__scalar::decode_fixed32_borrowed({v}).map(|x| x as u32)"),
+        "fixed32" => format!("__scalar::decode_fixed32_borrowed({v})"),
         "sfixed32" => format!("__scalar::decode_fixed32_borrowed({v}).map(|x| x as i32)"),
         "fixed64" => format!("__scalar::decode_fixed64_borrowed({v})"),
         "sfixed64" => format!("__scalar::decode_fixed64_borrowed({v}).map(|x| x as i64)"),
@@ -84,16 +99,18 @@ fn dec_numeric(scalar: &str, v: &str, _l: &str) -> String {
 pub fn to_wire_word(scalar: &str, v: &str) -> String {
     match scalar {
         "bool" => format!("{v} as u64"),
-        "int32" | "sint32" => format!("i64::from({v}) as u64"),
-        "int64" | "sint64" => format!("{v} as u64"),
+        "int32" => format!("i64::from({v}) as u64"),
+        "sint32" => format!("__core::varint::encode_zigzag(i64::from({v}))"),
+        "int64" => format!("{v} as u64"),
+        "sint64" => format!("__core::varint::encode_zigzag({v})"),
         "uint32" => format!("{v} as u64"),
         "uint64" => v.to_string(),
         "fixed32" => v.to_string(),
         "sfixed32" => format!("{v} as u32"),
-        "float32" => format!("{v}.to_bits()"),
+        "float32" => format!("({v}).to_bits()"),
         "fixed64" => v.to_string(),
         "sfixed64" => format!("{v} as u64"),
-        "float64" => format!("{v}.to_bits()"),
+        "float64" => format!("({v}).to_bits()"),
         other => unreachable!("not packable: {other}"),
     }
 }
@@ -101,16 +118,18 @@ pub fn to_wire_word(scalar: &str, v: &str) -> String {
 /// Wire word `{x}` -> element value for packed decoding.
 pub fn from_wire_word(scalar: &str, x: &str) -> String {
     match scalar {
-        "bool" => format!("({x} != 0)"),
-        "int32" => format!("({x} as i32)"),
-        "int64" => format!("({x} as i64)"),
-        "uint32" => format!("({x} as u32)"),
+        "bool" => format!("{x} != 0"),
+        "int32" => format!("{x} as i32"),
+        "int64" => format!("{x} as i64"),
+        "sint32" => format!("__core::varint::decode_zigzag({x}) as i32"),
+        "sint64" => format!("__core::varint::decode_zigzag({x})"),
+        "uint32" => format!("{x} as u32"),
         "uint64" => x.to_string(),
         "fixed32" => x.to_string(),
-        "sfixed32" => format!("({x} as i32)"),
+        "sfixed32" => format!("{x} as i32"),
         "float32" => format!("f32::from_bits({x})"),
         "fixed64" => x.to_string(),
-        "sfixed64" => format!("({x} as i64)"),
+        "sfixed64" => format!("{x} as i64"),
         "float64" => format!("f64::from_bits({x})"),
         other => unreachable!("not packable: {other}"),
     }
@@ -137,9 +156,9 @@ pub fn json_to(scalar: &str, v: &str) -> String {
 pub fn json_from(scalar: &str, v: &str) -> String {
     match scalar {
         "bool" => format!("__json::as_bool({v})"),
-        "int32" | "sint32" => format!("__support::as_i32({v})"),
+        "int32" | "sint32" | "sfixed32" => format!("__support::as_i32({v})"),
         "int64" | "sint64" => format!("__json::as_i64({v})"),
-        "uint32" | "fixed32" | "sfixed32" => format!("__support::as_u32({v})"),
+        "uint32" | "fixed32" => format!("__support::as_u32({v})"),
         "uint64" | "fixed64" => format!("__json::as_u64({v})"),
         "sfixed64" => format!("__json::as_i64({v})"),
         "float32" => format!("__json::as_f64({v}).map(|x| x as f32)"),
@@ -160,4 +179,3 @@ pub fn view_rust_type(scalar: &str) -> &'static str {
             .unwrap_or("()"),
     }
 }
-

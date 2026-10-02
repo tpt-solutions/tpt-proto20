@@ -14,3 +14,24 @@ categories = ["network-programming", "asynchronous"]
 thiserror.workspace = true
 tpt20-core = { path = "../tpt20-core" }
 tpt20-stdlib = { path = "../tpt20-stdlib" }
+tpt20-transport = { path = "../tpt20-transport" }
+tpt20-json = { path = "../tpt20-json" }
+tpt20-observability = { path = "../tpt20-observability" }
+futures = "0.3"
+async-trait = "0.1"
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+
+[features]
+default = []
+# Enables `Server::serve_http2`.
+http2 = ["tpt20-transport/http2"]
+# Enables `Server::serve_quic`.
+quic = ["tpt20-transport/quic"]
+
+[dev-dependencies]
+rcgen = "0.13"
+tpt20-observability = { path = "../tpt20-observability" }
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }
+tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
+tokio = { version = "1", features = ["full"] }
+tpt20-transport = { path = "../tpt20-transport", features = ["http2"] }

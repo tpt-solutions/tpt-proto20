@@ -30,10 +30,7 @@ use crate::WireClass;
 /// Returns generation facts for a schema scalar name, or `None` if the name
 /// is not a known scalar (i.e. it is a message or enum reference).
 pub fn scalar_info(name: &str) -> Option<ScalarInfo> {
-    let info = |rust: &'static str,
-                class: WireClass,
-                pack: PackKind|
-     -> ScalarInfo {
+    let info = |rust: &'static str, class: WireClass, pack: PackKind| -> ScalarInfo {
         ScalarInfo { rust, class, pack }
     };
     Some(match name {

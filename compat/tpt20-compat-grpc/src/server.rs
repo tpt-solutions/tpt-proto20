@@ -43,8 +43,54 @@ impl GrpcServer {
 
     /// Runs the server, accepting connections and dispatching RPC calls.
     ///
-    /// The handler receives parsed gRPC calls. Return an error to stop
-    /// serving.
+    /// Each call is handed to `handler` as a [`GrpcCall`]. When the handler
+    /// returns, the call ends: with the status it sent through
+    /// [`GrpcCall::send_status`], `OK` if it sent none, or `INTERNAL` if it
+    /// returned an error. Requests are accepted with any
+    /// `application/grpc[+proto]` content type and answered in kind.
+    #[cfg(feature = "server")]
+    pub async fn serve<F, Fut>(&self, handler: F) -> Result<(), GrpcError>
+    where
+        F: Fn(GrpcCall) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Result<(), GrpcError>> + Send + 'static,
+    {
+        let listener = tpt20_transport::Http2Server::new(self.endpoint.clone())
+            .bind()
+            .await?;
+        self.serve_listener(listener, handler, std::future::pending())
+            .await
+    }
+
+    /// Like [`serve`](Self::serve) on an already-bound listener, stopping
+    /// gracefully when `shutdown` completes.
+    #[cfg(feature = "server")]
+    pub async fn serve_listener<F, Fut, S>(
+        &self,
+        listener: tokio::net::TcpListener,
+        handler: F,
+        shutdown: S,
+    ) -> Result<(), GrpcError>
+    where
+        F: Fn(GrpcCall) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Result<(), GrpcError>> + Send + 'static,
+        S: Future<Output = ()>,
+    {
+        let server = tpt20_transport::Http2Server::new(self.endpoint.clone());
+        server
+            .serve_listener(
+                listener,
+                move |call| {
+                    let handler = handler.clone();
+                    Box::pin(bridge(call, handler))
+                },
+                shutdown,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Without the `server` feature there is no HTTP/2 stack to serve on.
+    #[cfg(not(feature = "server"))]
     pub async fn serve<F, Fut>(&self, handler: F) -> Result<(), GrpcError>
     where
         F: Fn(GrpcCall) -> Fut + Send + Sync + Clone + 'static,
@@ -57,6 +103,76 @@ impl GrpcServer {
     }
 }
 
+/// Connects one transport call to a [`GrpcCall`] handler.
+#[cfg(feature = "server")]
+async fn bridge<F, Fut>(
+    incoming: tpt20_transport::http2::IncomingHttp2Call,
+    handler: F,
+) -> Result<(), tpt20_transport::TransportError>
+where
+    F: Fn(GrpcCall) -> Fut,
+    Fut: Future<Output = Result<(), GrpcError>>,
+{
+    use futures::StreamExt;
+    use tpt20_transport::traits::IncomingCall;
+
+    let parts = incoming.into_parts();
+    let mut sender = parts.sender;
+    let mut incoming_stream = parts.incoming;
+    let (response_tx, mut response_rx) = tokio::sync::mpsc::channel(32);
+    let (trailers_tx, trailers_rx) = tokio::sync::oneshot::channel();
+    let (request_tx, request_rx) = tokio::sync::mpsc::channel(32);
+    let call = GrpcCall {
+        method: parts.method,
+        metadata: parts.metadata,
+        payload: parts.request,
+        requests: request_rx,
+        response_tx,
+        trailers_tx: Some(trailers_tx),
+    };
+    let handled = handler(call);
+    let pump_requests = async {
+        while let Some(message) = incoming_stream.next().await {
+            if request_tx.send(message).await.is_err() {
+                break;
+            }
+        }
+        // Dropping the sender tells the handler the client is done; the
+        // call itself only ends when the handler does.
+        drop(request_tx);
+        futures::future::pending::<()>().await;
+    };
+    let forward = async {
+        while let Some(item) = response_rx.recv().await {
+            match item {
+                Ok(framed) => sender.send_message(framed.payload).await?,
+                Err(_) => break,
+            }
+        }
+        Ok::<_, tpt20_transport::TransportError>(())
+    };
+    let (outcome, forwarded) = tokio::select! {
+        done = async { futures::join!(handled, forward) } => done,
+        _ = pump_requests => unreachable!("request pump never completes"),
+    };
+    forwarded?;
+    let trailers = match trailers_rx.await {
+        Ok(Ok(t)) => t,
+        _ => {
+            let mut t = tpt20_transport::Metadata::new();
+            match outcome {
+                Ok(()) => t.insert("grpc-status", "0"),
+                Err(e) => {
+                    t.insert("grpc-status", "13");
+                    t.insert("grpc-message", e.to_string());
+                }
+            }
+            t
+        }
+    };
+    sender.send_trailers(trailers).await
+}
+
 /// A parsed incoming gRPC call.
 #[derive(Debug)]
 pub struct GrpcCall {
@@ -66,13 +182,23 @@ pub struct GrpcCall {
     pub metadata: tpt20_transport::Metadata,
     /// The raw request payload bytes.
     pub payload: Vec<u8>,
+    /// Further request messages (client streaming / bidi); `payload` is the
+    /// first one. Closes when the client half-closes.
+    pub requests: tokio::sync::mpsc::Receiver<Vec<u8>>,
     /// Channel to send response frames.
     pub response_tx: tokio::sync::mpsc::Sender<Result<tpt20_transport::FramedMessage, GrpcError>>,
     /// Channel to send trailing metadata.
-    pub trailers_tx: Option<tokio::sync::oneshot::Sender<Result<tpt20_transport::Metadata, GrpcError>>>,
+    pub trailers_tx:
+        Option<tokio::sync::oneshot::Sender<Result<tpt20_transport::Metadata, GrpcError>>>,
 }
 
 impl GrpcCall {
+    /// Receives the next request message after `payload`, or `None` once the
+    /// client has finished sending.
+    pub async fn recv_message(&mut self) -> Option<Vec<u8>> {
+        self.requests.recv().await
+    }
+
     /// Sends a success response with the given payload.
     pub async fn send_ok(&self, payload: Vec<u8>) -> Result<(), GrpcError> {
         self.response_tx
@@ -85,7 +211,11 @@ impl GrpcCall {
     }
 
     /// Sends a response with the given tpt20 status.
-    pub async fn send_status(&mut self, status: tpt20_rpc::Status, message: impl Into<String>) -> Result<(), GrpcError> {
+    pub async fn send_status(
+        &mut self,
+        status: tpt20_rpc::Status,
+        message: impl Into<String>,
+    ) -> Result<(), GrpcError> {
         let trailers = self.build_status_trailers(status, message.into());
         if let Some(tx) = self.trailers_tx.take() {
             let _ = tx.send(Ok(trailers));

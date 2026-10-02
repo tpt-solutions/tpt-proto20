@@ -43,13 +43,13 @@ mod tests {
             1: id int64;
             2: name string;
             3: email string?;              // explicit presence
-            4: repeated tag string;
-            5: map<string, string> attributes;
+            4: tag repeated string;
+            5: attributes map<string, string>;
             oneof contact {
                 10: email_addr string;
                 11: phone string;
             }
-            7: Status status;
+            7: status Status;
         }
 
         enum Status {

@@ -142,6 +142,10 @@ impl<'a> Lexer<'a> {
                         self.bump();
                         tokens.push(Token::new(TokenKind::Comma, start_span));
                     }
+                    b':' => {
+                        self.bump();
+                        tokens.push(Token::new(TokenKind::Colon, start_span));
+                    }
                     b'=' => {
                         self.bump();
                         tokens.push(Token::new(TokenKind::Eq, start_span));

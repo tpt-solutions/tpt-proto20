@@ -66,10 +66,7 @@ impl Model {
     /// scoped path first, then the bare path, then a unique suffix match so a
     /// bare `Child` resolves to its enclosing `Outer.Child`.
     pub fn resolve(&self, scope: &[String], path: &[String]) -> Option<(&str, TypeKind)> {
-        let candidates = [
-            join(scope, &path.join(".")),
-            join(&[], &path.join(".")),
-        ];
+        let candidates = [join(scope, &path.join(".")), join(&[], &path.join("."))];
         for key in &candidates {
             if let (Some(name), Some(kind)) = (self.names.get(key), self.kinds.get(key)) {
                 return Some((name.as_str(), *kind));
@@ -115,10 +112,7 @@ fn flat_name(scope: &[String], name: &str) -> String {
 
 /// Returns true when the dotted path refers to a known scalar type.
 pub fn is_scalar_path(path: &[String]) -> bool {
-    path.len() == 1
-        && path
-            .first()
-            .is_some_and(|p| scalar_info(p).is_some())
+    path.len() == 1 && path.first().is_some_and(|p| scalar_info(p).is_some())
 }
 
 #[cfg(test)]

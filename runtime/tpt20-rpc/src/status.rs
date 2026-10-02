@@ -48,18 +48,29 @@ impl Status {
         }
     }
 
-    pub const fn code(&self) -> i32 { *self as i32 }
+    pub const fn code(&self) -> i32 {
+        *self as i32
+    }
 
     pub fn from_code(code: i32) -> Option<Status> {
         match code {
-            0 => Some(Status::Ok), 1 => Some(Status::Cancelled), 2 => Some(Status::Unknown),
-            3 => Some(Status::InvalidArgument), 4 => Some(Status::DeadlineExceeded),
-            5 => Some(Status::NotFound), 6 => Some(Status::AlreadyExists),
-            7 => Some(Status::PermissionDenied), 8 => Some(Status::ResourceExhausted),
-            9 => Some(Status::FailedPrecondition), 10 => Some(Status::Aborted),
-            11 => Some(Status::OutOfRange), 12 => Some(Status::Unimplemented),
-            13 => Some(Status::Internal), 14 => Some(Status::Unavailable),
-            15 => Some(Status::DataLoss), 16 => Some(Status::Unauthenticated),
+            0 => Some(Status::Ok),
+            1 => Some(Status::Cancelled),
+            2 => Some(Status::Unknown),
+            3 => Some(Status::InvalidArgument),
+            4 => Some(Status::DeadlineExceeded),
+            5 => Some(Status::NotFound),
+            6 => Some(Status::AlreadyExists),
+            7 => Some(Status::PermissionDenied),
+            8 => Some(Status::ResourceExhausted),
+            9 => Some(Status::FailedPrecondition),
+            10 => Some(Status::Aborted),
+            11 => Some(Status::OutOfRange),
+            12 => Some(Status::Unimplemented),
+            13 => Some(Status::Internal),
+            14 => Some(Status::Unavailable),
+            15 => Some(Status::DataLoss),
+            16 => Some(Status::Unauthenticated),
             _ => None,
         }
     }
@@ -72,7 +83,9 @@ impl std::fmt::Display for Status {
 }
 
 impl From<Status> for i32 {
-    fn from(status: Status) -> i32 { status.code() }
+    fn from(status: Status) -> i32 {
+        status.code()
+    }
 }
 
 impl TryFrom<i32> for Status {

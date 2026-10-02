@@ -1,0 +1,109 @@
+{
+  "suite": "canonical_encoding",
+  "description": "Deterministic encoding (spec \u00a79.10): fields ordered by (field_id, wire_class, payload); minimal varints; order-independent input.",
+  "cases": [
+    {
+      "name": "sorted_by_field_id",
+      "kind": "canonical",
+      "fields": [
+        {
+          "id": 2,
+          "class": "varint",
+          "value": "1"
+        },
+        {
+          "id": 1,
+          "class": "varint",
+          "value": "1"
+        }
+      ],
+      "hex": "08011001"
+    },
+    {
+      "name": "equal_ids_sorted_by_payload",
+      "kind": "canonical",
+      "fields": [
+        {
+          "id": 1,
+          "class": "len",
+          "value": "62"
+        },
+        {
+          "id": 1,
+          "class": "len",
+          "value": "61"
+        }
+      ],
+      "hex": "0b01610b0162"
+    },
+    {
+      "name": "multibyte_varint_is_minimal",
+      "kind": "canonical",
+      "fields": [
+        {
+          "id": 1,
+          "class": "varint",
+          "value": "300"
+        }
+      ],
+      "hex": "08ac02"
+    },
+    {
+      "name": "wire_class_breaks_ties",
+      "kind": "canonical",
+      "fields": [
+        {
+          "id": 1,
+          "class": "len",
+          "value": ""
+        },
+        {
+          "id": 1,
+          "class": "varint",
+          "value": "5"
+        }
+      ],
+      "hex": "08050b00"
+    },
+    {
+      "name": "fixed_width_values",
+      "kind": "canonical",
+      "fields": [
+        {
+          "id": 2,
+          "class": "fixed64",
+          "value": "1"
+        },
+        {
+          "id": 1,
+          "class": "fixed32",
+          "value": "1"
+        }
+      ],
+      "hex": "0901000000120100000000000000"
+    },
+    {
+      "name": "empty_message",
+      "kind": "canonical",
+      "fields": [],
+      "hex": ""
+    },
+    {
+      "name": "duplicate_fields_are_kept",
+      "kind": "canonical",
+      "fields": [
+        {
+          "id": 1,
+          "class": "varint",
+          "value": "1"
+        },
+        {
+          "id": 1,
+          "class": "varint",
+          "value": "1"
+        }
+      ],
+      "hex": "08010801"
+    }
+  ]
+}

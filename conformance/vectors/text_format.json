@@ -1,0 +1,54 @@
+{
+  "suite": "text_format",
+  "description": "Text format (spec \u00a714.3) parsed to, and printed from, the native wire format.",
+  "cases": [
+    {
+      "name": "scalars_strings_repeated",
+      "kind": "text",
+      "schema": "package t.v1;\nmessage User { 1: id int64; 2: name string; 3: tags repeated string; }",
+      "message": "User",
+      "text": "id: 7\nname: \"Ada\"\ntags: \"x\"\n",
+      "hex": "080713034164611b0178"
+    },
+    {
+      "name": "negative_int64_is_sign_extended",
+      "kind": "text",
+      "schema": "package t.v1;\nmessage User { 1: id int64; 2: name string; 3: tags repeated string; }",
+      "message": "User",
+      "text": "id: -1\n",
+      "hex": "08ffffffffffffffffff01"
+    },
+    {
+      "name": "sint_bool_float_fixed",
+      "kind": "text",
+      "schema": "package t.v1;\nmessage Z { 1: z sint64; 2: b bool; 3: f float64; 4: fx fixed32; }",
+      "message": "Z",
+      "text": "z: -1\nb: true\nf: 1.5\nfx: 16\n",
+      "hex": "080110011a000000000000f83f2110000000"
+    },
+    {
+      "name": "nested_message_and_map",
+      "kind": "text",
+      "schema": "package t.v1;\nmessage I { 1: v int32; }\nmessage O { 1: i I; 2: m map<string, int64>; }",
+      "message": "O",
+      "text": "i {\n  v: 5\n}\nm {\n  key: \"a\"\n  value: 1\n}\n",
+      "hex": "0b02080513050b01611001"
+    },
+    {
+      "name": "enum_by_name",
+      "kind": "text",
+      "schema": "package t.v1;\nmessage E { enum S { A = 0; B = 1; } 1: s S; }",
+      "message": "E",
+      "text": "s: B\n",
+      "hex": "0801"
+    },
+    {
+      "name": "oneof_member",
+      "kind": "text",
+      "schema": "package t.v1;\nmessage W { oneof c { 1: a string; 2: b int64; } }",
+      "message": "W",
+      "text": "b: 9\n",
+      "hex": "1009"
+    }
+  ]
+}

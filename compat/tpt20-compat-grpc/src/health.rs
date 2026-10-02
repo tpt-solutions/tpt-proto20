@@ -73,7 +73,10 @@ impl HealthRegistry {
         if service.is_empty() {
             guard.get("").copied().unwrap_or(ServingStatus::Serving)
         } else {
-            guard.get(service).copied().unwrap_or(ServingStatus::ServiceUnknown)
+            guard
+                .get(service)
+                .copied()
+                .unwrap_or(ServingStatus::ServiceUnknown)
         }
     }
 
@@ -124,7 +127,7 @@ impl HealthHandler {
 /// Field 1, varint encoding.
 fn encode_health_response(status: ServingStatus) -> Vec<u8> {
     let mut buf = Vec::new();
-    let tag: u64 = ((1u32 << 3) | 0) as u64; // field 1, varint wire type
+    let tag: u64 = u64::from(1u32 << 3); // field 1, varint wire type (0)
     encode_varint(&mut buf, tag);
     encode_varint(&mut buf, status.code() as u64);
     buf

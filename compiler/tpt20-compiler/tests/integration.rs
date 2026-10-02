@@ -12,8 +12,8 @@ const EXAMPLE: &str = r#"
         1: id int64;
         2: name string;
         3: email string?;
-        4: repeated tags string;
-        5: map<string, string> attributes;
+        4: tags repeated string;
+        5: attributes map<string, string>;
         oneof contact {
             10: email_addr string;
             11: phone string;
@@ -71,7 +71,7 @@ fn detects_duplicate_field_id() {
 fn rejects_bytes_map_key() {
     let src = r#"
         message M {
-            1: map<bytes, string> bad;
+            1: bad map<bytes, string>;
         }
     "#;
     let diags = check(src, Some("m.tpt"));
@@ -94,12 +94,28 @@ fn oneof_member_must_be_singular() {
     let src = r#"
         message M {
             oneof o {
-                1: repeated a string;
+                1: a repeated string;
             }
         }
     "#;
     let diags = check(src, Some("m.tpt"));
     assert!(diags.iter().any(|d| d.code == "E0005"));
+}
+
+#[test]
+fn rejects_duplicate_enum_value_names() {
+    let diags = check("enum E { A = 0; A = 1; }", Some("e.tpt"));
+    assert!(diags.iter().any(|d| d.code == "E0003"), "{diags:?}");
+    // Distinct names sharing a number need `alias`.
+    let diags = check("enum E { A = 0; B = 0; }", Some("e.tpt"));
+    assert!(diags.iter().any(|d| d.code == "E0002"), "{diags:?}");
+    let diags = check("enum E { A = 0; B alias = 0; }", Some("e.tpt"));
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.severity != tpt20_compiler::Severity::Error),
+        "{diags:?}"
+    );
 }
 
 #[test]

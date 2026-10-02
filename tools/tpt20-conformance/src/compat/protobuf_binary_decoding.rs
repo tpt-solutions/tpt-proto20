@@ -1,5 +1,5 @@
 use tpt20_compat_protobuf::wire::decode_protobuf;
-use tpt20_core::{Field, RawMessage, UnknownFieldPolicy, Value, WireClass};
+use tpt20_core::{Value, WireClass};
 
 #[test]
 fn decode_protobuf_varint() {
@@ -14,7 +14,7 @@ fn decode_protobuf_varint() {
 #[test]
 fn decode_protobuf_fixed64() {
     let value: u64 = 0xABCD1234567890;
-    let mut bytes = vec![0x09, 0x00]; // field 1, fixed64 tag
+    let mut bytes = vec![0x09]; // field 1, fixed64 tag
     bytes.extend_from_slice(&value.to_le_bytes());
     let msg = decode_protobuf(&bytes).unwrap();
     assert_eq!(msg.fields[0].wire_class, WireClass::Fixed64);
@@ -24,7 +24,7 @@ fn decode_protobuf_fixed64() {
 #[test]
 fn decode_protobuf_fixed32() {
     let value: u32 = 0xDEADBEEF;
-    let mut bytes = vec![0x0D, 0x00]; // field 1, fixed32 tag
+    let mut bytes = vec![0x0D]; // field 1, fixed32 tag
     bytes.extend_from_slice(&value.to_le_bytes());
     let msg = decode_protobuf(&bytes).unwrap();
     assert_eq!(msg.fields[0].wire_class, WireClass::Fixed32);

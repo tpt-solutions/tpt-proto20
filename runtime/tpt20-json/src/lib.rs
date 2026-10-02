@@ -12,8 +12,8 @@
 //! and unknown-field policies are applied by callers; [`get_field`] accepts
 //! either spelling when looking up object members.
 
-pub use serde_json::Value;
 pub use serde_json as json;
+pub use serde_json::Value;
 use thiserror::Error;
 
 /// Errors that can occur while converting between tpt20 messages and JSON.
@@ -37,6 +37,45 @@ pub enum JsonError {
     /// An enum name or number was not part of a closed enum.
     #[error("unknown enum value: {0}")]
     InvalidEnum(String),
+
+    /// The input contained a member the schema does not define (only
+    /// reported with [`JsonOptions::reject_unknown_fields`]).
+    #[error("unknown field: {0}")]
+    UnknownField(String),
+}
+
+/// How field names are spelled when encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FieldNameStyle {
+    /// The names as written in the schema (default).
+    #[default]
+    Original,
+    /// `lowerCamelCase` aliases.
+    LowerCamel,
+}
+
+/// Options for generated `to_json_with` / `from_json_with` methods.
+///
+/// The defaults reproduce the plain `to_json` / `from_json` behavior:
+/// original names, default values omitted, unknown members ignored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct JsonOptions {
+    /// Spelling of field names on encode. Decode accepts both spellings.
+    pub field_names: FieldNameStyle,
+    /// Emit fields that hold their default (zero/empty) value.
+    pub emit_defaults: bool,
+    /// Fail decoding on members that match no schema field.
+    pub reject_unknown_fields: bool,
+}
+
+impl JsonOptions {
+    /// Returns the member name to emit for a field.
+    pub fn key(&self, original: &str, lower_camel: &str) -> String {
+        match self.field_names {
+            FieldNameStyle::Original => original.to_string(),
+            FieldNameStyle::LowerCamel => lower_camel.to_string(),
+        }
+    }
 }
 
 impl From<serde_json::Error> for JsonError {
@@ -47,10 +86,7 @@ impl From<serde_json::Error> for JsonError {
 
 /// Looks up an object member by any of the accepted spellings (e.g. original
 /// schema name and its lowerCamelCase alias). First match wins.
-pub fn get_field<'a>(
-    obj: &'a serde_json::Map<String, Value>,
-    names: &[&str],
-) -> Option<&'a Value> {
+pub fn get_field<'a>(obj: &'a serde_json::Map<String, Value>, names: &[&str]) -> Option<&'a Value> {
     names.iter().find_map(|n| obj.get(*n))
 }
 
@@ -58,12 +94,13 @@ pub fn get_field<'a>(
 /// integers are representable as strings).
 pub fn as_i64(v: &Value) -> Result<i64, JsonError> {
     match v {
-        Value::Number(n) => n
-            .as_i64()
-            .or_else(|| n.as_f64().map(|f| f as i64))
-            .ok_or(JsonError::TypeMismatch {
-                expected: "64-bit integer",
-            }),
+        Value::Number(n) => {
+            n.as_i64()
+                .or_else(|| n.as_f64().map(|f| f as i64))
+                .ok_or(JsonError::TypeMismatch {
+                    expected: "64-bit integer",
+                })
+        }
         Value::String(s) => s.parse::<i64>().map_err(|_| JsonError::TypeMismatch {
             expected: "64-bit integer string",
         }),
@@ -99,8 +136,9 @@ pub fn as_f64(v: &Value) -> Result<f64, JsonError> {
 
 /// Reads a `bool` from a JSON boolean.
 pub fn as_bool(v: &Value) -> Result<bool, JsonError> {
-    v.as_bool()
-        .ok_or(JsonError::TypeMismatch { expected: "boolean" })
+    v.as_bool().ok_or(JsonError::TypeMismatch {
+        expected: "boolean",
+    })
 }
 
 /// Reads a string slice from a JSON string.
@@ -123,8 +161,7 @@ pub fn u64_to_value(v: u64) -> Value {
 pub mod base64 {
     use super::JsonError;
 
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     /// Encodes `data` as standard padded base64.
     pub fn encode(data: &[u8]) -> String {
@@ -177,7 +214,7 @@ pub mod base64 {
         let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
         for chunk in bytes.chunks(4) {
             let pad = chunk.iter().filter(|&&c| c == b'=').count();
-            if pad > 2 || chunk[..4 - pad].iter().any(|&c| c == b'=') {
+            if pad > 2 || chunk[..4 - pad].contains(&b'=') {
                 return Err(JsonError::Base64("misplaced padding".to_string()));
             }
             let mut n: u32 = 0;
@@ -251,4 +288,3 @@ mod tests {
         assert!(get_field(map, &["userid"]).is_none());
     }
 }
-

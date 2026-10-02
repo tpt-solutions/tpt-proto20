@@ -48,23 +48,62 @@ impl GlobalHooks {
     }
 }
 
-/// Emits a structured log event if a global logger is registered.
-///
-/// This is a convenience wrapper. Backends that want to observe log events
-/// should implement their own logger interface; this function is a placeholder
-/// that can be wired up when a concrete logging backend is available.
-pub fn emit_log(_event: LogEvent) {}
+/// A sink for structured [`LogEvent`]s (spec §19.3).
+pub trait Logger: Send + Sync {
+    /// Receives one event. Must not block the calling RPC task for long.
+    fn log(&self, event: &LogEvent);
+}
+
+static GLOBAL_LOGGER: OnceLock<&'static dyn Logger> = OnceLock::new();
+
+/// Sets the global [`Logger`]. May be called at most once; later calls are
+/// ignored.
+pub fn set_global_logger(logger: &'static dyn Logger) {
+    let _ = GLOBAL_LOGGER.set(logger);
+}
+
+/// Returns the global [`Logger`], if one was registered.
+pub fn global_logger() -> Option<&'static dyn Logger> {
+    GLOBAL_LOGGER.get().copied()
+}
+
+/// Delivers `event` to the global logger; a no-op when none is registered.
+pub fn emit_log(event: LogEvent) {
+    if let Some(logger) = global_logger() {
+        logger.log(&event);
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    use crate::metrics::Labels;
     use super::*;
+    use crate::metrics::Labels;
 
     #[test]
     fn global_hooks_returns_noop_when_unset() {
         let hooks = GlobalHooks::current();
         let labels = Labels::new();
         hooks.metrics.requests_started(&labels);
+    }
+
+    #[test]
+    fn logger_receives_events_once_registered() {
+        use std::sync::Mutex;
+        struct Capture(Mutex<Vec<String>>);
+        impl Logger for Capture {
+            fn log(&self, e: &LogEvent) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(e.status.clone().unwrap_or_default());
+            }
+        }
+        // No logger yet: a no-op.
+        emit_log(LogEvent::new().status("dropped"));
+        let capture: &'static Capture = Box::leak(Box::new(Capture(Mutex::new(Vec::new()))));
+        set_global_logger(capture);
+        emit_log(LogEvent::new().status("OK"));
+        assert_eq!(*capture.0.lock().unwrap(), vec!["OK".to_string()]);
     }
 
     #[test]

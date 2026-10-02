@@ -11,6 +11,7 @@ keywords = ["tpt20", "codegen", "rust", "code-generation", "schema"]
 categories = ["development-tools", "compilers"]
 
 [dependencies]
+tpt20-descriptor = { path = "../tpt20-descriptor" }
 tpt20-ir = { path = "../tpt20-ir" }
 
 [dev-dependencies]

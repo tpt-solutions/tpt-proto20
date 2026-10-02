@@ -15,3 +15,6 @@ tpt20-core = { path = "../tpt20-core" }
 tpt20-descriptor = { path = "../../compiler/tpt20-descriptor" }
 tpt20-ir = { path = "../../compiler/tpt20-ir" }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tpt20-compiler = { path = "../../compiler/tpt20-compiler" }

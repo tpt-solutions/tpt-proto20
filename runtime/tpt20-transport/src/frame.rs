@@ -158,13 +158,7 @@ impl Frame {
         }
 
         let payload = bytes[5..5 + length].to_vec();
-        Ok((
-            Frame {
-                flags,
-                payload,
-            },
-            5 + length,
-        ))
+        Ok((Frame { flags, payload }, 5 + length))
     }
 
     /// Returns the encoded frame length without the payload.
@@ -217,7 +211,7 @@ mod tests {
 
     #[test]
     fn frame_rejects_reserved_bits() {
-        let mut bytes = vec![0xFE, 0, 0, 0, 0];
+        let bytes = vec![0xFE, 0, 0, 0, 0];
         assert!(Frame::decode(&bytes).is_err());
     }
 

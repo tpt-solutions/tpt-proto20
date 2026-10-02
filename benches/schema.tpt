@@ -1,0 +1,48 @@
+package bench.v1;
+
+message Small {
+  1: id int64;
+  2: name string;
+  3: flag bool;
+}
+
+message Leaf {
+  1: v int64;
+  2: s string;
+}
+
+message Mid {
+  1: leaf Leaf;
+  2: n int32;
+}
+
+message Nested {
+  1: mid Mid;
+  2: tag string;
+}
+
+message Repeated {
+  1: items repeated string;
+  2: nums repeated int64;
+}
+
+message Maps {
+  1: attrs map<string, string>;
+  2: counts map<int64, int64>;
+}
+
+message Big {
+  1: blob bytes;
+  2: name string;
+}
+
+message Blob {
+  1: data bytes;
+}
+
+service Bench {
+  Echo(Blob) returns (Blob);
+  Unary(Small) returns (Small);
+  Stream(Small) returns (stream Small);
+  Slow(Small) returns (Small);
+}

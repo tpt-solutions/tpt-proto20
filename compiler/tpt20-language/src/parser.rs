@@ -28,7 +28,13 @@ pub enum ParseError {
     ExpectedType(Span),
     /// A numeric literal was expected.
     ExpectedNumber(Span),
+    /// Messages are nested deeper than [`MAX_NESTING_DEPTH`].
+    NestingTooDeep(Span),
 }
+
+/// Maximum nesting depth of message declarations; bounds parser recursion so
+/// hostile schemas cannot overflow the stack.
+pub const MAX_NESTING_DEPTH: usize = 64;
 
 impl From<LexError> for ParseError {
     fn from(e: LexError) -> Self {
@@ -39,6 +45,7 @@ impl From<LexError> for ParseError {
 struct Parser {
     tokens: Vec<SpannedToken>,
     pos: usize,
+    depth: usize,
 }
 
 impl Parser {
@@ -143,6 +150,16 @@ impl Parser {
     }
 
     fn parse_message(&mut self) -> Result<Message, ParseError> {
+        if self.depth >= MAX_NESTING_DEPTH {
+            return Err(ParseError::NestingTooDeep(self.span()));
+        }
+        self.depth += 1;
+        let result = self.parse_message_body();
+        self.depth -= 1;
+        result
+    }
+
+    fn parse_message_body(&mut self) -> Result<Message, ParseError> {
         self.expect(&Token::Message)?;
         let span = self.span();
         let name = self.expect_ident()?;
@@ -478,6 +495,10 @@ impl Parser {
 /// Parses `.tpt` source into an [`ast::File`].
 pub fn parse(src: &str) -> Result<File, ParseError> {
     let tokens = crate::lexer::lex(src)?;
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        depth: 0,
+    };
     parser.parse_file()
 }

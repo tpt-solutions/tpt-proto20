@@ -11,8 +11,10 @@ keywords = ["tpt20", "fuzzing", "testing", "security", "metadata"]
 categories = ["development-tools", "testing"]
 
 [[bin]]
-name = "fuzz_target"
+name = "metadata-parsing-fuzz"
 path = "fuzz_targets/fuzz_target.rs"
+test = false
+bench = false
 
 [dependencies]
 tpt20-rpc = { path = "../../runtime/tpt20-rpc" }

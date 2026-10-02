@@ -10,12 +10,14 @@
 //! - generated enums respecting open/closed unknown-value semantics;
 //! - oneofs as mutually exclusive Rust enums;
 //! - JSON conversion methods (`to_json` / `from_json`) per spec §14.2;
-//! - opt-in validated builders.
+//! - opt-in validated builders;
+//! - per `service`: an `#[async_trait]` server trait, an `XServer<S>` wrapper
+//!   implementing `tpt20_rpc::Service`, and an `XClient` stub over
+//!   `tpt20_rpc::Channel`, covering unary, server-, client- and
+//!   bidirectional-streaming methods (see [`CodegenOptions::services`]).
 //!
-//! Generated code depends on `tpt20-core` and `tpt20-json`.
-//!
-//! Service code generation is deferred until the RPC runtime types exist
-//! (spec §16, todo Phase 10); it will extend this module.
+//! Generated code depends on `tpt20-core` and `tpt20-json`, plus `tpt20-rpc`
+//! when the schema declares services.
 
 pub mod emit;
 pub mod expr;
@@ -47,6 +49,11 @@ pub struct CodegenOptions {
     pub core_crate: String,
     /// Crate name to reference for `tpt20-json` in generated code.
     pub json_crate: String,
+    /// Emit service traits, server wrappers and client stubs (spec §12.6).
+    /// Generated service code depends on `tpt20-rpc`.
+    pub services: bool,
+    /// Crate name to reference for `tpt20-rpc` in generated service code.
+    pub rpc_crate: String,
 }
 
 impl Default for CodegenOptions {
@@ -55,6 +62,8 @@ impl Default for CodegenOptions {
             builders: false,
             core_crate: "tpt20_core".to_string(),
             json_crate: "tpt20_json".to_string(),
+            services: true,
+            rpc_crate: "tpt20_rpc".to_string(),
         }
     }
 }

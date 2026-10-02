@@ -21,6 +21,8 @@
 //! - `reflect`         introspect a descriptor
 //! - `registry publish` publish a descriptor to the local registry
 
+mod conformance;
+
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -74,6 +76,15 @@ impl CliError {
 #[derive(Parser, Debug)]
 #[command(name = "tpt20", about = "tpt20 schema compiler tooling", version)]
 struct Cli {
+    /// PEM client certificate chain to present to servers that require mTLS
+    /// (used by `call`, `health` and `reflect-remote`; needs --tls-client-key)
+    #[arg(long, global = true, requires = "tls_client_key")]
+    tls_client_cert: Option<PathBuf>,
+
+    /// PEM private key for --tls-client-cert
+    #[arg(long, global = true, requires = "tls_client_cert")]
+    tls_client_key: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -146,7 +157,7 @@ enum Commands {
         out: Option<PathBuf>,
     },
 
-    /// Decode binary bytes to a JSON representation
+    /// Decode binary bytes (schema-free JSON, or text format with --schema)
     Decode {
         /// Binary input file (defaults to stdin)
         #[arg(short, long)]
@@ -154,6 +165,12 @@ enum Commands {
         /// Output file (defaults to stdout)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Schema file; with --message, prints schema-aware text format
+        #[arg(short, long, requires = "message")]
+        schema: Option<PathBuf>,
+        /// Message type to decode as (e.g. `User` or `Outer.Child`)
+        #[arg(short, long, requires = "schema")]
+        message: Option<String>,
     },
 
     /// Encode JSON input to binary
@@ -166,7 +183,7 @@ enum Commands {
         output: Option<PathBuf>,
     },
 
-    /// Convert text format to binary
+    /// Convert text format to binary (schema-driven)
     TextToBinary {
         /// Text input file (defaults to stdin)
         #[arg(short, long)]
@@ -174,9 +191,15 @@ enum Commands {
         /// Output file (defaults to stdout)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Schema file
+        #[arg(short, long)]
+        schema: PathBuf,
+        /// Message type (e.g. `User` or `Outer.Child`)
+        #[arg(short, long)]
+        message: String,
     },
 
-    /// Convert binary to text format
+    /// Convert binary to text format (schema-driven)
     BinaryToText {
         /// Binary input file (defaults to stdin)
         #[arg(short, long)]
@@ -184,6 +207,12 @@ enum Commands {
         /// Output file (defaults to stdout)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Schema file
+        #[arg(short, long)]
+        schema: PathBuf,
+        /// Message type (e.g. `User` or `Outer.Child`)
+        #[arg(short, long)]
+        message: String,
     },
 
     /// Convert JSON to binary
@@ -231,12 +260,25 @@ enum Commands {
         endpoint: String,
         /// Method to call (e.g. user.v1.UserService/GetUser)
         method: String,
-        /// JSON input file (defaults to stdin)
+        /// JSON input file: a field-id-keyed object, or an array of them for
+        /// client/bidi streams (defaults to stdin when no other input is given)
         #[arg(short, long)]
         input: Option<PathBuf>,
-        /// Binary input file
+        /// Binary input file (one message)
         #[arg(short, long)]
         binary_input: Option<PathBuf>,
+        /// Text-format input file (needs --schema and --request-type)
+        #[arg(long, requires_all = ["schema", "request_type"])]
+        text_input: Option<PathBuf>,
+        /// Schema file used for text input/output
+        #[arg(long)]
+        schema: Option<PathBuf>,
+        /// Request message type (for --text-input)
+        #[arg(long, requires = "schema")]
+        request_type: Option<String>,
+        /// Response message type; responses print as text format
+        #[arg(long, requires = "schema")]
+        response_type: Option<String>,
         /// Streaming call type: unary, server, client, bidi
         #[arg(short, long, default_value = "unary")]
         streaming: StreamingTypeArg,
@@ -246,19 +288,51 @@ enum Commands {
         /// Deadline in milliseconds
         #[arg(short, long)]
         deadline_ms: Option<u64>,
-        /// TLS certificate file
+        /// CA certificate (PEM) to trust; enables TLS
         #[arg(long)]
         tls_cert: Option<PathBuf>,
-        /// Compression algorithm: none, gzip, deflate
+        /// Compression for request messages: none, gzip, deflate (the server may
+        /// answer compressed when it supports it)
         #[arg(long, default_value = "none")]
         compression: CompressionArg,
     },
 
-    /// Check service health
+    /// Check service health (`tpt20.health.v1.Health/Check`)
     Health {
         /// Target endpoint
         endpoint: String,
-        /// TLS certificate file
+        /// Service name to check (empty = overall server status)
+        #[arg(short, long, default_value = "")]
+        service: String,
+        /// Deadline in milliseconds
+        #[arg(short, long, default_value_t = 5000)]
+        deadline_ms: u64,
+        /// CA certificate (PEM) to trust; enables TLS
+        #[arg(long)]
+        tls_cert: Option<PathBuf>,
+    },
+
+    /// List a running server's services, or fetch its schema descriptor
+    /// (`tpt20.reflection.v1.Reflection`)
+    ReflectRemote {
+        /// Target endpoint
+        endpoint: String,
+        /// Fetch the descriptor instead of listing services
+        #[arg(short, long)]
+        descriptor: bool,
+        /// Package whose descriptor to fetch (default: the only one)
+        #[arg(short, long, default_value = "")]
+        package: String,
+        /// Descriptor output format: json or binary
+        #[arg(short, long, default_value = "json")]
+        format: DescriptorFormat,
+        /// Output file for the descriptor (defaults to stdout)
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// Deadline in milliseconds
+        #[arg(long, default_value_t = 5000)]
+        deadline_ms: u64,
+        /// CA certificate (PEM) to trust; enables TLS
         #[arg(long)]
         tls_cert: Option<PathBuf>,
     },
@@ -292,7 +366,33 @@ enum GenBackend {
         /// Emit validated builders
         #[arg(long)]
         builders: bool,
+        /// Do not generate service traits/clients (skips the `tpt20-rpc` dependency)
+        #[arg(long)]
+        no_services: bool,
     },
+    /// Generate Go code (messages + minimal runtime; Go 1.21+)
+    Go(PolyglotArgs),
+    /// Generate Java code (messages + minimal runtime; Java 11+)
+    Java(PolyglotArgs),
+    /// Generate Python code (messages + minimal runtime; Python 3.8+)
+    Python(PolyglotArgs),
+}
+
+/// Options shared by the non-Rust backends.
+#[derive(clap::Args, Debug)]
+struct PolyglotArgs {
+    /// Input schema file
+    #[arg(short, long = "in")]
+    input: PathBuf,
+    /// Output directory
+    #[arg(short, long = "out")]
+    output: PathBuf,
+    /// Package/module name (default: derived from the schema package)
+    #[arg(long)]
+    package_name: Option<String>,
+    /// Do not generate service clients/servers (and the RPC runtime)
+    #[arg(long)]
+    no_services: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -307,6 +407,31 @@ enum RegistryCommands {
         /// Version label (defaults to package name)
         #[arg(short, long)]
         version: Option<String>,
+        /// Overwrite an already published version whose contents differ
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// List published versions
+    List {
+        /// Registry root directory (defaults to ~/.tpt20/registry)
+        #[arg(short, long)]
+        registry: Option<PathBuf>,
+    },
+
+    /// Fetch a published descriptor by version label or fingerprint
+    Get {
+        /// Version label, or (a prefix of at least 8 characters of) a fingerprint
+        version: String,
+        /// Registry root directory (defaults to ~/.tpt20/registry)
+        #[arg(short, long)]
+        registry: Option<PathBuf>,
+        /// Output format: json or binary
+        #[arg(short, long, default_value = "json")]
+        format: DescriptorFormat,
+        /// Output file (defaults to stdout)
+        #[arg(short, long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -344,6 +469,9 @@ enum CompressionArg {
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let (Some(cert), Some(key)) = (&cli.tls_client_cert, &cli.tls_client_key) {
+        let _ = CLIENT_IDENTITY.set((cert.clone(), key.clone()));
+    }
 
     match run(cli).await {
         Ok(()) => ExitCode::SUCCESS,
@@ -359,16 +487,34 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Init { name } => cmd_init(name),
         Commands::Check { file, descriptor } => cmd_check(file, descriptor),
         Commands::Fmt { file, check } => cmd_fmt(file, check),
-        Commands::Lint { files, config, format, deny_warnings } => {
-            cmd_lint(files, config, format, deny_warnings)
-        }
+        Commands::Lint {
+            files,
+            config,
+            format,
+            deny_warnings,
+        } => cmd_lint(files, config, format, deny_warnings),
         Commands::Diff { old, new } => cmd_diff(old, new),
         Commands::Gen { backend } => cmd_gen(backend),
         Commands::Descriptors { file, format, out } => cmd_descriptors(file, format, out),
-        Commands::Decode { input, output } => cmd_decode(input, output),
+        Commands::Decode {
+            input,
+            output,
+            schema,
+            message,
+        } => cmd_decode(input, output, schema, message),
         Commands::Encode { input, output } => cmd_encode(input, output),
-        Commands::TextToBinary { input, output } => cmd_text_to_binary(input, output),
-        Commands::BinaryToText { input, output } => cmd_binary_to_text(input, output),
+        Commands::TextToBinary {
+            input,
+            output,
+            schema,
+            message,
+        } => cmd_text_to_binary(input, output, schema, message),
+        Commands::BinaryToText {
+            input,
+            output,
+            schema,
+            message,
+        } => cmd_binary_to_text(input, output, schema, message),
         Commands::JsonToBinary { input, output } => cmd_json_to_binary(input, output),
         Commands::BinaryToJson { input, output } => cmd_binary_to_json(input, output),
         Commands::ImportProto { input, output } => cmd_import_proto(input, output),
@@ -378,16 +524,59 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             method,
             input,
             binary_input,
+            text_input,
+            schema,
+            request_type,
+            response_type,
             streaming,
             metadata,
             deadline_ms,
             tls_cert,
             compression,
-        } => cmd_call(
-            endpoint, method, input, binary_input, streaming,
-            metadata, deadline_ms, tls_cert, compression,
-        ).await,
-        Commands::Health { endpoint, tls_cert } => cmd_health(endpoint, tls_cert).await,
+        } => {
+            cmd_call(CallOpts {
+                endpoint,
+                method,
+                input,
+                binary_input,
+                text_input,
+                schema,
+                request_type,
+                response_type,
+                streaming,
+                metadata,
+                deadline_ms,
+                tls_cert,
+                compression,
+            })
+            .await
+        }
+        Commands::Health {
+            endpoint,
+            service,
+            deadline_ms,
+            tls_cert,
+        } => cmd_health(endpoint, service, deadline_ms, tls_cert).await,
+        Commands::ReflectRemote {
+            endpoint,
+            descriptor,
+            package,
+            format,
+            out,
+            deadline_ms,
+            tls_cert,
+        } => {
+            cmd_reflect_remote(
+                endpoint,
+                descriptor,
+                package,
+                format,
+                out,
+                deadline_ms,
+                tls_cert,
+            )
+            .await
+        }
         Commands::Reflect { file, message } => cmd_reflect(file, message),
         Commands::Registry { command } => cmd_registry(command),
     }
@@ -407,7 +596,10 @@ fn cmd_init(name: Option<String>) -> Result<(), CliError> {
 
     let dir = Path::new(&project);
     if dir.exists() {
-        return Err(CliError::Usage(format!("directory '{}' already exists", project)));
+        return Err(CliError::Usage(format!(
+            "directory '{}' already exists",
+            project
+        )));
     }
 
     fs::create_dir_all(dir)?;
@@ -416,7 +608,7 @@ fn cmd_init(name: Option<String>) -> Result<(), CliError> {
     fs::create_dir_all(&src)?;
 
     let schema = format!(
-r#"package {name};
+        r#"package {name};
 
 message Example {{
     1: id int64;
@@ -428,7 +620,7 @@ message Example {{
     fs::write(src.join(format!("{}.tpt", project)), schema)?;
 
     let cargo = format!(
-r#"[package]
+        r#"[package]
 name = "{name}"
 version = "0.1.0"
 edition = "2021"
@@ -460,15 +652,17 @@ fn cmd_check(file: PathBuf, show_descriptor: bool) -> Result<(), CliError> {
     let diags = tpt20_compiler::check(&src, file.to_str());
     if !diags.is_empty() {
         eprintln!("{}", tpt20_compiler::render_all(&diags));
-        if diags.iter().any(|d| d.severity == tpt20_compiler::Severity::Error) {
+        if diags
+            .iter()
+            .any(|d| d.severity == tpt20_compiler::Severity::Error)
+        {
             return Err(CliError::Diagnostics("check failed".into()));
         }
     }
 
     if show_descriptor {
-        let out = tpt20_compiler::compile(&src, file.to_str()).map_err(|diags| {
-            CliError::Diagnostics(tpt20_compiler::render_all(&diags))
-        })?;
+        let out = tpt20_compiler::compile(&src, file.to_str())
+            .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
         println!("{}", out.descriptor.to_json()?);
     }
 
@@ -506,12 +700,6 @@ fn format_schema(src: &str) -> String {
             FmtToken::Newline => {
                 out.push('\n');
                 last_was_newline = true;
-            }
-            FmtToken::Indent => {
-                for _ in 0..indent {
-                    out.push_str("    ");
-                }
-                last_was_newline = false;
             }
             FmtToken::OpenBrace => {
                 if !last_was_newline {
@@ -565,7 +753,6 @@ fn format_schema(src: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FmtToken {
     Newline,
-    Indent,
     OpenBrace,
     CloseBrace,
     Semicolon,
@@ -664,12 +851,15 @@ fn cmd_lint(
 
     match format {
         OutputFormat::Json => {
-            let serializable: Vec<LintDiag> = all_diags.iter().map(|d| LintDiag {
-                code: d.code.to_string(),
-                message: d.message.clone(),
-                severity: format!("{:?}", d.severity),
-                file: d.file.clone(),
-            }).collect();
+            let serializable: Vec<LintDiag> = all_diags
+                .iter()
+                .map(|d| LintDiag {
+                    code: d.code.to_string(),
+                    message: d.message.clone(),
+                    severity: format!("{:?}", d.severity),
+                    file: d.file.clone(),
+                })
+                .collect();
             let json = serde_json::to_string_pretty(&serializable)?;
             println!("{}", json);
         }
@@ -678,8 +868,13 @@ fn cmd_lint(
         }
     }
 
-    if all_diags.iter().any(|d| d.severity == tpt20_compiler::Severity::Error)
-        || (deny_warnings && all_diags.iter().any(|d| d.severity == tpt20_compiler::Severity::Warning))
+    if all_diags
+        .iter()
+        .any(|d| d.severity == tpt20_compiler::Severity::Error)
+        || (deny_warnings
+            && all_diags
+                .iter()
+                .any(|d| d.severity == tpt20_compiler::Severity::Warning))
     {
         return Err(CliError::Diagnostics("lint failed".into()));
     }
@@ -745,8 +940,11 @@ impl LintRule {
             LintRule::NoRequired => {
                 if src.contains("required") {
                     diags.push(
-                        Diagnostic::warning("LINT001", "required keyword is deprecated; use explicit presence (`?`) instead")
-                            .in_file(file)
+                        Diagnostic::warning(
+                            "LINT001",
+                            "required keyword is deprecated; use explicit presence (`?`) instead",
+                        )
+                        .in_file(file),
                     );
                 }
             }
@@ -754,23 +952,26 @@ impl LintRule {
                 if !src.contains("package ") {
                     diags.push(
                         Diagnostic::warning("LINT002", "schema is missing a package declaration")
-                            .in_file(file)
+                            .in_file(file),
                     );
                 }
             }
             LintRule::ReservedReuse => {
                 let reserved_re = regex::Regex::new(r"reserved\s+\d+\s+to\s+\d+").unwrap();
+                let digits_re = regex::Regex::new(r"\d+").unwrap();
                 for cap in reserved_re.find_iter(src) {
                     let range = cap.as_str();
-                    let nums: Vec<u32> = regex::Regex::new(r"\d+")
-                        .unwrap()
+                    let nums: Vec<u32> = digits_re
                         .find_iter(range)
                         .filter_map(|m| m.as_str().parse().ok())
                         .collect();
                     if nums.len() == 2 && nums[0] >= nums[1] {
                         diags.push(
-                            Diagnostic::error("LINT003", format!("invalid reserved range: {}", range))
-                                .in_file(file)
+                            Diagnostic::error(
+                                "LINT003",
+                                format!("invalid reserved range: {}", range),
+                            )
+                            .in_file(file),
                         );
                     }
                 }
@@ -778,8 +979,7 @@ impl LintRule {
             LintRule::DeprecatedUsage => {
                 if src.contains("@deprecated") {
                     diags.push(
-                        Diagnostic::warning("LINT004", "deprecated annotation found")
-                            .in_file(file)
+                        Diagnostic::warning("LINT004", "deprecated annotation found").in_file(file),
                     );
                 }
             }
@@ -814,14 +1014,21 @@ fn cmd_diff(old: PathBuf, new: PathBuf) -> Result<(), CliError> {
 
 fn cmd_gen(backend: GenBackend) -> Result<(), CliError> {
     match backend {
-        GenBackend::Rust { input, output, builders } => {
+        GenBackend::Rust {
+            input,
+            output,
+            builders,
+            no_services,
+        } => {
             let src = fs::read_to_string(&input)?;
-            let compiled = tpt20_compiler::compile(&src, input.to_str()).map_err(|diags| {
-                CliError::Diagnostics(tpt20_compiler::render_all(&diags))
-            })?;
+            let compiled = tpt20_compiler::compile(&src, input.to_str())
+                .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
 
-            let mut opts = tpt20_codegen_rust::CodegenOptions::default();
-            opts.builders = builders;
+            let opts = tpt20_codegen_rust::CodegenOptions {
+                builders,
+                services: !no_services,
+                ..Default::default()
+            };
 
             let module = tpt20_codegen_rust::generate_module(&compiled.ir, &opts);
             fs::create_dir_all(&output)?;
@@ -831,18 +1038,48 @@ fn cmd_gen(backend: GenBackend) -> Result<(), CliError> {
             println!("generated {}", dest.display());
             Ok(())
         }
+        GenBackend::Go(args) => gen_polyglot("go", args),
+        GenBackend::Java(args) => gen_polyglot("java", args),
+        GenBackend::Python(args) => gen_polyglot("python", args),
     }
+}
+
+fn gen_polyglot(name: &str, args: PolyglotArgs) -> Result<(), CliError> {
+    let src = fs::read_to_string(&args.input)?;
+    let compiled = tpt20_compiler::compile(&src, args.input.to_str())
+        .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
+    let backend = tpt20_codegen_backends::backend(name)
+        .ok_or_else(|| CliError::Usage(format!("unknown backend `{name}`")))?;
+    let options = tpt20_codegen_backends::BackendOptions {
+        package_name: args.package_name,
+        services: !args.no_services,
+    };
+    let files = backend
+        .generate(&compiled.ir, &options)
+        .map_err(|e| CliError::Usage(e.to_string()))?;
+    for file in files {
+        let dest = args.output.join(&file.path);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&dest, file.contents)?;
+        println!("generated {}", dest.display());
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // descriptors
 // ---------------------------------------------------------------------------
 
-fn cmd_descriptors(file: PathBuf, format: DescriptorFormat, out: Option<PathBuf>) -> Result<(), CliError> {
+fn cmd_descriptors(
+    file: PathBuf,
+    format: DescriptorFormat,
+    out: Option<PathBuf>,
+) -> Result<(), CliError> {
     let src = fs::read_to_string(&file)?;
-    let compiled = tpt20_compiler::compile(&src, file.to_str()).map_err(|diags| {
-        CliError::Diagnostics(tpt20_compiler::render_all(&diags))
-    })?;
+    let compiled = tpt20_compiler::compile(&src, file.to_str())
+        .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
 
     match format {
         DescriptorFormat::Json => {
@@ -909,8 +1146,31 @@ fn field_value_to_json(field: &tpt20_core::Field) -> serde_json::Value {
     }
 }
 
-fn cmd_decode(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), CliError> {
+fn load_descriptor(path: &Path) -> Result<tpt20_descriptor::Descriptor, CliError> {
+    let src = fs::read_to_string(path)?;
+    let compiled = tpt20_compiler::compile(&src, path.to_str())
+        .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
+    Ok(tpt20_descriptor::Descriptor::new(compiled.ir))
+}
+
+fn text_err(e: tpt20_text::TextError) -> CliError {
+    CliError::Parse(e.to_string())
+}
+
+fn cmd_decode(
+    input: Option<PathBuf>,
+    output: Option<PathBuf>,
+    schema: Option<PathBuf>,
+    message: Option<String>,
+) -> Result<(), CliError> {
     let bytes = read_input(input)?;
+    if let (Some(schema), Some(message)) = (schema, message) {
+        let descriptor = load_descriptor(&schema)?;
+        let text = tpt20_text::TextFormat::new(&descriptor)
+            .print_bytes(&message, &bytes)
+            .map_err(text_err)?;
+        return write_output_str(&text, output);
+    }
     let raw = tpt20_core::RawMessage::decode(
         &bytes,
         &tpt20_core::DecoderLimits::default(),
@@ -930,11 +1190,15 @@ fn cmd_encode(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), Cli
     let json_str = read_input_string(input)?;
     let value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| CliError::Parse(format!("invalid json: {e}")))?;
-    let obj = value.as_object().ok_or_else(|| CliError::Parse("expected json object".into()))?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| CliError::Parse("expected json object".into()))?;
 
     let mut raw = tpt20_core::RawMessage::new();
     for (key, val) in obj {
-        let id: u32 = key.parse().map_err(|_| CliError::Parse(format!("invalid field id: {key}")))?;
+        let id: u32 = key
+            .parse()
+            .map_err(|_| CliError::Parse(format!("invalid field id: {key}")))?;
         let (wire, value) = json_value_to_core(val)?;
         raw.push(tpt20_core::Field::new(id, wire, value));
     }
@@ -942,58 +1206,47 @@ fn cmd_encode(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), Cli
     write_output(&bytes, output)
 }
 
-fn cmd_text_to_binary(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), CliError> {
+fn cmd_text_to_binary(
+    input: Option<PathBuf>,
+    output: Option<PathBuf>,
+    schema: PathBuf,
+    message: String,
+) -> Result<(), CliError> {
     let text = read_input_string(input)?;
-    let mut raw = tpt20_core::RawMessage::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let parts: Vec<&str> = line.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            continue;
-        }
-        let field_name = parts[0].trim();
-        let value_str = parts[1].trim();
-
-        let field_id = field_name.parse::<u32>().unwrap_or(0);
-        if field_id == 0 {
-            continue;
-        }
-
-        let (wire, value) = parse_text_value(value_str)?;
-        raw.push(tpt20_core::Field::new(field_id, wire, value));
-    }
-    let bytes = raw.encode().map_err(|e| CliError::Parse(e.to_string()))?;
+    let descriptor = load_descriptor(&schema)?;
+    let bytes = tpt20_text::TextFormat::new(&descriptor)
+        .parse_to_bytes(&message, &text)
+        .map_err(text_err)?;
     write_output(&bytes, output)
 }
 
-fn cmd_binary_to_text(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), CliError> {
+fn cmd_binary_to_text(
+    input: Option<PathBuf>,
+    output: Option<PathBuf>,
+    schema: PathBuf,
+    message: String,
+) -> Result<(), CliError> {
     let bytes = read_input(input)?;
-    let raw = tpt20_core::RawMessage::decode(
-        &bytes,
-        &tpt20_core::DecoderLimits::default(),
-        tpt20_core::UnknownFieldPolicy::Preserve,
-    )
-    .map_err(|e| CliError::Parse(e.to_string()))?;
-
-    let mut out = String::new();
-    for field in &raw.fields {
-        out.push_str(&format!("{}: {}\n", field.field_id, core_value_to_text(&field.value)));
-    }
-    write_output_str(&out, output)
+    let descriptor = load_descriptor(&schema)?;
+    let text = tpt20_text::TextFormat::new(&descriptor)
+        .print_bytes(&message, &bytes)
+        .map_err(text_err)?;
+    write_output_str(&text, output)
 }
 
 fn cmd_json_to_binary(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), CliError> {
     let json_str = read_input_string(input)?;
     let value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| CliError::Parse(format!("invalid json: {e}")))?;
-    let obj = value.as_object().ok_or_else(|| CliError::Parse("expected json object".into()))?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| CliError::Parse("expected json object".into()))?;
 
     let mut raw = tpt20_core::RawMessage::new();
     for (key, val) in obj {
-        let id: u32 = key.parse().map_err(|_| CliError::Parse(format!("invalid field id: {key}")))?;
+        let id: u32 = key
+            .parse()
+            .map_err(|_| CliError::Parse(format!("invalid field id: {key}")))?;
         let (wire, value) = json_value_to_core(val)?;
         raw.push(tpt20_core::Field::new(id, wire, value));
     }
@@ -1002,7 +1255,7 @@ fn cmd_json_to_binary(input: Option<PathBuf>, output: Option<PathBuf>) -> Result
 }
 
 fn cmd_binary_to_json(input: Option<PathBuf>, output: Option<PathBuf>) -> Result<(), CliError> {
-    cmd_decode(input, output)
+    cmd_decode(input, output, None, None)
 }
 
 fn read_input_string(input: Option<PathBuf>) -> Result<String, CliError> {
@@ -1016,17 +1269,31 @@ fn read_input_string(input: Option<PathBuf>) -> Result<String, CliError> {
     }
 }
 
-fn json_value_to_core(value: &serde_json::Value) -> Result<(tpt20_core::WireClass, tpt20_core::Value), CliError> {
+fn json_value_to_core(
+    value: &serde_json::Value,
+) -> Result<(tpt20_core::WireClass, tpt20_core::Value), CliError> {
     match value {
-        serde_json::Value::Null => Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(Vec::new()))),
-        serde_json::Value::Bool(b) => Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(if *b { 1 } else { 0 }))),
+        serde_json::Value::Null => Ok((
+            tpt20_core::WireClass::Len,
+            tpt20_core::Value::Len(Vec::new()),
+        )),
+        serde_json::Value::Bool(b) => Ok((
+            tpt20_core::WireClass::Varint,
+            tpt20_core::Value::Varint(if *b { 1 } else { 0 }),
+        )),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(i as u64)))
+                Ok((
+                    tpt20_core::WireClass::Varint,
+                    tpt20_core::Value::Varint(i as u64),
+                ))
             } else if let Some(u) = n.as_u64() {
                 Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(u)))
             } else if let Some(f) = n.as_f64() {
-                Ok((tpt20_core::WireClass::Fixed64, tpt20_core::Value::Fixed64(f.to_bits())))
+                Ok((
+                    tpt20_core::WireClass::Fixed64,
+                    tpt20_core::Value::Fixed64(f.to_bits()),
+                ))
             } else {
                 Err(CliError::Parse("unsupported number".into()))
             }
@@ -1035,7 +1302,10 @@ fn json_value_to_core(value: &serde_json::Value) -> Result<(tpt20_core::WireClas
             if let Ok(bytes) = STANDARD.decode(s) {
                 Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(bytes)))
             } else {
-                Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(s.as_bytes().to_vec())))
+                Ok((
+                    tpt20_core::WireClass::Len,
+                    tpt20_core::Value::Len(s.as_bytes().to_vec()),
+                ))
             }
         }
         serde_json::Value::Array(_) => {
@@ -1047,27 +1317,6 @@ fn json_value_to_core(value: &serde_json::Value) -> Result<(tpt20_core::WireClas
             Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(bytes)))
         }
     }
-}
-
-fn parse_text_value(s: &str) -> Result<(tpt20_core::WireClass, tpt20_core::Value), CliError> {
-    let s = s.trim();
-    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        let inner = &s[1..s.len()-1];
-        return Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(inner.as_bytes().to_vec())));
-    }
-    if let Ok(b) = s.parse::<bool>() {
-        return Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(if b { 1 } else { 0 })));
-    }
-    if let Ok(i) = s.parse::<i64>() {
-        return Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(i as u64)));
-    }
-    if let Ok(u) = s.parse::<u64>() {
-        return Ok((tpt20_core::WireClass::Varint, tpt20_core::Value::Varint(u)));
-    }
-    if let Ok(f) = s.parse::<f64>() {
-        return Ok((tpt20_core::WireClass::Fixed64, tpt20_core::Value::Fixed64(f.to_bits())));
-    }
-    Ok((tpt20_core::WireClass::Len, tpt20_core::Value::Len(s.as_bytes().to_vec())))
 }
 
 fn core_value_to_text(value: &tpt20_core::Value) -> String {
@@ -1095,8 +1344,13 @@ fn cmd_import_proto(input: PathBuf, output: Option<PathBuf>) -> Result<(), CliEr
         .map_err(|e| CliError::Parse(format!("lex error: {e}")))?;
     let proto = tpt20_compat_protobuf::parse_proto(tokens)
         .map_err(|e| CliError::Parse(format!("parse error: {e}")))?;
-    let ir = tpt20_compat_protobuf::lower(proto)
+    let (ir, report) = tpt20_compat_protobuf::lower_with_report(proto)
         .map_err(|e| CliError::Parse(format!("lower error: {e}")))?;
+    for dropped in &report.dropped_extensions {
+        eprintln!(
+            "warning: extension `{dropped}` extends a message that is not declared in this file; dropped"
+        );
+    }
 
     let json = serde_json::to_string_pretty(&ir).map_err(|e| CliError::Parse(e.to_string()))?;
     match output {
@@ -1113,132 +1367,341 @@ fn cmd_import_proto(input: PathBuf, output: Option<PathBuf>) -> Result<(), CliEr
 // ---------------------------------------------------------------------------
 
 fn cmd_conformance(directory: Option<PathBuf>, test: Option<String>) -> Result<(), CliError> {
-    let dir = directory.unwrap_or_else(|| PathBuf::from("tests/conformance"));
-    if !dir.exists() {
-        println!("no conformance directory at {}", dir.display());
-        return Ok(());
+    let dir = directory.unwrap_or_else(|| PathBuf::from("conformance/vectors"));
+    if !dir.is_dir() {
+        return Err(CliError::Usage(format!(
+            "no conformance vectors at {} (use --directory)",
+            dir.display()
+        )));
     }
-
-    let entries = fs::read_dir(&dir).map_err(|e| CliError::Io(e))?;
-    let mut passed = 0usize;
-    let mut failed = 0usize;
-
-    for entry in entries {
-        let entry = entry.map_err(|e| CliError::Io(e))?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        if let Some(ref t) = test {
-            if name != *t {
-                continue;
-            }
-        }
-
-        match run_conformance_test(&path) {
-            Ok(()) => {
-                println!("PASS {}", name);
-                passed += 1;
-            }
-            Err(e) => {
-                eprintln!("FAIL {}: {}", name, e);
-                failed += 1;
-            }
-        }
+    let summary = conformance::run(&dir, test.as_deref()).map_err(CliError::Parse)?;
+    println!("\n{} passed, {} failed", summary.passed, summary.failed);
+    if summary.passed + summary.failed == 0 {
+        return Err(CliError::Usage("no conformance cases matched".into()));
     }
-
-    println!("\n{} passed, {} failed", passed, failed);
-    if failed > 0 {
-        Err(CliError::Diagnostics("conformance tests failed".into()))
+    if summary.failed > 0 {
+        Err(CliError::Diagnostics("conformance vectors failed".into()))
     } else {
         Ok(())
     }
 }
 
-fn run_conformance_test(path: &Path) -> Result<(), CliError> {
-    let raw = fs::read_to_string(path)?;
-    let _test: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| CliError::Parse(format!("invalid test json: {e}")))?;
-
-    if let Some(obj) = _test.as_object() {
-        if let Some(binary) = obj.get("binary").and_then(|v| v.as_str()) {
-            let bytes = hex::decode(binary).map_err(|e| CliError::Parse(e.to_string()))?;
-            tpt20_core::RawMessage::decode(
-                &bytes,
-                &tpt20_core::DecoderLimits::default(),
-                tpt20_core::UnknownFieldPolicy::Preserve,
-            )
-            .map_err(|e| CliError::Parse(e.to_string()))?;
-        }
-    }
-
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
-// call (RPC debugger)
+// call (RPC debugger) and health
 // ---------------------------------------------------------------------------
 
-async fn cmd_call(
+struct CallOpts {
     endpoint: String,
     method: String,
     input: Option<PathBuf>,
     binary_input: Option<PathBuf>,
+    text_input: Option<PathBuf>,
+    schema: Option<PathBuf>,
+    request_type: Option<String>,
+    response_type: Option<String>,
     streaming: StreamingTypeArg,
     metadata: Vec<String>,
     deadline_ms: Option<u64>,
-    _tls_cert: Option<PathBuf>,
-    _compression: CompressionArg,
-) -> Result<(), CliError> {
-    let request_bytes = if let Some(p) = binary_input {
-        fs::read(p)?
-    } else if let Some(p) = input {
-        let json = fs::read_to_string(p)?;
-        serde_json::to_vec(&serde_json::from_str::<serde_json::Value>(&json).map_err(|e| CliError::Parse(e.to_string()))?)?
-    } else {
-        let mut buf = String::new();
-        io::stdin().read_to_string(&mut buf)?;
-        serde_json::to_vec(&serde_json::from_str::<serde_json::Value>(&buf).map_err(|e| CliError::Parse(e.to_string()))?)?
-    };
+    tls_cert: Option<PathBuf>,
+    compression: CompressionArg,
+}
 
-    let mut md = tpt20_rpc::Metadata::with_default_limit();
-    for kv in &metadata {
-        let parts: Vec<&str> = kv.splitn(2, '=').collect();
-        if parts.len() == 2 {
-            md.insert_text(parts[0], parts[1]).map_err(|e| CliError::Transport(e.to_string()))?;
-        }
+/// Encodes a field-id-keyed JSON object to wire bytes.
+fn json_object_to_bytes(value: &serde_json::Value) -> Result<Vec<u8>, CliError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| CliError::Parse("expected json object".into()))?;
+    let mut raw = tpt20_core::RawMessage::new();
+    for (key, val) in obj {
+        let id: u32 = key
+            .parse()
+            .map_err(|_| CliError::Parse(format!("invalid field id: {key}")))?;
+        let (wire, value) = json_value_to_core(val)?;
+        raw.push(tpt20_core::Field::new(id, wire, value));
     }
+    raw.encode().map_err(|e| CliError::Parse(e.to_string()))
+}
+
+/// Client certificate and key from `--tls-client-cert` / `--tls-client-key`.
+static CLIENT_IDENTITY: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
+
+fn build_endpoint(
+    endpoint: &str,
+    tls_cert: Option<&Path>,
+) -> Result<tpt20_transport::Endpoint, CliError> {
+    let (https, address) = if let Some(rest) = endpoint.strip_prefix("https://") {
+        (true, rest)
+    } else if let Some(rest) = endpoint.strip_prefix("http://") {
+        (false, rest)
+    } else {
+        (false, endpoint)
+    };
+    let address = address.trim_end_matches('/');
+    if address.is_empty() || !address.contains(':') {
+        return Err(CliError::Usage(format!(
+            "endpoint `{endpoint}` must look like host:port or http(s)://host:port"
+        )));
+    }
+    let mut ep = tpt20_transport::Endpoint::new(address);
+    if https || tls_cert.is_some() {
+        let cert = tls_cert.ok_or_else(|| {
+            CliError::Usage("https endpoints need --tls-cert (PEM CA certificate to trust)".into())
+        })?;
+        let mut tls = tpt20_transport::TlsConfig::http2();
+        tls.cert_pem = Some(fs::read(cert)?);
+        if let Some((client_cert, client_key)) = CLIENT_IDENTITY.get() {
+            tls = tls.with_client_identity_pem(fs::read(client_cert)?, fs::read(client_key)?);
+        }
+        ep = ep.with_tls(tls);
+    }
+    Ok(ep)
+}
+
+enum CallOutput {
+    Message(Vec<u8>),
+    Trailers(Vec<(String, String)>),
+}
+
+/// Performs one call and collects everything the server sends back.
+async fn perform_call(
+    endpoint: tpt20_transport::Endpoint,
+    method: &str,
+    messages: Vec<Vec<u8>>,
+    metadata: &[String],
+    streaming: StreamingTypeArg,
+    deadline_ms: Option<u64>,
+) -> Result<Vec<CallOutput>, CliError> {
+    use futures::{SinkExt, StreamExt};
+    use tpt20_transport::{StreamItem, StreamingType, Transport};
 
     let streaming_type = match streaming {
-        StreamingTypeArg::Unary => tpt20_transport::StreamingType::Unary,
-        StreamingTypeArg::Server => tpt20_transport::StreamingType::ServerStream,
-        StreamingTypeArg::Client => tpt20_transport::StreamingType::ClientStream,
-        StreamingTypeArg::Bidi => tpt20_transport::StreamingType::Bidi,
+        StreamingTypeArg::Unary => StreamingType::Unary,
+        StreamingTypeArg::Server => StreamingType::ServerStream,
+        StreamingTypeArg::Client => StreamingType::ClientStream,
+        StreamingTypeArg::Bidi => StreamingType::Bidi,
+    };
+    let client_streams = matches!(
+        streaming_type,
+        StreamingType::ClientStream | StreamingType::Bidi
+    );
+    if !client_streams && messages.len() != 1 {
+        return Err(CliError::Usage(
+            "unary and server-streaming calls take exactly one request message".into(),
+        ));
+    }
+
+    let mut md = tpt20_transport::Metadata::new();
+    for kv in metadata {
+        let (k, v) = kv
+            .split_once('=')
+            .ok_or_else(|| CliError::Usage(format!("metadata `{kv}` must be key=value")))?;
+        md.insert(k, v);
+    }
+
+    let transport = tpt20_transport::http2::Http2Transport::new(endpoint);
+    let run = async {
+        let mut messages = messages.into_iter();
+        let first = messages.next().unwrap_or_default();
+        let mut call = transport
+            .start_call(method, first, &md, streaming_type)
+            .await
+            .map_err(|e| CliError::Transport(e.to_string()))?;
+        if client_streams {
+            for m in messages {
+                call.sink
+                    .send(m)
+                    .await
+                    .map_err(|e| CliError::Transport(e.to_string()))?;
+            }
+            call.sink
+                .close()
+                .await
+                .map_err(|e| CliError::Transport(e.to_string()))?;
+        }
+        let mut out = Vec::new();
+        while let Some(item) = call.stream.next().await {
+            match item.map_err(|e| CliError::Transport(e.to_string()))? {
+                StreamItem::Message(bytes) => out.push(CallOutput::Message(bytes)),
+                StreamItem::Trailer(t) => {
+                    let mut kv: Vec<(String, String)> = t
+                        .iter()
+                        .flat_map(|(k, vs)| vs.iter().map(move |v| (k.to_string(), v.clone())))
+                        .collect();
+                    kv.sort();
+                    out.push(CallOutput::Trailers(kv));
+                }
+            }
+        }
+        Ok::<_, CliError>(out)
+    };
+    match deadline_ms {
+        Some(ms) => tokio::time::timeout(std::time::Duration::from_millis(ms), run)
+            .await
+            .map_err(|_| CliError::Transport(format!("deadline of {ms}ms exceeded")))?,
+        None => run.await,
+    }
+}
+
+async fn cmd_call(opts: CallOpts) -> Result<(), CliError> {
+    let descriptor = match &opts.schema {
+        Some(p) => Some(load_descriptor(p)?),
+        None => None,
     };
 
-    println!("RPC call to {} ({})", endpoint, method);
-    println!("metadata: {:?}", md.iter().collect::<Vec<_>>());
+    let messages: Vec<Vec<u8>> = if let Some(p) = &opts.binary_input {
+        vec![fs::read(p)?]
+    } else if let Some(p) = &opts.text_input {
+        let (Some(d), Some(ty)) = (&descriptor, &opts.request_type) else {
+            return Err(CliError::Usage(
+                "--text-input needs --schema and --request-type".into(),
+            ));
+        };
+        let text = fs::read_to_string(p)?;
+        vec![tpt20_text::TextFormat::new(d)
+            .parse_to_bytes(ty, &text)
+            .map_err(text_err)?]
+    } else {
+        let json = read_input_string(opts.input.clone())?;
+        let value: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| CliError::Parse(format!("invalid json: {e}")))?;
+        match &value {
+            serde_json::Value::Array(items) => items
+                .iter()
+                .map(json_object_to_bytes)
+                .collect::<Result<_, _>>()?,
+            other => vec![json_object_to_bytes(other)?],
+        }
+    };
 
-    if let Some(d) = deadline_ms {
-        println!("deadline: {}ms", d);
+    let mut endpoint = build_endpoint(&opts.endpoint, opts.tls_cert.as_deref())?;
+    endpoint.compression = match opts.compression {
+        CompressionArg::None => None,
+        CompressionArg::Gzip => Some(tpt20_transport::Compression::Gzip),
+        CompressionArg::Deflate => Some(tpt20_transport::Compression::Deflate),
+    };
+    // A debugger: compress every message that gets smaller.
+    endpoint.compression_min_bytes = 0;
+    let outputs = perform_call(
+        endpoint,
+        &opts.method,
+        messages,
+        &opts.metadata,
+        opts.streaming,
+        opts.deadline_ms,
+    )
+    .await?;
+
+    let mut stdout = io::stdout().lock();
+    let mut n = 0usize;
+    for out in outputs {
+        match out {
+            CallOutput::Message(bytes) => {
+                n += 1;
+                writeln!(stdout, "# message {n} ({} bytes)", bytes.len())?;
+                let text = match (&descriptor, &opts.response_type) {
+                    (Some(d), Some(ty)) => tpt20_text::TextFormat::new(d)
+                        .print_bytes(ty, &bytes)
+                        .map_err(text_err)?,
+                    _ => raw_fields_text(&bytes)?,
+                };
+                write!(stdout, "{text}")?;
+            }
+            CallOutput::Trailers(kv) => {
+                writeln!(stdout, "# trailers")?;
+                for (k, v) in kv {
+                    writeln!(stdout, "{k}: {v}")?;
+                }
+            }
+        }
     }
-    println!("streaming: {:?}", streaming_type);
-    println!("request sent ({} bytes)", request_bytes.len());
-    println!("(In-process transport: no server response in CLI stub)");
-
     Ok(())
 }
 
+/// Schema-free `id: value` listing of a wire message.
+fn raw_fields_text(bytes: &[u8]) -> Result<String, CliError> {
+    let raw = tpt20_core::RawMessage::decode(
+        bytes,
+        &tpt20_core::DecoderLimits::default(),
+        tpt20_core::UnknownFieldPolicy::Preserve,
+    )
+    .map_err(|e| CliError::Parse(e.to_string()))?;
+    let mut out = String::new();
+    for f in &raw.fields {
+        out.push_str(&format!(
+            "{}: {}\n",
+            f.field_id,
+            core_value_to_text(&f.value)
+        ));
+    }
+    Ok(out)
+}
+
+async fn cmd_health(
+    endpoint: String,
+    service: String,
+    deadline_ms: u64,
+    tls_cert: Option<PathBuf>,
+) -> Result<(), CliError> {
+    let channel = tpt20_rpc::Channel::new(tpt20_transport::http2::Http2Transport::new(
+        build_endpoint(&endpoint, tls_cert.as_deref())?,
+    ));
+    let ctx =
+        tpt20_rpc::RpcContext::new().with_timeout(std::time::Duration::from_millis(deadline_ms));
+    let status = tpt20_rpc::health::check(&channel, &ctx, &service)
+        .await
+        .map_err(|e| CliError::Transport(e.to_string()))?;
+    let target = if service.is_empty() {
+        endpoint.clone()
+    } else {
+        format!("{endpoint} ({service})")
+    };
+    println!("{target}: {}", status.as_str());
+    if status == tpt20_rpc::health::ServingStatus::Serving {
+        Ok(())
+    } else {
+        Err(CliError::Transport(format!(
+            "service is {}",
+            status.as_str()
+        )))
+    }
+}
+
 // ---------------------------------------------------------------------------
-// health
+// reflect-remote
 // ---------------------------------------------------------------------------
 
-async fn cmd_health(endpoint: String, _tls_cert: Option<PathBuf>) -> Result<(), CliError> {
-    println!("Checking health of {}", endpoint);
-    println!("health check initiated (in-process transport stub)");
-    println!("(In-process transport: no server response in CLI stub)");
-    Ok(())
+async fn cmd_reflect_remote(
+    endpoint: String,
+    descriptor: bool,
+    package: String,
+    format: DescriptorFormat,
+    out: Option<PathBuf>,
+    deadline_ms: u64,
+    tls_cert: Option<PathBuf>,
+) -> Result<(), CliError> {
+    let endpoint = build_endpoint(&endpoint, tls_cert.as_deref())?;
+    let channel = tpt20_rpc::Channel::new(tpt20_transport::http2::Http2Transport::new(endpoint));
+    let ctx =
+        tpt20_rpc::RpcContext::new().with_timeout(std::time::Duration::from_millis(deadline_ms));
+    let rpc_err = |e: tpt20_rpc::RpcError| CliError::Transport(e.to_string());
+
+    if !descriptor {
+        for name in tpt20_rpc::reflection::list_services(&channel, &ctx)
+            .await
+            .map_err(rpc_err)?
+        {
+            println!("{name}");
+        }
+        return Ok(());
+    }
+    let remote = tpt20_rpc::reflection::get_descriptor(&channel, &ctx, &package)
+        .await
+        .map_err(rpc_err)?;
+    let parsed = tpt20_descriptor::Descriptor::from_binary(&remote.descriptor)?;
+    match format {
+        DescriptorFormat::Json => write_output_str(&parsed.to_json()?, out),
+        DescriptorFormat::Binary => write_output(&remote.descriptor, out),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1247,9 +1710,8 @@ async fn cmd_health(endpoint: String, _tls_cert: Option<PathBuf>) -> Result<(), 
 
 fn cmd_reflect(file: PathBuf, message: Option<String>) -> Result<(), CliError> {
     let src = fs::read_to_string(&file)?;
-    let compiled = tpt20_compiler::compile(&src, file.to_str()).map_err(|diags| {
-        CliError::Diagnostics(tpt20_compiler::render_all(&diags))
-    })?;
+    let compiled = tpt20_compiler::compile(&src, file.to_str())
+        .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
 
     let desc = compiled.descriptor;
 
@@ -1259,7 +1721,7 @@ fn cmd_reflect(file: PathBuf, message: Option<String>) -> Result<(), CliError> {
             println!("fields:");
             for f in &msg.fields {
                 let label = match &f.label {
-                    tpt20_ir::FieldLabelIr::Singular(t) => format!("{}", t.name()),
+                    tpt20_ir::FieldLabelIr::Singular(t) => t.name().to_string(),
                     tpt20_ir::FieldLabelIr::Repeated(t) => format!("repeated {}", t.name()),
                     tpt20_ir::FieldLabelIr::Map { key, value } => {
                         format!("map<{}, {}>", key.name(), value.name())
@@ -1278,7 +1740,11 @@ fn cmd_reflect(file: PathBuf, message: Option<String>) -> Result<(), CliError> {
                 }
             }
             for e in &msg.enums {
-                println!("  enum {}: {}", e.name, if e.open { "open" } else { "closed" });
+                println!(
+                    "  enum {}: {}",
+                    e.name,
+                    if e.open { "open" } else { "closed" }
+                );
                 for v in &e.values {
                     println!("    {} = {}", v.name, v.number);
                 }
@@ -1309,40 +1775,134 @@ fn cmd_reflect(file: PathBuf, message: Option<String>) -> Result<(), CliError> {
 // registry
 // ---------------------------------------------------------------------------
 
+fn registry_root(registry: Option<PathBuf>) -> PathBuf {
+    registry.unwrap_or_else(|| {
+        home::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".tpt20")
+            .join("registry")
+    })
+}
+
+/// Version labels become directory names; keep them to a safe charset so a
+/// label can never escape the registry root.
+fn validate_version_label(v: &str) -> Result<(), CliError> {
+    let ok = !v.is_empty()
+        && v != "."
+        && v != ".."
+        && v.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+'));
+    if ok {
+        Ok(())
+    } else {
+        Err(CliError::Usage(format!(
+            "invalid version label `{v}` (allowed: letters, digits, `.`, `_`, `-`, `+`)"
+        )))
+    }
+}
+
 fn cmd_registry(command: RegistryCommands) -> Result<(), CliError> {
     match command {
-        RegistryCommands::Publish { file, registry, version } => {
-            let registry = registry.unwrap_or_else(|| {
-                home::home_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join(".tpt20")
-                    .join("registry")
-            });
-
-            fs::create_dir_all(&registry)?;
-
+        RegistryCommands::Publish {
+            file,
+            registry,
+            version,
+            force,
+        } => {
+            let registry = registry_root(registry);
             let src = fs::read_to_string(&file)?;
-            let compiled = tpt20_compiler::compile(&src, file.to_str()).map_err(|diags| {
-                CliError::Diagnostics(tpt20_compiler::render_all(&diags))
-            })?;
+            let compiled = tpt20_compiler::compile(&src, file.to_str())
+                .map_err(|diags| CliError::Diagnostics(tpt20_compiler::render_all(&diags)))?;
 
             let version = version.unwrap_or_else(|| {
-                compiled.ir.name.clone().unwrap_or_else(|| "default".to_string())
+                compiled
+                    .ir
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "default".to_string())
             });
-
-            let descriptor_json = compiled.descriptor.to_json()?;
-            let version_dir = registry.join(&version);
-            fs::create_dir_all(&version_dir)?;
-
-            let descriptor_path = version_dir.join("descriptor.json");
-            fs::write(&descriptor_path, descriptor_json)?;
+            validate_version_label(&version)?;
 
             let mut manifest = LocalManifest::load_or_default(&registry);
+            if let Some(existing) = manifest.versions.iter().find(|v| v.version == version) {
+                if existing.fingerprint == compiled.fingerprint {
+                    println!(
+                        "{version} is already published with this fingerprint ({})",
+                        registry.display()
+                    );
+                    return Ok(());
+                }
+                if !force {
+                    return Err(CliError::Registry(format!(
+                        "version `{version}` is already published with a different fingerprint \
+                         ({}); published versions are immutable — choose a new --version or pass --force",
+                        existing.fingerprint
+                    )));
+                }
+            }
+
+            fs::create_dir_all(&registry)?;
+            let version_dir = registry.join(&version);
+            fs::create_dir_all(&version_dir)?;
+            fs::write(
+                version_dir.join("descriptor.json"),
+                compiled.descriptor.to_json()?,
+            )?;
+
             manifest.record_version(&version, &compiled.fingerprint, "strict");
             manifest.save(&registry)?;
 
             println!("published {} to registry ({})", version, registry.display());
             Ok(())
+        }
+        RegistryCommands::List { registry } => {
+            let registry = registry_root(registry);
+            let manifest = LocalManifest::load_or_default(&registry);
+            if manifest.versions.is_empty() {
+                println!("no versions published in {}", registry.display());
+                return Ok(());
+            }
+            println!(
+                "{:<24} {:<18} {:<8} PUBLISHED",
+                "VERSION", "FINGERPRINT", "POLICY"
+            );
+            for v in &manifest.versions {
+                let fp: String = v.fingerprint.chars().take(16).collect();
+                println!(
+                    "{:<24} {:<18} {:<8} {}",
+                    v.version, fp, v.policy, v.published_at
+                );
+            }
+            Ok(())
+        }
+        RegistryCommands::Get {
+            version,
+            registry,
+            format,
+            out,
+        } => {
+            let registry = registry_root(registry);
+            let manifest = LocalManifest::load_or_default(&registry);
+            let record = manifest.find(&version)?;
+            validate_version_label(&record.version)?;
+            let path = registry.join(&record.version).join("descriptor.json");
+            let json = fs::read_to_string(&path)
+                .map_err(|e| CliError::Registry(format!("cannot read {}: {e}", path.display())))?;
+            let mut descriptor = tpt20_descriptor::Descriptor::from_json(&json)?;
+            // Verify integrity: the stored descriptor must still hash to the
+            // fingerprint recorded at publish time.
+            let actual = descriptor.compute_fingerprint();
+            if actual != record.fingerprint {
+                return Err(CliError::Registry(format!(
+                    "descriptor for `{}` does not match its recorded fingerprint \
+                     (recorded {}, actual {actual}); the registry entry was modified",
+                    record.version, record.fingerprint
+                )));
+            }
+            match format {
+                DescriptorFormat::Json => write_output_str(&descriptor.to_json()?, out),
+                DescriptorFormat::Binary => write_output(&descriptor.to_binary()?, out),
+            }
         }
     }
 }
@@ -1351,7 +1911,7 @@ fn cmd_registry(command: RegistryCommands) -> Result<(), CliError> {
 // Local registry manifest helpers
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct LocalManifest {
     versions: Vec<VersionRecord>,
 }
@@ -1362,12 +1922,6 @@ struct VersionRecord {
     fingerprint: String,
     policy: String,
     published_at: String,
-}
-
-impl Default for LocalManifest {
-    fn default() -> Self {
-        LocalManifest { versions: Vec::new() }
-    }
 }
 
 impl LocalManifest {
@@ -1385,19 +1939,80 @@ impl LocalManifest {
 
     fn save(&self, root: &Path) -> Result<(), CliError> {
         let path = root.join("manifest.json");
-        let json = serde_json::to_string_pretty(self).map_err(|e| CliError::Registry(e.to_string()))?;
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| CliError::Registry(e.to_string()))?;
         fs::write(path, json)?;
         Ok(())
     }
 
     fn record_version(&mut self, version: &str, fingerprint: &str, policy: &str) {
+        // A forced re-publish replaces the earlier record of that label.
+        self.versions.retain(|v| v.version != version);
         self.versions.push(VersionRecord {
             version: version.to_string(),
             fingerprint: fingerprint.to_string(),
             policy: policy.to_string(),
-            published_at: "now".to_string(),
+            published_at: utc_now_iso8601(),
         });
     }
+
+    /// Finds a record by exact version label, else by fingerprint prefix
+    /// (at least 8 characters, and unambiguous).
+    fn find(&self, query: &str) -> Result<&VersionRecord, CliError> {
+        if let Some(v) = self.versions.iter().find(|v| v.version == query) {
+            return Ok(v);
+        }
+        if query.len() >= 8 {
+            let matches: Vec<&VersionRecord> = self
+                .versions
+                .iter()
+                .filter(|v| v.fingerprint.starts_with(query))
+                .collect();
+            match matches.as_slice() {
+                [one] => return Ok(one),
+                [] => {}
+                _ => {
+                    return Err(CliError::Registry(format!(
+                        "fingerprint prefix `{query}` is ambiguous"
+                    )))
+                }
+            }
+        }
+        Err(CliError::Registry(format!(
+            "no published version or fingerprint matches `{query}`"
+        )))
+    }
+}
+
+/// Current UTC time as `YYYY-MM-DDTHH:MM:SSZ` (no date-time dependency).
+fn utc_now_iso8601() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format_unix_utc(secs)
+}
+
+fn format_unix_utc(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    // Civil-from-days (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1407,6 +2022,24 @@ impl LocalManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unix_time_formats_as_utc() {
+        assert_eq!(format_unix_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(format_unix_utc(951_782_400), "2000-02-29T00:00:00Z");
+        assert_eq!(format_unix_utc(1_709_210_096), "2024-02-29T12:34:56Z");
+        assert_eq!(format_unix_utc(4_102_444_799), "2099-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn version_labels_cannot_escape_the_registry() {
+        for bad in ["", ".", "..", "../x", "a/b", "a\\b", "sp ace"] {
+            assert!(validate_version_label(bad).is_err(), "{bad:?}");
+        }
+        for ok in ["user.v1", "v1.2.3-rc+build_4"] {
+            assert!(validate_version_label(ok).is_ok(), "{ok:?}");
+        }
+    }
 
     #[test]
     fn format_preserves_semantics() {

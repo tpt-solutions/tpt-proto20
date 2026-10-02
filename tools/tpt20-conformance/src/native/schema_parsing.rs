@@ -2,10 +2,10 @@ use tpt20_language::parse_file;
 
 #[test]
 fn parse_simple_schema() {
-    let src = r#"package "test.v1"
+    let src = r#"package test.v1;
 message User {
-  id: int64
-  name: string
+  1: id int64;
+  2: name string;
 }"#;
     let file = parse_file(src).unwrap();
     assert_eq!(file.package, Some("test.v1".to_string()));
@@ -18,8 +18,8 @@ message User {
 fn parse_message_with_oneof() {
     let src = r#"message Request {
   oneof payload {
-    text: string
-    bytes: bytes
+    1: text string;
+    2: data bytes;
   }
 }"#;
     let file = parse_file(src).unwrap();
@@ -31,8 +31,8 @@ fn parse_message_with_oneof() {
 #[test]
 fn parse_message_with_reserved() {
     let src = r#"message Foo {
-  reserved 1, 5 to 10
-  reserved "foo", "bar"
+  reserved 1, 5 to 10;
+  reserved "foo", "bar";
 }"#;
     let file = parse_file(src).unwrap();
     assert_eq!(file.messages[0].reserved.len(), 2);
@@ -41,8 +41,8 @@ fn parse_message_with_reserved() {
 #[test]
 fn parse_enum() {
     let src = r#"enum State {
-  ACTIVE = 0
-  INACTIVE = 1
+  ACTIVE = 0;
+  INACTIVE = 1;
 }"#;
     let file = parse_file(src).unwrap();
     assert_eq!(file.enums.len(), 1);
@@ -52,7 +52,7 @@ fn parse_enum() {
 
 #[test]
 fn parse_import() {
-    let src = r#"import "other.tpt"
+    let src = r#"import "other.tpt";
 message Bar {}"#;
     let file = parse_file(src).unwrap();
     assert_eq!(file.imports, vec!["other.tpt"]);
@@ -61,7 +61,7 @@ message Bar {}"#;
 #[test]
 fn parse_repeated_field() {
     let src = r#"message Foo {
-  tags: repeated string
+  1: tags repeated string;
 }"#;
     let file = parse_file(src).unwrap();
     assert!(matches!(
@@ -73,7 +73,7 @@ fn parse_repeated_field() {
 #[test]
 fn parse_map_field() {
     let src = r#"message Foo {
-  meta: map<string, int64>
+  1: meta map<string, int64>;
 }"#;
     let file = parse_file(src).unwrap();
     assert!(matches!(
@@ -85,7 +85,7 @@ fn parse_map_field() {
 #[test]
 fn parse_service() {
     let src = r#"service UserService {
-  rpc GetUser (GetUserRequest) returns (User)
+  GetUser(GetUserRequest) returns (User);
 }"#;
     let file = parse_file(src).unwrap();
     assert_eq!(file.services.len(), 1);

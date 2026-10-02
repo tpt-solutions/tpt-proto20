@@ -1,0 +1,78 @@
+{
+  "suite": "schema_language",
+  "description": "Schema acceptance and the diagnostics for each rejected construct.",
+  "cases": [
+    {
+      "name": "valid_minimal",
+      "kind": "schema",
+      "source": "package p.v1;\nmessage M { 1: a int64; }",
+      "expect": "ok"
+    },
+    {
+      "name": "valid_all_constructs",
+      "kind": "schema",
+      "source": "package p.v1;\nenum E { A = 0; B = 1; }\nmessage M { 1: a int64; 2: b repeated string; 3: c map<string, E>; 4: d string?; oneof o { 5: x int32; 6: y string; } reserved 9, 12 to 15; }\nservice S { Do(M) returns (stream M); }",
+      "expect": "ok"
+    },
+    {
+      "name": "duplicate_field_id",
+      "kind": "schema",
+      "source": "message M { 1: a int64; 1: b int64; }",
+      "expect_error_code": "E0001"
+    },
+    {
+      "name": "duplicate_enum_number",
+      "kind": "schema",
+      "source": "enum E { A = 0; B = 0; }",
+      "expect_error_code": "E0002"
+    },
+    {
+      "name": "duplicate_enum_value_name",
+      "kind": "schema",
+      "source": "enum E { A = 0; A = 1; }",
+      "expect_error_code": "E0003"
+    },
+    {
+      "name": "enum_alias_may_share_a_number",
+      "kind": "schema",
+      "source": "enum E { A = 0; B alias = 0; }",
+      "expect": "ok"
+    },
+    {
+      "name": "duplicate_field_name",
+      "kind": "schema",
+      "source": "message M { 1: a int64; 2: a string; }",
+      "expect_error_code": "E0003"
+    },
+    {
+      "name": "oneof_member_must_be_singular",
+      "kind": "schema",
+      "source": "message M { oneof o { 1: a repeated string; } }",
+      "expect_error_code": "E0005"
+    },
+    {
+      "name": "reserved_id_reuse",
+      "kind": "schema",
+      "source": "message M { reserved 1; 1: a int64; }",
+      "expect_error_code": "E0006"
+    },
+    {
+      "name": "bytes_map_key_forbidden",
+      "kind": "schema",
+      "source": "message M { 1: m map<bytes, string>; }",
+      "expect_error_code": "E0007"
+    },
+    {
+      "name": "unknown_scalar_type",
+      "kind": "schema",
+      "source": "message M { 1: a notatype; }",
+      "expect_error_code": "E0010"
+    },
+    {
+      "name": "required_is_not_part_of_the_language",
+      "kind": "schema",
+      "source": "message M { 1: required a int32; }",
+      "expect_error_code": "E0011"
+    }
+  ]
+}

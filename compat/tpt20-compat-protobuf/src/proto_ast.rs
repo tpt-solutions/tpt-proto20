@@ -20,6 +20,57 @@ impl Token {
     }
 }
 
+impl TokenKind {
+    /// Source text of a keyword token. Most `.proto` keywords are contextual:
+    /// they remain valid as field, enum-value and message names.
+    pub fn keyword_text(&self) -> Option<&'static str> {
+        use TokenKind::*;
+        Some(match self {
+            Syntax => "syntax",
+            Import => "import",
+            Public => "public",
+            Weak => "weak",
+            Option => "option",
+            Package => "package",
+            Message => "message",
+            Enum => "enum",
+            Oneof => "oneof",
+            Map => "map",
+            Reserved => "reserved",
+            Extend => "extend",
+            Service => "service",
+            Rpc => "rpc",
+            Returns => "returns",
+            Stream => "stream",
+            Optional => "optional",
+            Repeated => "repeated",
+            Required => "required",
+            Default => "default",
+            Max => "max",
+            Packed => "packed",
+            Float => "float",
+            Double => "double",
+            Int32 => "int32",
+            Int64 => "int64",
+            UInt32 => "uint32",
+            UInt64 => "uint64",
+            SInt32 => "sint32",
+            SInt64 => "sint64",
+            Fixed32 => "fixed32",
+            Fixed64 => "fixed64",
+            SFixed32 => "sfixed32",
+            SFixed64 => "sfixed64",
+            Bool => "bool",
+            String => "string",
+            Bytes => "bytes",
+            True => "true",
+            False => "false",
+            To => "to",
+            _ => return None,
+        })
+    }
+}
+
 /// The kind of token.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
@@ -73,6 +124,7 @@ pub enum TokenKind {
     LAngle,
     RAngle,
     Comma,
+    Colon,
     Eq,
     Dot,
     Lt,
@@ -115,6 +167,8 @@ impl Default for Span {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ProtoFile {
     pub syntax: Option<String>,
+    /// Edition year from `edition = "2023";` (mutually exclusive with `syntax`).
+    pub edition: Option<String>,
     pub package: Option<String>,
     pub imports: Vec<Import>,
     pub options: Vec<OptionDecl>,
@@ -155,6 +209,8 @@ pub struct Message {
     pub messages: Vec<Message>,
     pub enums: Vec<Enum>,
     pub extensions: Vec<Extend>,
+    /// `extensions 100 to 199;` ranges (inclusive).
+    pub extension_ranges: Vec<(u32, u32)>,
     pub reserved: Vec<Reserved>,
     pub options: Vec<OptionDecl>,
 }
@@ -218,6 +274,7 @@ pub struct Enum {
     pub values: Vec<EnumValue>,
     pub options: Vec<OptionDecl>,
     pub allow_alias: bool,
+    pub reserved: Vec<Reserved>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -231,6 +288,7 @@ pub struct EnumValue {
 pub struct Service {
     pub name: String,
     pub methods: Vec<Method>,
+    pub options: Vec<OptionDecl>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

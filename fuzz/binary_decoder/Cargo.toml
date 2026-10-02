@@ -11,8 +11,10 @@ keywords = ["tpt20", "fuzzing", "testing", "security", "binary-decoder"]
 categories = ["development-tools", "testing"]
 
 [[bin]]
-name = "fuzz_target"
+name = "binary-decoder-fuzz"
 path = "fuzz_targets/fuzz_target.rs"
+test = false
+bench = false
 
 [dependencies]
 tpt20-core = { path = "../../runtime/tpt20-core" }

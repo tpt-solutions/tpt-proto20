@@ -18,7 +18,10 @@ impl CompressionAlgorithm {
         }
     }
     pub const fn is_compression(&self) -> bool {
-        matches!(self, CompressionAlgorithm::Gzip | CompressionAlgorithm::Deflate)
+        matches!(
+            self,
+            CompressionAlgorithm::Gzip | CompressionAlgorithm::Deflate
+        )
     }
 }
 

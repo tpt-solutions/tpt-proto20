@@ -31,16 +31,31 @@ tpt20 import-proto user.proto --out user.tpt
 re-serializing `.tpt` source text — see
 [CLI reference § import-proto](cli-reference.md#import-proto).)
 
-Supported: proto2, proto3, messages, enums, oneofs, maps, services, options
-where meaningful, and message-level `reserved` fields.
+Supported: proto2, proto3, **editions 2023/2024**, messages, enums, oneofs,
+maps, services (including `rpc` bodies and service options), options where
+meaningful, `reserved` and `extensions` ranges, `allow_alias`, and protobuf
+name scoping (relative, package-qualified and `.absolute` type references).
+Keywords such as `max`, `stream` or `default` are accepted as names.
 
-Not yet supported:
+**Editions.** `edition = "2023";` (or `"2024"`) selects edition semantics:
+singular fields have explicit presence and enums are open unless overridden.
+`features.field_presence` (`EXPLICIT`/`IMPLICIT`/`LEGACY_REQUIRED`) and
+`features.enum_type` (`OPEN`/`CLOSED`) are honored at file, message, enum and
+field level. `features.message_encoding = DELIMITED` (groups) is rejected;
+other features do not change how schemas lower and are ignored.
 
-- **Editions** — doc comments describe editions support, but there is no
-  `edition = "..."` lexing/parsing implemented.
-- **`extend` blocks** — parsed but discarded; nothing is lowered into IR.
-- **Enum-level `reserved`** — parsed but not yet stored/lowered (message-level
-  `reserved` works).
+**Extensions.** An `extend` block whose extendee is declared in the same file
+is merged into that message as ordinary fields — same field number, same wire
+form, so real protobuf messages carrying the extension decode into those
+fields. Ids must fall inside the extendee's `extensions` ranges (if declared)
+and must not collide with existing fields or reservations, nor may names.
+Extensions of messages from other files (for example custom options on
+`google.protobuf.FieldOptions`) are dropped; `lower_with_report` returns them
+and `tpt20 import-proto` prints a warning.
+
+Not supported: proto2 `group`s, `default = …` values (dropped), types imported
+from other `.proto` files (references stay as written and fail semantic
+analysis), enum-level `reserved` (parsed, not lowered).
 
 ## Protobuf wire adapter
 
@@ -91,12 +106,11 @@ codes, `to_grpc_status`/`from_grpc_status` are a direct pass-through
 (`status.code()`) rather than a translation table — there is no
 representational drift to worry about between the two systems.
 
-> **Known bug (`todo.md` Phase 15):** the mapping functions themselves work
-> correctly, but `GrpcClient`/`GrpcStream::poll_next` don't call them yet —
-> they hardcode `Status::Ok` for every response instead of reading the
-> `grpc-status`/`grpc-message` trailers. **A failed call made through
-> `GrpcClient` is currently misreported as successful.** Do not rely on
-> client-side status reporting from this crate until that's fixed.
+`GrpcClient` decodes the final trailers into `GrpcResponse::Trailers`: the
+`grpc-status` code becomes the `status`, `grpc-message` (percent-decoded) the
+`message`, and both keys are removed from the returned metadata. A response
+that ends without `grpc-status` is reported as `Status::Unknown`, never as
+success, and a non-numeric or out-of-range code is an error.
 
 ### Metadata mapping
 
@@ -139,15 +153,27 @@ status, which defaults to `Serving` until explicitly set otherwise.
 
 `ReflectionService` exists as a minimal in-memory symbol registry, but it is
 **not yet wired to the real `grpc.reflection.v1alpha.ServerReflection` wire
-service** — existing gRPC reflection clients (e.g. `grpcurl -reflect`) cannot
-talk to it yet.
+service** — use `reflection_wire::ReflectionServer` (below) for that.
 
 ### Server and client status
 
-`GrpcServer::serve()` is currently a hardcoded "not supported" stub — there
-is no live network gRPC server yet, only the framing/mapping building blocks
-above. `GrpcClient` can perform calls but inherits the status-mapping bug
-described above. Track `todo.md` Phase 15 for progress.
+With the `server` feature, `GrpcServer::serve()` / `serve_listener()` run a live
+HTTP/2 server: requests with any `application/grpc[+sub]` content type are
+dispatched to your handler as `GrpcCall`s and answered with the same content
+type, standard 5-byte framing, and `grpc-status`/`grpc-message` trailers
+(`OK` if the handler sends no status, `INTERNAL` if it returns an error).
+Message bytes are opaque to the adapter — use generated tpt20 or protobuf
+codecs in the handler. `GrpcClient` can perform calls over any tpt20
+`Transport`. 
+With the `reflection` feature, `reflection_wire::ReflectionServer` implements
+the `grpc.reflection.v1alpha` / `v1` `ServerReflectionInfo` stream
+(`list_services`, `file_by_filename`, `file_containing_symbol`) and serves real
+`FileDescriptorProto` bytes built from IR (validated against `prost-reflect`
+in tests). Route `ReflectionServer::handles(&call.method)` calls to
+`serve_call`. The descriptors describe the protobuf-compatible shape (proto3;
+maps as entry messages; explicit presence as `proto3_optional`), so they suit
+handlers speaking protobuf bytes; tpt20's native wire encoding differs.
+Extensions and imports are not supported.
 
 ## Choosing an adapter path
 
@@ -158,3 +184,14 @@ described above. Track `todo.md` Phase 15 for progress.
 - Exposing or consuming a gRPC service → `tpt20-compat-grpc`, with the
   caveats above; today this is most usable for the mapping/framing
   primitives, not yet as a drop-in gRPC server or a trustworthy client.
+
+## Converting whole messages (schema-aware)
+
+`wire::decode_protobuf` / `encode_protobuf` translate only the tags of one
+message level; nested messages and map entries carry their own tags inside
+length-delimited payloads. To convert a complete message, use
+`schema_wire::protobuf_to_native(bytes, &package_ir, "Message", &limits)` and
+`schema_wire::native_to_protobuf(...)`, which walk the schema and convert every
+level (bounded by `DecoderLimits::max_depth`). Generated decoders accept map
+entries with an absent key or value (defaults apply), as protobuf writers omit
+default values.
